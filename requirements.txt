@@ -6,3 +6,15 @@ streamlit-folium
 pyproj
 shapely
 streamlit-drawable-canvas
+
+
+
+
+PIL 
+rasterio
+pyproj 
+json
+
+geopandas
+tempfile
+os
