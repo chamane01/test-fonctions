@@ -1,1 +1,8 @@
+streamlit
+rasterio
+numpy
+folium
+streamlit-folium
+pyproj
+shapely
 
