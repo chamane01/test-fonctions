@@ -1,200 +1,237 @@
-import streamlit as st
-from io import BytesIO
-import base64
-from streamlit_drawable_canvas import st_canvas
-from PIL import Image, ImageDraw
-import random, math
+import io, random, math
+from PIL import Image
+import ipywidgets as widgets
+from ipycanvas import Canvas, hold_canvas
+from IPython.display import display
 
-# --- Patch pour définir st.image_to_url si nécessaire ---
-if not hasattr(st, "image_to_url"):
-    def image_to_url(image):
-        buffered = BytesIO()
-        image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        return f"data:image/png;base64,{img_str}"
-    st.image_to_url = image_to_url
+# --- Paramètres du canvas ---
+canvas_width = 800
+canvas_height = 600
 
-# ----------------------------
-# Fonction de calcul des métriques
-# ----------------------------
-def calculate_metrics_for_object(obj):
-    metrics = {}
-    obj_type = obj.get("type")
-    
-    if obj_type == "line":
-        points = obj.get("path", [])
-        if points:
-            distance = 0.0
-            for i in range(1, len(points)):
-                dx = points[i][1] - points[i-1][1]
-                dy = points[i][2] - points[i-1][2]
-                distance += math.sqrt(dx * dx + dy * dy)
-            metrics["longueur"] = round(distance, 2)
+# Création du canvas avec une bordure
+canvas = Canvas(width=canvas_width, height=canvas_height)
+canvas.layout.border = '1px solid black'
 
-    elif obj_type == "rect":
-        width = obj.get("width", 0)
-        height = obj.get("height", 0)
-        area = width * height
-        metrics["surface"] = round(area, 2)
-        metrics["périmètre"] = round(2 * (width + height), 2)
+# --- Variables globales ---
+mode = None          # mode de dessin sélectionné
+start_point = None   # point de départ pour les formes à deux clics
+polygon_points = []  # liste des points pour le polygone
+drawing = False      # indique si l'on est en train de dessiner
 
-    elif obj_type == "circle":
-        diameter = obj.get("width", 0)
-        radius = diameter / 2
-        area = math.pi * radius * radius
-        metrics["surface"] = round(area, 2)
-        metrics["circonférence"] = round(2 * math.pi * radius, 2)
+# --- Widgets pour l'interface utilisateur ---
 
-    elif obj_type == "polygon":
-        points = obj.get("path", [])
-        if points and len(points) >= 3:
-            area = 0
-            n = len(points)
-            for i in range(n):
-                x1, y1 = points[i][1], points[i][2]
-                x2, y2 = points[(i+1) % n][1], points[(i+1) % n][2]
-                area += x1 * y2 - x2 * y1
-            area = abs(area) / 2
-            metrics["surface"] = round(area, 2)
-    return metrics
-
-# ----------------------------
-# Configuration et présentation de l'application
-# ----------------------------
-st.title("Carnet de Dessin Personnel")
-
-# --- Sidebar pour les options générales ---
-st.sidebar.header("Options de dessin")
-drawing_mode = st.sidebar.selectbox("Outil de dessin", ["freedraw", "line", "rect", "circle", "transform"])
-stroke_width = st.sidebar.slider("Épaisseur du trait", 1, 25, 3)
-stroke_color = st.sidebar.color_picker("Couleur du trait", "#000000")
-bg_color = st.sidebar.color_picker("Couleur de fond", "#FFFFFF")
-realtime_update = st.sidebar.checkbox("Mise à jour en temps réel", True)
-
-# Téléversement d'une image de fond
-uploaded_file = st.sidebar.file_uploader("Téléversez une image de fond", type=["png", "jpg", "jpeg"])
-if uploaded_file is not None:
-    bg_image = Image.open(uploaded_file)
-else:
-    bg_image = None
-
-# --- Création du canvas de dessin ---
-canvas_result = st_canvas(
-    fill_color="rgba(255, 165, 0, 0.3)",  # Couleur de remplissage pour les outils (ex: polygone)
-    stroke_width=stroke_width,
-    stroke_color=stroke_color,
-    background_color=bg_color,
-    background_image=bg_image,
-    update_streamlit=realtime_update,
-    height=500,
-    width=700,
-    drawing_mode=drawing_mode,
-    key="canvas",
+# Sélecteur de mode de dessin
+mode_selector = widgets.ToggleButtons(
+    options=['Libre', 'Ligne', 'Rectangle', 'Cercle', 'Polygone', 'Mesure'],
+    description='Mode:',
 )
 
-# ----------------------------
-# Affichage des métriques des dessins réalisés
-# ----------------------------
-st.subheader("Métriques des objets dessinés")
-if canvas_result.json_data is not None:
-    objects = canvas_result.json_data.get("objects", [])
-    if objects:
-        for i, obj in enumerate(objects):
-            st.markdown(f"**Objet {i+1}** — Type : `{obj.get('type')}`")
-            metrics = calculate_metrics_for_object(obj)
-            st.write(metrics)
+# Bouton pour finaliser un polygone (mode "Polygone")
+finir_polygone_btn = widgets.Button(description="Finir Polygone")
+finir_polygone_btn.disabled = True
+
+# Label pour afficher la mesure (distance)
+label_mesure = widgets.Label("Mesure: ")
+
+# Widget pour téléverser une image (uniquement une image)
+upload = widgets.FileUpload(accept='image/*', multiple=False)
+
+# Widgets pour la génération aléatoire d’entités :
+# Dropdown pour sélectionner la forme aléatoire
+forme_dropdown = widgets.Dropdown(
+    options=['Rectangle', 'Carré', 'Cercle', 'Polygone'],
+    description='Forme:',
+)
+
+# Bouton pour générer une forme aléatoire
+generer_forme_btn = widgets.Button(description="Générer forme aléatoire")
+
+# Zone (emprise) dans laquelle générer la forme aléatoire
+zone_x = widgets.IntText(value=0, description='X:')
+zone_y = widgets.IntText(value=0, description='Y:')
+zone_width = widgets.IntText(value=canvas_width, description='Largeur:')
+zone_height = widgets.IntText(value=canvas_height, description='Hauteur:')
+
+# --- Gestion du téléversement d'image ---
+def on_upload_change(change):
+    if upload.value:
+        # On récupère le premier fichier téléversé
+        for filename, file_info in upload.value.items():
+            content = file_info['content']
+            # Ouvrir l'image avec PIL
+            image = Image.open(io.BytesIO(content))
+            # Redimensionner l'image pour occuper tout le canvas
+            image = image.resize((canvas_width, canvas_height))
+            # Effacer le canvas et dessiner l'image en fond
+            canvas.clear()
+            canvas.draw_image(image, 0, 0)
+            break
+
+upload.observe(on_upload_change, names='value')
+
+# --- Gestion du choix de mode de dessin ---
+def set_mode(change):
+    global mode, polygon_points, start_point
+    mode = change['new']
+    start_point = None
+    polygon_points = []
+    if mode == 'Polygone':
+        finir_polygone_btn.disabled = False
     else:
-        st.write("Aucun objet dessiné pour l'instant.")
+        finir_polygone_btn.disabled = True
 
-# ----------------------------
-# Génération aléatoire d'entités géométriques
-# ----------------------------
-st.subheader("Génération aléatoire d'entités")
+mode_selector.observe(set_mode, names='value')
 
-st.markdown("Définissez la zone d'emprise (en pixels) dans laquelle les entités seront générées.")
-col1, col2, col3, col4 = st.columns(4)
-x_min = col1.number_input("X min", min_value=0, value=50)
-y_min = col2.number_input("Y min", min_value=0, value=50)
-x_max = col3.number_input("X max", min_value=0, value=300)
-y_max = col4.number_input("Y max", min_value=0, value=300)
+# --- Fonction pour finir et dessiner un polygone ---
+def finir_polygone(b):
+    global polygon_points
+    if len(polygon_points) > 2:
+        with hold_canvas(canvas):
+            canvas.stroke_style = 'blue'
+            canvas.line_width = 2
+            canvas.begin_path()
+            canvas.move_to(*polygon_points[0])
+            for pt in polygon_points[1:]:
+                canvas.line_to(*pt)
+            canvas.close_path()
+            canvas.stroke()
+    polygon_points = []
 
-num_entities = st.number_input("Nombre d'entités à générer", min_value=1, value=5)
-entity_type = st.selectbox("Type d'entité", ["rectangle", "carré", "cercle", "polygone"])
+finir_polygone_btn.on_click(finir_polygone)
 
-if st.button("Générer entités"):
-    if bg_image is not None:
-        image = bg_image.copy()
-    else:
-        image = Image.new("RGB", (700, 500), color=bg_color)
-    draw = ImageDraw.Draw(image)
-    
-    generated_entities = []
+# --- Gestion des événements de la souris sur le canvas ---
+def handle_mouse_down(x, y):
+    global start_point, drawing, polygon_points
+    if mode in ['Ligne', 'Rectangle', 'Cercle', 'Mesure']:
+        start_point = (x, y)
+        drawing = True
+    elif mode == 'Libre':
+        drawing = True
+        start_point = (x, y)
+    elif mode == 'Polygone':
+        polygon_points.append((x, y))
+        # Marquer le point cliqué (petit cercle rouge)
+        canvas.fill_style = 'red'
+        canvas.fill_circle(x, y, 3)
 
-    for i in range(num_entities):
-        if entity_type == "rectangle":
-            x1 = random.randint(x_min, x_max)
-            y1 = random.randint(y_min, y_max)
-            x2 = random.randint(x1, x_max)
-            y2 = random.randint(y1, y_max)
-            draw.rectangle([x1, y1, x2, y2], outline=stroke_color, width=stroke_width)
-            area = abs(x2 - x1) * abs(y2 - y1)
-            generated_entities.append({
-                "type": "rectangle",
-                "coords": [x1, y1, x2, y2],
-                "surface": area
-            })
+def handle_mouse_move(x, y):
+    global start_point, drawing
+    # En mode "Libre", dessiner en traçant des segments pendant le déplacement
+    if drawing and mode == 'Libre':
+        with hold_canvas(canvas):
+            canvas.stroke_style = 'black'
+            canvas.line_width = 2
+            canvas.begin_path()
+            canvas.move_to(*start_point)
+            canvas.line_to(x, y)
+            canvas.stroke()
+        start_point = (x, y)
+    # Pour d'autres modes, on pourrait ajouter un aperçu dynamique (non implémenté ici)
 
-        elif entity_type == "carré":
-            side_max = min(x_max - x_min, y_max - y_min)
-            side = random.randint(10, side_max if side_max > 10 else 10)
-            x1 = random.randint(x_min, x_max - side)
-            y1 = random.randint(y_min, y_max - side)
-            x2 = x1 + side
-            y2 = y1 + side
-            draw.rectangle([x1, y1, x2, y2], outline=stroke_color, width=stroke_width)
-            area = side * side
-            generated_entities.append({
-                "type": "carré",
-                "coords": [x1, y1, x2, y2],
-                "surface": area
-            })
+def handle_mouse_up(x, y):
+    global start_point, drawing
+    if drawing and mode == 'Ligne':
+        with hold_canvas(canvas):
+            canvas.stroke_style = 'black'
+            canvas.line_width = 2
+            canvas.begin_path()
+            canvas.move_to(*start_point)
+            canvas.line_to(x, y)
+            canvas.stroke()
+    elif drawing and mode == 'Rectangle':
+        with hold_canvas(canvas):
+            canvas.stroke_style = 'green'
+            canvas.line_width = 2
+            x0, y0 = start_point
+            largeur = x - x0
+            hauteur = y - y0
+            canvas.stroke_rect(x0, y0, largeur, hauteur)
+    elif drawing and mode == 'Cercle':
+        with hold_canvas(canvas):
+            canvas.stroke_style = 'purple'
+            canvas.line_width = 2
+            x0, y0 = start_point
+            rayon = math.sqrt((x - x0)**2 + (y - y0)**2)
+            canvas.begin_path()
+            canvas.arc(x0, y0, rayon, 0, 2*math.pi)
+            canvas.stroke()
+    elif drawing and mode == 'Mesure':
+        with hold_canvas(canvas):
+            canvas.stroke_style = 'orange'
+            canvas.line_width = 2
+            canvas.begin_path()
+            canvas.move_to(*start_point)
+            canvas.line_to(x, y)
+            canvas.stroke()
+        distance = math.sqrt((x - start_point[0])**2 + (y - start_point[1])**2)
+        label_mesure.value = f"Mesure: {distance:.2f} pixels"
+    drawing = False
+    start_point = None
 
-        elif entity_type == "cercle":
-            max_diameter = min(x_max - x_min, y_max - y_min)
-            diameter = random.randint(10, max_diameter if max_diameter > 10 else 10)
-            x1 = random.randint(x_min, x_max - diameter)
-            y1 = random.randint(y_min, y_max - diameter)
-            x2 = x1 + diameter
-            y2 = y1 + diameter
-            draw.ellipse([x1, y1, x2, y2], outline=stroke_color, width=stroke_width)
-            area = math.pi * (diameter / 2) ** 2
-            generated_entities.append({
-                "type": "cercle",
-                "coords": [x1, y1, x2, y2],
-                "surface": round(area, 2)
-            })
+canvas.on_mouse_down(handle_mouse_down)
+canvas.on_mouse_move(handle_mouse_move)
+canvas.on_mouse_up(handle_mouse_up)
 
-        elif entity_type == "polygone":
-            num_points = 5
+# --- Génération aléatoire d'entités dans une zone donnée ---
+def generer_forme(b):
+    forme = forme_dropdown.value
+    # Récupérer les coordonnées et dimensions de la zone
+    x0 = zone_x.value
+    y0 = zone_y.value
+    w = zone_width.value
+    h = zone_height.value
+    # Générer un point aléatoire dans la zone
+    rand_x = random.randint(x0, x0 + w)
+    rand_y = random.randint(y0, y0 + h)
+    with hold_canvas(canvas):
+        if forme == 'Rectangle':
+            rect_w = random.randint(20, max(20, w//2))
+            rect_h = random.randint(20, max(20, h//2))
+            canvas.stroke_style = 'brown'
+            canvas.line_width = 2
+            canvas.stroke_rect(rand_x, rand_y, rect_w, rect_h)
+        elif forme == 'Carré':
+            side = random.randint(20, max(20, min(w, h)//2))
+            canvas.stroke_style = 'brown'
+            canvas.line_width = 2
+            canvas.stroke_rect(rand_x, rand_y, side, side)
+        elif forme == 'Cercle':
+            radius = random.randint(10, max(10, min(w, h)//4))
+            canvas.stroke_style = 'brown'
+            canvas.line_width = 2
+            canvas.begin_path()
+            canvas.arc(rand_x, rand_y, radius, 0, 2*math.pi)
+            canvas.stroke()
+        elif forme == 'Polygone':
+            # Générer un polygone régulier avec 5 à 8 côtés
+            n = random.randint(5, 8)
+            angle = 2 * math.pi / n
+            rayon = random.randint(20, max(20, min(w, h)//4))
             points = []
-            for j in range(num_points):
-                x = random.randint(x_min, x_max)
-                y = random.randint(y_min, y_max)
-                points.append((x, y))
-            draw.polygon(points, outline=stroke_color)
-            area = 0
-            n = len(points)
-            for j in range(n):
-                x1p, y1p = points[j]
-                x2p, y2p = points[(j + 1) % n]
-                area += x1p * y2p - x2p * y1p
-            area = abs(area) / 2
-            generated_entities.append({
-                "type": "polygone",
-                "points": points,
-                "surface": round(area, 2)
-            })
+            for i in range(n):
+                theta = i * angle
+                px = rand_x + rayon * math.cos(theta)
+                py = rand_y + rayon * math.sin(theta)
+                points.append((px, py))
+            canvas.stroke_style = 'brown'
+            canvas.line_width = 2
+            canvas.begin_path()
+            canvas.move_to(*points[0])
+            for pt in points[1:]:
+                canvas.line_to(*pt)
+            canvas.close_path()
+            canvas.stroke()
 
-    st.image(image, caption="Image avec entités générées", use_column_width=True)
-    st.markdown("### Détails des entités générées")
-    st.write(generated_entities)
+generer_forme_btn.on_click(generer_forme)
+
+# --- Assemblage de l'interface utilisateur ---
+ui = widgets.VBox([
+    widgets.HBox([mode_selector, finir_polygone_btn, label_mesure]),
+    canvas,
+    widgets.Label("Téléverser une image (pour dessiner par-dessus) :"),
+    upload,
+    widgets.HBox([forme_dropdown, generer_forme_btn]),
+    widgets.HBox([zone_x, zone_y, zone_width, zone_height])
+])
+
+display(ui)
