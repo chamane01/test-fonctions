@@ -1,237 +1,200 @@
 import streamlit as st
+from io import BytesIO
+import base64
 from streamlit_drawable_canvas import st_canvas
-from PIL import Image
-import random
-import math
+from PIL import Image, ImageDraw
+import random, math
 
-# Titre de l'application
-st.title("Carnet de dessin personnel")
+# --- Patch pour définir st.image_to_url si nécessaire ---
+if not hasattr(st, "image_to_url"):
+    def image_to_url(image):
+        buffered = BytesIO()
+        image.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        return f"data:image/png;base64,{img_str}"
+    st.image_to_url = image_to_url
 
-st.markdown("""
-Ce carnet vous permet de dessiner avec divers outils, de téléverser une image de fond et d’ajouter des entités aléatoires dans une zone définie.  
-Vous pouvez également visualiser quelques mesures (longueur, aire, périmètre) des objets dessinés.
-""")
+# ----------------------------
+# Fonction de calcul des métriques
+# ----------------------------
+def calculate_metrics_for_object(obj):
+    metrics = {}
+    obj_type = obj.get("type")
+    
+    if obj_type == "line":
+        points = obj.get("path", [])
+        if points:
+            distance = 0.0
+            for i in range(1, len(points)):
+                dx = points[i][1] - points[i-1][1]
+                dy = points[i][2] - points[i-1][2]
+                distance += math.sqrt(dx * dx + dy * dy)
+            metrics["longueur"] = round(distance, 2)
 
-# -----------------------------
-# 1. Configuration dans la barre latérale
-# -----------------------------
-st.sidebar.header("Paramètres de dessin")
+    elif obj_type == "rect":
+        width = obj.get("width", 0)
+        height = obj.get("height", 0)
+        area = width * height
+        metrics["surface"] = round(area, 2)
+        metrics["périmètre"] = round(2 * (width + height), 2)
 
-# Téléversement d'une image
-uploaded_file = st.sidebar.file_uploader("Téléversez une photo pour dessiner", type=["png", "jpg", "jpeg"])
-if uploaded_file is not None:
-    image = Image.open(uploaded_file)
-    st.sidebar.image(image, caption="Image téléversée", use_column_width=True)
-else:
-    image = None
+    elif obj_type == "circle":
+        diameter = obj.get("width", 0)
+        radius = diameter / 2
+        area = math.pi * radius * radius
+        metrics["surface"] = round(area, 2)
+        metrics["circonférence"] = round(2 * math.pi * radius, 2)
 
-# Choix du mode de dessin
-drawing_mode = st.sidebar.selectbox("Mode de dessin", 
-                                    ("freedraw", "line", "rect", "circle", "transform"),
-                                    help="Sélectionnez l'outil de dessin")
+    elif obj_type == "polygon":
+        points = obj.get("path", [])
+        if points and len(points) >= 3:
+            area = 0
+            n = len(points)
+            for i in range(n):
+                x1, y1 = points[i][1], points[i][2]
+                x2, y2 = points[(i+1) % n][1], points[(i+1) % n][2]
+                area += x1 * y2 - x2 * y1
+            area = abs(area) / 2
+            metrics["surface"] = round(area, 2)
+    return metrics
 
-# Réglages des couleurs et de l'épaisseur
+# ----------------------------
+# Configuration et présentation de l'application
+# ----------------------------
+st.title("Carnet de Dessin Personnel")
+
+# --- Sidebar pour les options générales ---
+st.sidebar.header("Options de dessin")
+drawing_mode = st.sidebar.selectbox("Outil de dessin", ["freedraw", "line", "rect", "circle", "transform"])
 stroke_width = st.sidebar.slider("Épaisseur du trait", 1, 25, 3)
 stroke_color = st.sidebar.color_picker("Couleur du trait", "#000000")
-fill_color = st.sidebar.color_picker("Couleur de remplissage", "#ffffff")
+bg_color = st.sidebar.color_picker("Couleur de fond", "#FFFFFF")
+realtime_update = st.sidebar.checkbox("Mise à jour en temps réel", True)
 
-st.sidebar.markdown("---")
-st.sidebar.header("Génération d'entités aléatoires")
+# Téléversement d'une image de fond
+uploaded_file = st.sidebar.file_uploader("Téléversez une image de fond", type=["png", "jpg", "jpeg"])
+if uploaded_file is not None:
+    bg_image = Image.open(uploaded_file)
+else:
+    bg_image = None
 
-# Sélection du type d'entité
-entity_type = st.sidebar.selectbox("Type d'entité", 
-                                   ("polygon", "rectangle", "carré", "cercle"),
-                                   help="Choisissez le type d'entité à générer")
+# --- Création du canvas de dessin ---
+canvas_result = st_canvas(
+    fill_color="rgba(255, 165, 0, 0.3)",  # Couleur de remplissage pour les outils (ex: polygone)
+    stroke_width=stroke_width,
+    stroke_color=stroke_color,
+    background_color=bg_color,
+    background_image=bg_image,
+    update_streamlit=realtime_update,
+    height=500,
+    width=700,
+    drawing_mode=drawing_mode,
+    key="canvas",
+)
 
-# Nombre d'entités à générer
-num_entities = st.sidebar.number_input("Nombre d'entités", min_value=1, max_value=100, value=1, step=1)
+# ----------------------------
+# Affichage des métriques des dessins réalisés
+# ----------------------------
+st.subheader("Métriques des objets dessinés")
+if canvas_result.json_data is not None:
+    objects = canvas_result.json_data.get("objects", [])
+    if objects:
+        for i, obj in enumerate(objects):
+            st.markdown(f"**Objet {i+1}** — Type : `{obj.get('type')}`")
+            metrics = calculate_metrics_for_object(obj)
+            st.write(metrics)
+    else:
+        st.write("Aucun objet dessiné pour l'instant.")
 
-# Définition de la zone (emprise) dans laquelle les entités seront générées
-st.sidebar.subheader("Définir la zone de génération")
-# Vous pouvez définir la taille de votre canevas (par défaut ou via une image)
-canvas_width = st.sidebar.number_input("Largeur du canevas", min_value=100, max_value=1000, value=500, step=10)
-canvas_height = st.sidebar.number_input("Hauteur du canevas", min_value=100, max_value=1000, value=500, step=10)
+# ----------------------------
+# Génération aléatoire d'entités géométriques
+# ----------------------------
+st.subheader("Génération aléatoire d'entités")
 
-# Zone de génération (parmi le canevas)
-zone_x = st.sidebar.number_input("X de la zone", min_value=0, max_value=canvas_width, value=0, step=10)
-zone_y = st.sidebar.number_input("Y de la zone", min_value=0, max_value=canvas_height, value=0, step=10)
-zone_width = st.sidebar.number_input("Largeur de la zone", min_value=10, max_value=canvas_width, value=canvas_width, step=10)
-zone_height = st.sidebar.number_input("Hauteur de la zone", min_value=10, max_value=canvas_height, value=canvas_height, step=10)
+st.markdown("Définissez la zone d'emprise (en pixels) dans laquelle les entités seront générées.")
+col1, col2, col3, col4 = st.columns(4)
+x_min = col1.number_input("X min", min_value=0, value=50)
+y_min = col2.number_input("Y min", min_value=0, value=50)
+x_max = col3.number_input("X max", min_value=0, value=300)
+y_max = col4.number_input("Y max", min_value=0, value=300)
 
-# Bouton pour générer les entités
-if st.sidebar.button("Générer entités aléatoires"):
-    shapes = []
+num_entities = st.number_input("Nombre d'entités à générer", min_value=1, value=5)
+entity_type = st.selectbox("Type d'entité", ["rectangle", "carré", "cercle", "polygone"])
+
+if st.button("Générer entités"):
+    if bg_image is not None:
+        image = bg_image.copy()
+    else:
+        image = Image.new("RGB", (700, 500), color=bg_color)
+    draw = ImageDraw.Draw(image)
+    
+    generated_entities = []
+
     for i in range(num_entities):
-        if entity_type in ["rectangle", "carré"]:
-            # Position aléatoire dans la zone
-            x0 = random.randint(zone_x, max(zone_x, zone_x + zone_width - 10))
-            y0 = random.randint(zone_y, max(zone_y, zone_y + zone_height - 10))
-            # Pour rectangle : largeur et hauteur aléatoires ; pour carré : même taille
-            if entity_type == "rectangle":
-                max_width = max(10, zone_x + zone_width - x0)
-                max_height = max(10, zone_y + zone_height - y0)
-                width = random.randint(10, max_width)
-                height = random.randint(10, max_height)
-            else:  # carré
-                max_size = min(zone_x + zone_width - x0, zone_y + zone_height - y0)
-                size = random.randint(10, max_size)
-                width = size
-                height = size
-            # Création de l'objet rectangle (le type "rect" est utilisé)
-            shape_obj = {
-                "type": "rect",
-                "version": "4.6.0",
-                "originX": "left",
-                "originY": "top",
-                "left": x0,
-                "top": y0,
-                "width": width,
-                "height": height,
-                "fill": fill_color,
-                "stroke": stroke_color,
-                "strokeWidth": stroke_width,
-                "opacity": 1,
-                "angle": 0,
-            }
-            shapes.append(shape_obj)
+        if entity_type == "rectangle":
+            x1 = random.randint(x_min, x_max)
+            y1 = random.randint(y_min, y_max)
+            x2 = random.randint(x1, x_max)
+            y2 = random.randint(y1, y_max)
+            draw.rectangle([x1, y1, x2, y2], outline=stroke_color, width=stroke_width)
+            area = abs(x2 - x1) * abs(y2 - y1)
+            generated_entities.append({
+                "type": "rectangle",
+                "coords": [x1, y1, x2, y2],
+                "surface": area
+            })
+
+        elif entity_type == "carré":
+            side_max = min(x_max - x_min, y_max - y_min)
+            side = random.randint(10, side_max if side_max > 10 else 10)
+            x1 = random.randint(x_min, x_max - side)
+            y1 = random.randint(y_min, y_max - side)
+            x2 = x1 + side
+            y2 = y1 + side
+            draw.rectangle([x1, y1, x2, y2], outline=stroke_color, width=stroke_width)
+            area = side * side
+            generated_entities.append({
+                "type": "carré",
+                "coords": [x1, y1, x2, y2],
+                "surface": area
+            })
+
         elif entity_type == "cercle":
-            # Rayon aléatoire
-            max_radius = min(zone_width, zone_height) // 2
-            if max_radius < 10:
-                max_radius = 10
-            radius = random.randint(10, max_radius)
-            # Centre aléatoire en veillant à ce que le cercle soit dans la zone
-            cx = random.randint(zone_x + radius, zone_x + zone_width - radius)
-            cy = random.randint(zone_y + radius, zone_y + zone_height - radius)
-            shape_obj = {
-                "type": "circle",
-                "version": "4.6.0",
-                "originX": "center",
-                "originY": "center",
-                "left": cx,
-                "top": cy,
-                "radius": radius,
-                "fill": fill_color,
-                "stroke": stroke_color,
-                "strokeWidth": stroke_width,
-                "opacity": 1,
-                "angle": 0,
-            }
-            shapes.append(shape_obj)
-        elif entity_type == "polygon":
-            # Génération d'un polygone avec un nombre de points aléatoire entre 3 et 6
-            num_points = random.randint(3, 6)
+            max_diameter = min(x_max - x_min, y_max - y_min)
+            diameter = random.randint(10, max_diameter if max_diameter > 10 else 10)
+            x1 = random.randint(x_min, x_max - diameter)
+            y1 = random.randint(y_min, y_max - diameter)
+            x2 = x1 + diameter
+            y2 = y1 + diameter
+            draw.ellipse([x1, y1, x2, y2], outline=stroke_color, width=stroke_width)
+            area = math.pi * (diameter / 2) ** 2
+            generated_entities.append({
+                "type": "cercle",
+                "coords": [x1, y1, x2, y2],
+                "surface": round(area, 2)
+            })
+
+        elif entity_type == "polygone":
+            num_points = 5
             points = []
             for j in range(num_points):
-                px = random.randint(zone_x, zone_x + zone_width)
-                py = random.randint(zone_y, zone_y + zone_height)
-                points.append([px, py])
-            shape_obj = {
-                "type": "polygon",
-                "version": "4.6.0",
-                "originX": "left",
-                "originY": "top",
-                "left": 0,  # non utilisé directement quand on spécifie les points
-                "top": 0,
+                x = random.randint(x_min, x_max)
+                y = random.randint(y_min, y_max)
+                points.append((x, y))
+            draw.polygon(points, outline=stroke_color)
+            area = 0
+            n = len(points)
+            for j in range(n):
+                x1p, y1p = points[j]
+                x2p, y2p = points[(j + 1) % n]
+                area += x1p * y2p - x2p * y1p
+            area = abs(area) / 2
+            generated_entities.append({
+                "type": "polygone",
                 "points": points,
-                "fill": fill_color,
-                "stroke": stroke_color,
-                "strokeWidth": stroke_width,
-                "opacity": 1,
-                "angle": 0,
-            }
-            shapes.append(shape_obj)
-    # Enregistrer la liste des formes générées dans la session
-    st.session_state["random_shapes"] = shapes
+                "surface": round(area, 2)
+            })
 
-# Si des entités aléatoires ont été générées, on les ajoute comme dessin initial
-if "random_shapes" in st.session_state:
-    initial_drawing = {"objects": st.session_state["random_shapes"], "background": None}
-else:
-    initial_drawing = None
-
-# -----------------------------
-# 2. Création du canevas de dessin
-# -----------------------------
-st.markdown("## Zone de dessin")
-
-# Si une image est téléversée, on l'utilise comme fond et on adapte la taille du canevas
-if image:
-    canvas_result = st_canvas(
-        fill_color=fill_color,
-        stroke_width=stroke_width,
-        stroke_color=stroke_color,
-        background_image=image,
-        background_color="#eee",
-        update_streamlit=True,
-        height=image.height,
-        width=image.width,
-        drawing_mode=drawing_mode,
-        initial_drawing=initial_drawing,
-        key="canvas",
-    )
-else:
-    canvas_result = st_canvas(
-        fill_color=fill_color,
-        stroke_width=stroke_width,
-        stroke_color=stroke_color,
-        background_color="#eee",
-        update_streamlit=True,
-        height=canvas_height,
-        width=canvas_width,
-        drawing_mode=drawing_mode,
-        initial_drawing=initial_drawing,
-        key="canvas",
-    )
-
-# -----------------------------
-# 3. Affichage et mesures des objets dessinés
-# -----------------------------
-if canvas_result.json_data is not None:
-    objects = canvas_result.json_data["objects"]
-    st.write("### Objets dessinés")
-    st.json(objects)
-
-    st.write("### Mesures des objets")
-    for obj in objects:
-        # Pour les lignes (si disponibles)
-        if obj["type"] == "line":
-            # Selon la configuration, une ligne peut posséder des coordonnées de début et fin
-            try:
-                x1 = obj["x1"]
-                y1 = obj["y1"]
-                x2 = obj["x2"]
-                y2 = obj["y2"]
-            except KeyError:
-                continue
-            length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-            st.write(f"- **Ligne** : longueur = {length:.2f} pixels")
-        # Pour les rectangles (et carrés)
-        elif obj["type"] == "rect":
-            width = obj.get("width", 0)
-            height = obj.get("height", 0)
-            area = width * height
-            perimeter = 2 * (width + height)
-            st.write(f"- **Rectangle/Carré** : largeur = {width}, hauteur = {height}, aire = {area}, périmètre = {perimeter}")
-        # Pour les cercles
-        elif obj["type"] == "circle":
-            radius = obj.get("radius", 0)
-            area = math.pi * (radius ** 2)
-            circumference = 2 * math.pi * radius
-            st.write(f"- **Cercle** : rayon = {radius}, aire = {area:.2f}, circonférence = {circumference:.2f}")
-        # Pour les polygones (calcul par la formule de Gauss)
-        elif obj["type"] == "polygon":
-            points = obj.get("points", [])
-            if len(points) >= 3:
-                area = 0
-                n = len(points)
-                for i in range(n):
-                    x1, y1 = points[i]
-                    x2, y2 = points[(i + 1) % n]
-                    area += x1 * y2 - x2 * y1
-                area = abs(area) / 2
-                st.write(f"- **Polygone** : {len(points)} points, aire ≈ {area:.2f} pixels²")
-            else:
-                st.write("- **Polygone** : moins de 3 points (non calculable)")
-        else:
-            st.write(f"- **Objet de type {obj['type']}** : mesures non définies")
+    st.image(image, caption="Image avec entités générées", use_column_width=True)
+    st.markdown("### Détails des entités générées")
+    st.write(generated_entities)
