@@ -10,8 +10,6 @@ streamlit-drawable-canvas
 Pillow
 rasterio
 pyproj 
-json
-
 geopandas
 tempfile
-os
+
