@@ -1,5 +1,6 @@
 import streamlit as st
 from PIL import Image, ExifTags
+import numpy as np
 import json
 from streamlit_drawable_canvas import st_canvas
 from pyproj import Transformer
@@ -9,7 +10,7 @@ st.set_page_config(layout="wide")
 st.title("Éditeur d'images Drone Géolocalisées")
 
 ###########################
-# Fonctions d'extraction EXIF et GPS
+# Fonctions EXIF et GPS
 ###########################
 
 def get_exif_data(image):
@@ -26,7 +27,7 @@ def get_exif_data(image):
     return exif_data
 
 def get_decimal_from_dms(dms, ref):
-    """Convertit une coordonnée GPS depuis le format DMS en degrés décimaux."""
+    """Convertit une coordonnée GPS du format DMS en degrés décimaux."""
     degrees = dms[0][0] / dms[0][1]
     minutes = dms[1][0] / dms[1][1]
     seconds = dms[2][0] / dms[2][1]
@@ -53,13 +54,13 @@ def get_gps_coords(exif_data):
         return None, None
 
 ###########################
-# Fonctions de projection UTM et conversion pixel → coordonnée
+# Projection UTM et conversion pixel → coordonnées réelles
 ###########################
 
 def latlon_to_utm(lat, lon):
     """
     Convertit une coordonnée lat/lon (EPSG:4326) en UTM.
-    Détermine la zone UTM à partir de la longitude.
+    La zone UTM est déterminée automatiquement en fonction de la longitude.
     """
     zone = int((lon + 180) / 6) + 1
     if lat >= 0:
@@ -73,22 +74,21 @@ def latlon_to_utm(lat, lon):
 def pixel_to_utm(x, y, top_left_x, top_left_y, resolution):
     """
     Convertit des coordonnées pixel (x,y) en coordonnées UTM.
-    L'image est supposée être orientée "nord en haut".
+    On suppose que l'image est orientée avec le nord en haut.
     """
     utm_x = top_left_x + x * resolution
-    utm_y = top_left_y - y * resolution  # car y croît vers le bas dans l'image
+    utm_y = top_left_y - y * resolution  # y croît vers le bas dans l'image
     return utm_x, utm_y
 
 ###########################
 # Interface utilisateur
 ###########################
 
-# Téléversement de l'image
 st.sidebar.header("Charger une image")
 uploaded_file = st.sidebar.file_uploader("Sélectionnez une image (JPEG ou PNG)", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # Charger l'image avec PIL
+    # Chargement de l'image via PIL
     image = Image.open(uploaded_file)
     width, height = image.size
     st.image(image, caption="Image chargée", use_column_width=True)
@@ -107,10 +107,10 @@ if uploaded_file is not None:
     center_utm_x, center_utm_y, epsg_code = latlon_to_utm(lat, lon)
     st.sidebar.info(f"Projection UTM utilisée : EPSG:{epsg_code}")
 
-    # Paramétrage de la résolution au sol (m/pixel)
+    # Paramétrage de la résolution au sol (m/px)
     resolution = st.sidebar.number_input("Résolution au sol (m/px)", value=0.05, step=0.01, format="%.3f")
 
-    # Calcul des coordonnées UTM du pixel supérieur gauche de l'image.
+    # Calcul des coordonnées UTM du coin supérieur gauche de l'image.
     # On considère que le centre de l'image correspond aux coordonnées GPS extraites.
     top_left_x = center_utm_x - (width / 2) * resolution
     top_left_y = center_utm_y + (height / 2) * resolution
@@ -118,11 +118,9 @@ if uploaded_file is not None:
     # Choix du mode de dessin
     drawing_mode = st.sidebar.selectbox("Mode de dessin", ("point", "line", "polygon"))
 
-    # Paramètre de dessin pour st_canvas
-    # Pour le mode "point", on utilise le mode "circle" avec un petit rayon.
+    # Détermination du mode de dessin pour st_canvas
     if drawing_mode == "point":
         canvas_drawing_mode = "circle"
-        point_radius = 3  # rayon fixe (non modifiable par l'utilisateur dans cet exemple)
     elif drawing_mode == "line":
         canvas_drawing_mode = "line"
     elif drawing_mode == "polygon":
@@ -132,14 +130,17 @@ if uploaded_file is not None:
 
     st.sidebar.markdown("**Dessinez directement sur l'image ci-dessous.**")
 
-    # Affichage de la zone de dessin
+    # Conversion de l'image en tableau NumPy pour st_canvas
+    image_array = np.array(image)
+
+    # Zone de dessin interactive avec st_canvas
     canvas_result = st_canvas(
         fill_color="rgba(255, 165, 0, 0.3)",  # couleur de remplissage par défaut
         stroke_width=2,
         stroke_color="#000000",
-        background_image=image,
-        background_image_mode="FIT",
-        update_streamlit=True,
+        background_image=image_array,
+        background_image_mode="fit",  # mode en minuscules
+        # Si nécessaire, retirez 'update_streamlit' ou mettez à jour streamlit-drawable-canvas\n        update_streamlit=True,
         height=height,
         width=width,
         drawing_mode=canvas_drawing_mode,
@@ -154,7 +155,7 @@ if uploaded_file is not None:
         objects = canvas_result.json_data.get("objects", [])
         features = []
         for obj in objects:
-            # Pour le mode "point", on récupère le centre du cercle dessiné
+            # Pour le mode "point", récupérer le centre du cercle dessiné
             if obj.get("type") == "circle" and drawing_mode == "point":
                 x = obj.get("left", 0) + obj.get("width", 0) / 2
                 y = obj.get("top", 0) + obj.get("height", 0) / 2
@@ -165,13 +166,13 @@ if uploaded_file is not None:
                     "properties": {}
                 }
                 features.append(feature)
-            # Pour les lignes et polygones, on extrait la liste des points
+            # Pour les lignes et polygones, extraire la liste des points
             elif obj.get("type") in ["path", "line", "polygon"]:
                 pts = obj.get("points")
                 if pts and len(pts) > 0:
                     utm_points = [pixel_to_utm(pt.get("x", 0), pt.get("y", 0), top_left_x, top_left_y, resolution) for pt in pts]
                     if drawing_mode == "polygon" or obj.get("type") == "polygon":
-                        # Pour un polygone, s'assurer que le premier et le dernier point sont identiques
+                        # Pour un polygone, assurer que le premier et le dernier point soient identiques
                         if utm_points[0] != utm_points[-1]:
                             utm_points.append(utm_points[0])
                         geom = Polygon(utm_points)
