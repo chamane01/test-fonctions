@@ -11,5 +11,5 @@ Pillow
 rasterio
 pyproj 
 geopandas
-tempfile
+
 
