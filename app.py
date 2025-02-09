@@ -1,73 +1,76 @@
 import streamlit as st
-from st_canvas import st_canvas
-import json
+import rasterio
+from rasterio.transform import from_origin
+from PIL import Image
+import exifread
+import numpy as np
+import os
 
-# Titre de l'application
-st.title("Application de Dessin Avancée")
+def extract_gps_info(image_path):
+    """Extrait les coordonnées GPS d'une image si disponibles"""
+    with open(image_path, 'rb') as f:
+        tags = exifread.process_file(f)
+    
+    if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
+        lat = tags['GPS GPSLatitude'].values
+        lon = tags['GPS GPSLongitude'].values
+        lat_ref = tags['GPS GPSLatitudeRef'].values
+        lon_ref = tags['GPS GPSLongitudeRef'].values
+        
+        lat = (lat[0] + lat[1]/60 + lat[2]/3600) * (-1 if lat_ref == 'S' else 1)
+        lon = (lon[0] + lon[1]/60 + lon[2]/3600) * (-1 if lon_ref == 'W' else 1)
+        
+        return lat, lon
+    return None, None
 
-# Configuration du canvas
-canvas_result = st_canvas(
-    fill_color="rgba(255, 165, 0, 0.3)",  # Couleur de remplissage
-    stroke_width=3,  # Épaisseur du trait
-    stroke_color="#000000",  # Couleur du trait
-    background_color="#ffffff",  # Couleur de fond
-    height=600,  # Hauteur du canvas
-    width=800,  # Largeur du canvas
-    drawing_mode="freedraw",  # Mode de dessin (ici, dessin libre)
-    key="canvas",
-)
+def convert_to_tiff(image_path, output_path, lat, lon):
+    """Convertit une image JPEG en GeoTIFF avec des coordonnées GPS"""
+    img = Image.open(image_path)
+    img_array = np.array(img)
+    
+    height, width = img_array.shape[:2]
+    
+    # Définition d'une transformation basique (origine en lat/lon)
+    transform = from_origin(lon, lat, 0.0001, 0.0001)  # Approximation de la résolution
+    
+    with rasterio.open(
+        output_path, 'w',
+        driver='GTiff',
+        height=height,
+        width=width,
+        count=3 if len(img_array.shape) == 3 else 1,
+        dtype=img_array.dtype,
+        crs='EPSG:4326',
+        transform=transform
+    ) as dst:
+        if len(img_array.shape) == 3:
+            for i in range(3):
+                dst.write(img_array[:, :, i], i + 1)
+        else:
+            dst.write(img_array, 1)
 
-# Barre latérale pour les outils
-with st.sidebar:
-    st.header("Outils de Dessin")
-    
-    # Sélection de l'outil
-    tool = st.selectbox(
-        "Outil :",
-        ["Point", "Ligne", "Polyligne", "Polygone", "Carré", "Rectangle"],
-        key="tool_select",
-    )
-    
-    # Choix de la couleur
-    color = st.color_picker("Couleur :", "#000000", key="color_picker")
-    
-    # Choix de l'épaisseur/taille
-    brush_size = st.slider("Épaisseur/Taille :", 1, 50, 5, key="brush_size")
-    
-    # Bouton pour effacer le canvas
-    if st.button("Effacer le dessin", key="clear_canvas"):
-        canvas_result.json_data = None
-    
-    # Téléversement d'image
-    uploaded_image = st.file_uploader("Téléverser une image", type=["png", "jpg", "jpeg"], key="image_loader")
-    
-    # Bouton pour exporter les dessins en GeoJSON
-    if st.button("Exporter en GeoJSON", key="export_geojson"):
-        if canvas_result.json_data:
-            st.download_button(
-                label="Télécharger GeoJSON",
-                data=json.dumps(canvas_result.json_data, indent=2),
-                file_name="dessin.geojson",
-                mime="application/json",
-            )
-    
-    # Bouton pour exporter les dessins en JSON
-    if st.button("Exporter en JSON", key="export_json"):
-        if canvas_result.json_data:
-            st.download_button(
-                label="Télécharger JSON",
-                data=json.dumps(canvas_result.json_data, indent=2),
-                file_name="dessin.json",
-                mime="application/json",
-            )
+st.title("Convertisseur JPEG → GeoTIFF avec métadonnées GPS")
 
-# Affichage des mesures
-st.header("Mesures")
-if canvas_result.json_data:
-    st.write(canvas_result.json_data)
-else:
-    st.write("Aucune mesure disponible.")
+uploaded_file = st.file_uploader("Choisissez une image JPEG", type=['jpg', 'jpeg'])
 
-# Affichage de l'image téléversée
-if uploaded_image is not None:
-    st.image(uploaded_image, caption="Image téléversée", use_column_width=True)
+if uploaded_file:
+    image_path = "temp.jpg"
+    with open(image_path, "wb") as f:
+        f.write(uploaded_file.read())
+    
+    lat, lon = extract_gps_info(image_path)
+    
+    if lat and lon:
+        st.success(f"Coordonnées GPS détectées : Latitude {lat}, Longitude {lon}")
+    else:
+        st.warning("Aucune information GPS trouvée. Le TIFF ne sera pas géoréférencé.")
+        lat, lon = 0, 0  # Valeurs par défaut
+    
+    tiff_path = "output.tif"
+    convert_to_tiff(image_path, tiff_path, lat, lon)
+    
+    with open(tiff_path, "rb") as f:
+        st.download_button("Télécharger le fichier GeoTIFF", f, file_name="image_geotiff.tif")
+    
+    os.remove(image_path)
+    os.remove(tiff_path)
