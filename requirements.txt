@@ -10,7 +10,7 @@ streamlit-drawable-canvas
 
 
 
-PIL 
+pillow
 rasterio
 pyproj 
 json
