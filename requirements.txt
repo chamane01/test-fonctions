@@ -7,10 +7,7 @@ pyproj
 shapely
 streamlit-drawable-canvas
 
-
-
-
-pillow
+Pillow
 rasterio
 pyproj 
 json
