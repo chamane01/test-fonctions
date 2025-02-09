@@ -1,217 +1,237 @@
 import streamlit as st
-import numpy as np
-from PIL import Image
-import rasterio
-from rasterio.warp import calculate_default_transform, reproject
-from pyproj import CRS, Transformer
-import json
 from streamlit_drawable_canvas import st_canvas
-from shapely.geometry import Point, LineString
-import tempfile
-import os
-import base64
-from io import BytesIO
+from PIL import Image
+import random
+import math
 
-# --- Patch pour corriger l'erreur de st_canvas liée à image_to_url ---
-def image_to_url(img):
-    buffered = BytesIO()
-    img.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{img_str}"
+# Titre de l'application
+st.title("Carnet de dessin personnel")
 
-if not hasattr(st, "image_to_url"):
-    st.image_to_url = image_to_url
-# --- Fin du patch ---
+st.markdown("""
+Ce carnet vous permet de dessiner avec divers outils, de téléverser une image de fond et d’ajouter des entités aléatoires dans une zone définie.  
+Vous pouvez également visualiser quelques mesures (longueur, aire, périmètre) des objets dessinés.
+""")
 
-def get_utm_crs(lat, lon):
-    """
-    Calcule le CRS UTM à partir du centre (lat, lon) en degrés.
-    """
-    zone = int((lon + 180) // 6 + 1)
-    return CRS.from_dict({'proj': 'utm', 'zone': zone, 'south': lat < 0})
+# -----------------------------
+# 1. Configuration dans la barre latérale
+# -----------------------------
+st.sidebar.header("Paramètres de dessin")
 
-def get_center_lon_lat(bounds, crs):
-    """
-    Calcule le centre de l'image et le convertit en EPSG:4326 si nécessaire.
-    Si le CRS est géographique, on s'assure que le centre soit dans une plage réaliste.
-    """
-    center_x = (bounds.left + bounds.right) / 2
-    center_y = (bounds.top + bounds.bottom) / 2
-    if crs.is_geographic:
-        # Si le CRS est géographique, les coordonnées doivent être en degrés
-        if not (-180 <= center_x <= 180 and -90 <= center_y <= 90):
-            raise ValueError("Les coordonnées du centre ne semblent pas être en degrés. "
-                             "L'image semble ne pas être géoréférencée correctement.")
-        return center_x, center_y
-    else:
-        transformer = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
-        lon, lat = transformer.transform(center_x, center_y)
-        if not (-180 <= lon <= 180 and -90 <= lat <= 90):
-            raise ValueError("La transformation du centre de l'image a produit des coordonnées invalides.")
-        return lon, lat
+# Téléversement d'une image
+uploaded_file = st.sidebar.file_uploader("Téléversez une photo pour dessiner", type=["png", "jpg", "jpeg"])
+if uploaded_file is not None:
+    image = Image.open(uploaded_file)
+    st.sidebar.image(image, caption="Image téléversée", use_column_width=True)
+else:
+    image = None
 
-def process_image(uploaded_file):
-    # Sauvegarder le fichier dans un fichier temporaire
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
-        tmp_path = tmp_file.name
+# Choix du mode de dessin
+drawing_mode = st.sidebar.selectbox("Mode de dessin", 
+                                    ("freedraw", "line", "rect", "circle", "transform"),
+                                    help="Sélectionnez l'outil de dessin")
 
-    with rasterio.open(tmp_path) as src:
-        # Si le CRS n'est pas défini, on utilise EPSG:4326 par défaut
-        if src.crs is None:
-            src_crs = CRS.from_epsg(4326)
+# Réglages des couleurs et de l'épaisseur
+stroke_width = st.sidebar.slider("Épaisseur du trait", 1, 25, 3)
+stroke_color = st.sidebar.color_picker("Couleur du trait", "#000000")
+fill_color = st.sidebar.color_picker("Couleur de remplissage", "#ffffff")
+
+st.sidebar.markdown("---")
+st.sidebar.header("Génération d'entités aléatoires")
+
+# Sélection du type d'entité
+entity_type = st.sidebar.selectbox("Type d'entité", 
+                                   ("polygon", "rectangle", "carré", "cercle"),
+                                   help="Choisissez le type d'entité à générer")
+
+# Nombre d'entités à générer
+num_entities = st.sidebar.number_input("Nombre d'entités", min_value=1, max_value=100, value=1, step=1)
+
+# Définition de la zone (emprise) dans laquelle les entités seront générées
+st.sidebar.subheader("Définir la zone de génération")
+# Vous pouvez définir la taille de votre canevas (par défaut ou via une image)
+canvas_width = st.sidebar.number_input("Largeur du canevas", min_value=100, max_value=1000, value=500, step=10)
+canvas_height = st.sidebar.number_input("Hauteur du canevas", min_value=100, max_value=1000, value=500, step=10)
+
+# Zone de génération (parmi le canevas)
+zone_x = st.sidebar.number_input("X de la zone", min_value=0, max_value=canvas_width, value=0, step=10)
+zone_y = st.sidebar.number_input("Y de la zone", min_value=0, max_value=canvas_height, value=0, step=10)
+zone_width = st.sidebar.number_input("Largeur de la zone", min_value=10, max_value=canvas_width, value=canvas_width, step=10)
+zone_height = st.sidebar.number_input("Hauteur de la zone", min_value=10, max_value=canvas_height, value=canvas_height, step=10)
+
+# Bouton pour générer les entités
+if st.sidebar.button("Générer entités aléatoires"):
+    shapes = []
+    for i in range(num_entities):
+        if entity_type in ["rectangle", "carré"]:
+            # Position aléatoire dans la zone
+            x0 = random.randint(zone_x, max(zone_x, zone_x + zone_width - 10))
+            y0 = random.randint(zone_y, max(zone_y, zone_y + zone_height - 10))
+            # Pour rectangle : largeur et hauteur aléatoires ; pour carré : même taille
+            if entity_type == "rectangle":
+                max_width = max(10, zone_x + zone_width - x0)
+                max_height = max(10, zone_y + zone_height - y0)
+                width = random.randint(10, max_width)
+                height = random.randint(10, max_height)
+            else:  # carré
+                max_size = min(zone_x + zone_width - x0, zone_y + zone_height - y0)
+                size = random.randint(10, max_size)
+                width = size
+                height = size
+            # Création de l'objet rectangle (le type "rect" est utilisé)
+            shape_obj = {
+                "type": "rect",
+                "version": "4.6.0",
+                "originX": "left",
+                "originY": "top",
+                "left": x0,
+                "top": y0,
+                "width": width,
+                "height": height,
+                "fill": fill_color,
+                "stroke": stroke_color,
+                "strokeWidth": stroke_width,
+                "opacity": 1,
+                "angle": 0,
+            }
+            shapes.append(shape_obj)
+        elif entity_type == "cercle":
+            # Rayon aléatoire
+            max_radius = min(zone_width, zone_height) // 2
+            if max_radius < 10:
+                max_radius = 10
+            radius = random.randint(10, max_radius)
+            # Centre aléatoire en veillant à ce que le cercle soit dans la zone
+            cx = random.randint(zone_x + radius, zone_x + zone_width - radius)
+            cy = random.randint(zone_y + radius, zone_y + zone_height - radius)
+            shape_obj = {
+                "type": "circle",
+                "version": "4.6.0",
+                "originX": "center",
+                "originY": "center",
+                "left": cx,
+                "top": cy,
+                "radius": radius,
+                "fill": fill_color,
+                "stroke": stroke_color,
+                "strokeWidth": stroke_width,
+                "opacity": 1,
+                "angle": 0,
+            }
+            shapes.append(shape_obj)
+        elif entity_type == "polygon":
+            # Génération d'un polygone avec un nombre de points aléatoire entre 3 et 6
+            num_points = random.randint(3, 6)
+            points = []
+            for j in range(num_points):
+                px = random.randint(zone_x, zone_x + zone_width)
+                py = random.randint(zone_y, zone_y + zone_height)
+                points.append([px, py])
+            shape_obj = {
+                "type": "polygon",
+                "version": "4.6.0",
+                "originX": "left",
+                "originY": "top",
+                "left": 0,  # non utilisé directement quand on spécifie les points
+                "top": 0,
+                "points": points,
+                "fill": fill_color,
+                "stroke": stroke_color,
+                "strokeWidth": stroke_width,
+                "opacity": 1,
+                "angle": 0,
+            }
+            shapes.append(shape_obj)
+    # Enregistrer la liste des formes générées dans la session
+    st.session_state["random_shapes"] = shapes
+
+# Si des entités aléatoires ont été générées, on les ajoute comme dessin initial
+if "random_shapes" in st.session_state:
+    initial_drawing = {"objects": st.session_state["random_shapes"], "background": None}
+else:
+    initial_drawing = None
+
+# -----------------------------
+# 2. Création du canevas de dessin
+# -----------------------------
+st.markdown("## Zone de dessin")
+
+# Si une image est téléversée, on l'utilise comme fond et on adapte la taille du canevas
+if image:
+    canvas_result = st_canvas(
+        fill_color=fill_color,
+        stroke_width=stroke_width,
+        stroke_color=stroke_color,
+        background_image=image,
+        background_color="#eee",
+        update_streamlit=True,
+        height=image.height,
+        width=image.width,
+        drawing_mode=drawing_mode,
+        initial_drawing=initial_drawing,
+        key="canvas",
+    )
+else:
+    canvas_result = st_canvas(
+        fill_color=fill_color,
+        stroke_width=stroke_width,
+        stroke_color=stroke_color,
+        background_color="#eee",
+        update_streamlit=True,
+        height=canvas_height,
+        width=canvas_width,
+        drawing_mode=drawing_mode,
+        initial_drawing=initial_drawing,
+        key="canvas",
+    )
+
+# -----------------------------
+# 3. Affichage et mesures des objets dessinés
+# -----------------------------
+if canvas_result.json_data is not None:
+    objects = canvas_result.json_data["objects"]
+    st.write("### Objets dessinés")
+    st.json(objects)
+
+    st.write("### Mesures des objets")
+    for obj in objects:
+        # Pour les lignes (si disponibles)
+        if obj["type"] == "line":
+            # Selon la configuration, une ligne peut posséder des coordonnées de début et fin
+            try:
+                x1 = obj["x1"]
+                y1 = obj["y1"]
+                x2 = obj["x2"]
+                y2 = obj["y2"]
+            except KeyError:
+                continue
+            length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+            st.write(f"- **Ligne** : longueur = {length:.2f} pixels")
+        # Pour les rectangles (et carrés)
+        elif obj["type"] == "rect":
+            width = obj.get("width", 0)
+            height = obj.get("height", 0)
+            area = width * height
+            perimeter = 2 * (width + height)
+            st.write(f"- **Rectangle/Carré** : largeur = {width}, hauteur = {height}, aire = {area}, périmètre = {perimeter}")
+        # Pour les cercles
+        elif obj["type"] == "circle":
+            radius = obj.get("radius", 0)
+            area = math.pi * (radius ** 2)
+            circumference = 2 * math.pi * radius
+            st.write(f"- **Cercle** : rayon = {radius}, aire = {area:.2f}, circonférence = {circumference:.2f}")
+        # Pour les polygones (calcul par la formule de Gauss)
+        elif obj["type"] == "polygon":
+            points = obj.get("points", [])
+            if len(points) >= 3:
+                area = 0
+                n = len(points)
+                for i in range(n):
+                    x1, y1 = points[i]
+                    x2, y2 = points[(i + 1) % n]
+                    area += x1 * y2 - x2 * y1
+                area = abs(area) / 2
+                st.write(f"- **Polygone** : {len(points)} points, aire ≈ {area:.2f} pixels²")
+            else:
+                st.write("- **Polygone** : moins de 3 points (non calculable)")
         else:
-            src_crs = src.crs
-
-        # Calcul du centre de l'image (converti en EPSG:4326 si nécessaire)
-        lon, lat = get_center_lon_lat(src.bounds, src_crs)
-
-        # Calcul du CRS UTM à partir du centre en degrés
-        utm_crs = get_utm_crs(lat, lon)
-
-        # Calcul de la transformation pour reprojeter l'image
-        utm_transform, width, height = calculate_default_transform(
-            src_crs, utm_crs, src.width, src.height, *src.bounds
-        )
-
-        # Création du tableau de destination pour l'image reprojetée
-        reproj_array = np.empty((src.count, height, width), dtype=src.dtypes[0])
-        reproject(
-            source=src.read(),
-            destination=reproj_array,
-            src_transform=src.transform,
-            src_crs=src_crs,
-            dst_transform=utm_transform,
-            dst_crs=utm_crs
-        )
-
-        original_size = (src.width, src.height)
-
-    # Supprimer le fichier temporaire
-    os.unlink(tmp_path)
-
-    # Conversion du tableau reprojeté en image PIL en fonction du nombre de bandes
-    if src.count >= 3:
-        # Image RGB (on prend les 3 premières bandes)
-        rgb_array = np.transpose(reproj_array[:3], (1, 2, 0)).astype(np.uint8)
-        pil_img = Image.fromarray(rgb_array, mode='RGB')
-    elif src.count == 1:
-        # Image en niveaux de gris
-        gray_array = reproj_array[0].astype(np.uint8)
-        pil_img = Image.fromarray(gray_array, mode='L')
-    else:
-        raise ValueError(f"Nombre de bandes non supporté : {src.count}")
-
-    return {
-        'image': pil_img,
-        'transform': utm_transform,
-        'crs': utm_crs,
-        'original_size': original_size,
-        'reprojected_size': (width, height)
-    }
-
-def canvas_to_geo(canvas_obj, transform, original_size, display_size):
-    """
-    Transforme les coordonnées du canvas vers celles de l'image d'origine.
-    """
-    scale_x = original_size[0] / display_size[0]
-    scale_y = original_size[1] / display_size[1]
-
-    if canvas_obj['type'] == 'rect':
-        x = canvas_obj['left'] * scale_x
-        y = canvas_obj['top'] * scale_y
-        return transform * (x, y)
-    
-    elif canvas_obj['type'] == 'path':
-        # Extraction des points de la trajectoire
-        points = [(cmd[1], cmd[2]) for cmd in canvas_obj['path'] if cmd[0] in ['M', 'L']]
-        scaled_points = [(x * scale_x, y * scale_y) for x, y in points]
-        return [transform * (x, y) for x, y in scaled_points]
-    
-    return None
-
-st.title("Éditeur d'Images Géoréférencées")
-
-uploaded_files = st.file_uploader(
-    "Télécharger des images", 
-    type=['tif', 'tiff', 'jpg', 'jpeg', 'png'], 
-    accept_multiple_files=True
-)
-
-if uploaded_files:
-    processed_images = []
-    for uploaded_file in uploaded_files:
-        try:
-            processed = process_image(uploaded_file)
-            processed['name'] = uploaded_file.name
-            processed_images.append(processed)
-        except Exception as e:
-            st.error(f"Erreur de traitement de {uploaded_file.name}: {str(e)}")
-
-    if processed_images:
-        selected_image = st.selectbox(
-            "Sélectionner une image", 
-            processed_images, 
-            format_func=lambda x: x['name']
-        )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            display_width = st.slider("Largeur d'affichage", 400, 1200, 800)
-            # Redimensionnement de l'image pour l'affichage
-            display_img = selected_image['image'].resize(
-                (display_width, int(display_width * selected_image['image'].height / selected_image['image'].width))
-            )
-            
-            canvas_result = st_canvas(
-                fill_color="rgba(255, 0, 0, 0.3)",
-                stroke_width=3,
-                stroke_color="#FF0000",
-                background_image=display_img,
-                height=display_img.height,
-                width=display_width,
-                drawing_mode="freedraw",
-                key="canvas"
-            )
-
-        with col2:
-            if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
-                features = []
-                for obj in canvas_result.json_data['objects']:
-                    geo = canvas_to_geo(
-                        obj, 
-                        selected_image['transform'], 
-                        selected_image['original_size'], 
-                        (display_width, display_img.height)
-                    )
-                    if geo:
-                        if obj['type'] == 'rect':
-                            geometry = Point(geo)
-                        elif obj['type'] == 'path':
-                            if isinstance(geo, list) and len(geo) > 1:
-                                geometry = LineString(geo)
-                            else:
-                                geometry = Point(geo[0] if isinstance(geo, list) else geo)
-                        features.append({
-                            'type': 'Feature',
-                            'geometry': geometry.__geo_interface__,
-                            'properties': {}
-                        })
-
-                if features:
-                    geojson = {
-                        'type': 'FeatureCollection',
-                        'features': features,
-                        'crs': {
-                            'type': 'name',
-                            'properties': {'name': str(selected_image['crs'].to_authority())}
-                        }
-                    }
-                    
-                    st.download_button(
-                        label="Télécharger GeoJSON",
-                        data=json.dumps(geojson, indent=2),
-                        file_name="annotations.geojson",
-                        mime="application/json"
-                    )
-                    st.json(geojson)
+            st.write(f"- **Objet de type {obj['type']}** : mesures non définies")
