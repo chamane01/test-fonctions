@@ -11,4 +11,4 @@ Pillow
 rasterio
 pyproj 
 geopandas
-
+exifread
