@@ -3,7 +3,7 @@ import numpy as np
 from PIL import Image
 import rasterio
 from rasterio.warp import calculate_default_transform, reproject
-from pyproj import CRS
+from pyproj import CRS, Transformer
 import json
 from streamlit_drawable_canvas import st_canvas
 from shapely.geometry import Point, LineString
@@ -11,8 +11,25 @@ import tempfile
 import os
 
 def get_utm_crs(lat, lon):
+    """
+    Calcule le CRS UTM en fonction des coordonnées (en degrés).
+    """
     zone = int((lon + 180) // 6 + 1)
     return CRS.from_dict({'proj': 'utm', 'zone': zone, 'south': lat < 0})
+
+def get_center_lon_lat(bounds, crs):
+    """
+    Calcule le centre de l'image et retourne (lon, lat) en EPSG:4326.
+    Si le CRS source est géographique, aucun changement n'est nécessaire.
+    Sinon, on transforme les coordonnées du centre en EPSG:4326.
+    """
+    center_x = (bounds.left + bounds.right) / 2
+    center_y = (bounds.top + bounds.bottom) / 2
+    if crs.is_geographic:
+        return center_x, center_y
+    else:
+        transformer = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+        return transformer.transform(center_x, center_y)
 
 def process_image(uploaded_file):
     # Enregistrer le fichier temporairement
@@ -27,18 +44,18 @@ def process_image(uploaded_file):
         else:
             src_crs = src.crs
 
-        # Calculer le centre de l'image à partir de ses limites
-        lon = (src.bounds.left + src.bounds.right) / 2
-        lat = (src.bounds.top + src.bounds.bottom) / 2
+        # Calculer le centre de l'image et le convertir en EPSG:4326 si nécessaire
+        lon, lat = get_center_lon_lat(src.bounds, src_crs)
 
-        # Définir le CRS UTM en fonction du centre de l'image
+        # Définir le CRS UTM à partir des coordonnées en degrés
         utm_crs = get_utm_crs(lat, lon)
 
         # Calculer la transformation pour reprojeter l'image
         utm_transform, width, height = calculate_default_transform(
-            src_crs, utm_crs, src.width, src.height, *src.bounds)
+            src_crs, utm_crs, src.width, src.height, *src.bounds
+        )
 
-        # Créer le tableau de destination pour l'image reprojetée
+        # Créer un tableau de destination pour l'image reprojetée
         reproj_array = np.empty((src.count, height, width), dtype=src.dtypes[0])
         reproject(
             source=src.read(),
@@ -50,6 +67,7 @@ def process_image(uploaded_file):
         )
 
         original_size = (src.width, src.height)
+
     # Supprimer le fichier temporaire
     os.unlink(tmp_path)
 
@@ -74,10 +92,12 @@ def process_image(uploaded_file):
     }
 
 def canvas_to_geo(canvas_obj, transform, original_size, display_size):
-    # Calculer les facteurs d'échelle entre la taille d'origine et la taille affichée
+    """
+    Transforme les coordonnées du canvas vers les coordonnées de l'image d'origine.
+    """
     scale_x = original_size[0] / display_size[0]
     scale_y = original_size[1] / display_size[1]
-
+    
     if canvas_obj['type'] == 'rect':
         x = canvas_obj['left'] * scale_x
         y = canvas_obj['top'] * scale_y
@@ -110,11 +130,7 @@ if uploaded_files:
             st.error(f"Erreur de traitement de {uploaded_file.name}: {str(e)}")
 
     if processed_images:
-        selected_image = st.selectbox(
-            "Sélectionner une image", 
-            processed_images, 
-            format_func=lambda x: x['name']
-        )
+        selected_image = st.selectbox("Sélectionner une image", processed_images, format_func=lambda x: x['name'])
         
         col1, col2 = st.columns(2)
         with col1:
