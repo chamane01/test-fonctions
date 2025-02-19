@@ -6,7 +6,7 @@ streamlit-folium
 pyproj
 shapely
 streamlit-drawable-canvas
-cv2
+opencv
 Pillow
 rasterio
 pyproj 
