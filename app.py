@@ -109,16 +109,13 @@ def apply_selective_color(img_bgr, mask, c_adj, m_adj, y_adj, k_adj, method="Rel
 # 6) Fonction d'application des modifications classiques
 # ----------------------------------------------------------------------------
 def apply_classic_modifications(img, brightness=0, contrast=1.0, saturation=1.0, gamma=1.0):
-    # Ajustement de luminosité et de contraste
     img = img.astype(np.float32)
     img = img * contrast + brightness
     img = np.clip(img, 0, 255).astype(np.uint8)
-    # Ajustement de la saturation
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
     hsv[..., 1] *= saturation
     hsv[..., 1] = np.clip(hsv[..., 1], 0, 255)
     img = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
-    # Correction gamma
     if gamma != 1.0:
         invGamma = 1.0 / gamma
         table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(256)]).astype("uint8")
@@ -126,62 +123,30 @@ def apply_classic_modifications(img, brightness=0, contrast=1.0, saturation=1.0,
     return img
 
 # ----------------------------------------------------------------------------
-# 7) Interface Streamlit – Choix des Corrections et paramètres
+# 7) Barre latérale : organisation des paramètres
 # ----------------------------------------------------------------------------
+st.sidebar.title("Paramètres de Correction")
 
-st.sidebar.title("Options de Correction")
+# Choix de la séquence de corrections
+correction_sequence = st.sidebar.radio("Séquence de corrections",
+                                         options=["Correction 1 seule", "Correction 2 (en chaîne)", "Correction 3 (en chaîne)"])
 
-# -- Les paramètres de Correction 1 sont TOUJOURS définis
+# ----- Correction 1 -----
 st.sidebar.subheader("Correction 1")
-layer_params_corr1 = {}
-for layer in layer_names:
-    with st.sidebar.expander(f"Couche {layer} (Corr 1)"):
-        active = st.checkbox("Activer", value=False, key=f"active_corr1_{layer}")
-        if active:
-            c_adj = st.slider("Cyan", -100, 100, 0, key=f"c_corr1_{layer}")
-            m_adj = st.slider("Magenta", -100, 100, 0, key=f"m_corr1_{layer}")
-            y_adj = st.slider("Jaune", -100, 100, 0, key=f"y_corr1_{layer}")
-            k_adj = st.slider("Noir", -100, 100, 0, key=f"k_corr1_{layer}")
-            method = st.radio("Méthode", options=["Relative", "Absolute"], index=0, key=f"method_corr1_{layer}")
-        else:
-            c_adj, m_adj, y_adj, k_adj, method = 0, 0, 0, 0, "Relative"
-        layer_params_corr1[layer] = {
-            "active": active,
-            "c_adj": c_adj,
-            "m_adj": m_adj,
-            "y_adj": y_adj,
-            "k_adj": k_adj,
-            "method": method
-        }
-
-st.sidebar.subheader("Modifications Classiques (Corr 1)")
-classic_active_corr1 = st.sidebar.checkbox("Activer modifications classiques", key="classic_active_corr1")
-if classic_active_corr1:
-    brightness_corr1 = st.sidebar.slider("Luminosité", -100, 100, 0, key="brightness_corr1")
-    contrast_corr1 = st.sidebar.slider("Contraste (%)", 50, 150, 100, key="contrast_corr1")
-    saturation_corr1 = st.sidebar.slider("Saturation (%)", 50, 150, 100, key="saturation_corr1")
-    gamma_corr1 = st.sidebar.slider("Gamma", 50, 150, 100, key="gamma_corr1")
-else:
-    brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1 = 0, 100, 100, 100
-
-# -- Choix d'appliquer une Correction 2 en plus
-st.sidebar.markdown("---")
-correction_mode = st.sidebar.radio("Choisir la Correction", options=["Correction 1 seule", "Correction 2 (en chaîne)"])
-if correction_mode == "Correction 2 (en chaîne)":
-    st.sidebar.subheader("Correction 2")
-    layer_params_corr2 = {}
+with st.sidebar.expander("Paramètres par Couche (Corr 1)"):
+    layer_params_corr1 = {}
     for layer in layer_names:
-        with st.sidebar.expander(f"Couche {layer} (Corr 2)"):
-            active = st.checkbox("Activer", value=False, key=f"active_corr2_{layer}")
+        with st.expander(f"Couche {layer}"):
+            active = st.checkbox("Activer", value=False, key=f"active_corr1_{layer}")
             if active:
-                c_adj = st.slider("Cyan", -100, 100, 0, key=f"c_corr2_{layer}")
-                m_adj = st.slider("Magenta", -100, 100, 0, key=f"m_corr2_{layer}")
-                y_adj = st.slider("Jaune", -100, 100, 0, key=f"y_corr2_{layer}")
-                k_adj = st.slider("Noir", -100, 100, 0, key=f"k_corr2_{layer}")
-                method = st.radio("Méthode", options=["Relative", "Absolute"], index=0, key=f"method_corr2_{layer}")
+                c_adj = st.slider("Cyan", -100, 100, 0, key=f"c_corr1_{layer}")
+                m_adj = st.slider("Magenta", -100, 100, 0, key=f"m_corr1_{layer}")
+                y_adj = st.slider("Jaune", -100, 100, 0, key=f"y_corr1_{layer}")
+                k_adj = st.slider("Noir", -100, 100, 0, key=f"k_corr1_{layer}")
+                method = st.radio("Méthode", options=["Relative", "Absolute"], index=0, key=f"method_corr1_{layer}")
             else:
                 c_adj, m_adj, y_adj, k_adj, method = 0, 0, 0, 0, "Relative"
-            layer_params_corr2[layer] = {
+            layer_params_corr1[layer] = {
                 "active": active,
                 "c_adj": c_adj,
                 "m_adj": m_adj,
@@ -189,55 +154,128 @@ if correction_mode == "Correction 2 (en chaîne)":
                 "k_adj": k_adj,
                 "method": method
             }
-    st.sidebar.subheader("Modifications Classiques (Corr 2)")
-    classic_active_corr2 = st.sidebar.checkbox("Activer modifications classiques", key="classic_active_corr2")
-    if classic_active_corr2:
-        brightness_corr2 = st.sidebar.slider("Luminosité", -100, 100, 0, key="brightness_corr2")
-        contrast_corr2 = st.sidebar.slider("Contraste (%)", 50, 150, 100, key="contrast_corr2")
-        saturation_corr2 = st.sidebar.slider("Saturation (%)", 50, 150, 100, key="saturation_corr2")
-        gamma_corr2 = st.sidebar.slider("Gamma", 50, 150, 100, key="gamma_corr2")
+with st.sidebar.expander("Modifications Classiques (Corr 1)"):
+    classic_active_corr1 = st.checkbox("Activer modifs classiques", key="classic_active_corr1")
+    if classic_active_corr1:
+        brightness_corr1 = st.slider("Luminosité", -100, 100, 0, key="brightness_corr1")
+        contrast_corr1 = st.slider("Contraste (%)", 50, 150, 100, key="contrast_corr1")
+        saturation_corr1 = st.slider("Saturation (%)", 50, 150, 100, key="saturation_corr1")
+        gamma_corr1 = st.slider("Gamma", 50, 150, 100, key="gamma_corr1")
     else:
-        brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2 = 0, 100, 100, 100
+        brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1 = 0, 100, 100, 100
 
+# ----- Correction 2 (affichée si nécessaire) -----
+if correction_sequence in ["Correction 2 (en chaîne)", "Correction 3 (en chaîne)"]:
+    st.sidebar.subheader("Correction 2")
+    with st.sidebar.expander("Paramètres par Couche (Corr 2)"):
+        layer_params_corr2 = {}
+        for layer in layer_names:
+            with st.expander(f"Couche {layer}"):
+                active = st.checkbox("Activer", value=False, key=f"active_corr2_{layer}")
+                if active:
+                    c_adj = st.slider("Cyan", -100, 100, 0, key=f"c_corr2_{layer}")
+                    m_adj = st.slider("Magenta", -100, 100, 0, key=f"m_corr2_{layer}")
+                    y_adj = st.slider("Jaune", -100, 100, 0, key=f"y_corr2_{layer}")
+                    k_adj = st.slider("Noir", -100, 100, 0, key=f"k_corr2_{layer}")
+                    method = st.radio("Méthode", options=["Relative", "Absolute"], index=0, key=f"method_corr2_{layer}")
+                else:
+                    c_adj, m_adj, y_adj, k_adj, method = 0, 0, 0, 0, "Relative"
+                layer_params_corr2[layer] = {
+                    "active": active,
+                    "c_adj": c_adj,
+                    "m_adj": m_adj,
+                    "y_adj": y_adj,
+                    "k_adj": k_adj,
+                    "method": method
+                }
+    with st.sidebar.expander("Modifications Classiques (Corr 2)"):
+        classic_active_corr2 = st.checkbox("Activer modifs classiques", key="classic_active_corr2")
+        if classic_active_corr2:
+            brightness_corr2 = st.slider("Luminosité", -100, 100, 0, key="brightness_corr2")
+            contrast_corr2 = st.slider("Contraste (%)", 50, 150, 100, key="contrast_corr2")
+            saturation_corr2 = st.slider("Saturation (%)", 50, 150, 100, key="saturation_corr2")
+            gamma_corr2 = st.slider("Gamma", 50, 150, 100, key="gamma_corr2")
+        else:
+            brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2 = 0, 100, 100, 100
+
+# ----- Correction 3 (affichée uniquement si sélectionnée) -----
+if correction_sequence == "Correction 3 (en chaîne)":
+    st.sidebar.subheader("Correction 3")
+    with st.sidebar.expander("Paramètres par Couche (Corr 3)"):
+        layer_params_corr3 = {}
+        for layer in layer_names:
+            with st.expander(f"Couche {layer}"):
+                active = st.checkbox("Activer", value=False, key=f"active_corr3_{layer}")
+                if active:
+                    c_adj = st.slider("Cyan", -100, 100, 0, key=f"c_corr3_{layer}")
+                    m_adj = st.slider("Magenta", -100, 100, 0, key=f"m_corr3_{layer}")
+                    y_adj = st.slider("Jaune", -100, 100, 0, key=f"y_corr3_{layer}")
+                    k_adj = st.slider("Noir", -100, 100, 0, key=f"k_corr3_{layer}")
+                    method = st.radio("Méthode", options=["Relative", "Absolute"], index=0, key=f"method_corr3_{layer}")
+                else:
+                    c_adj, m_adj, y_adj, k_adj, method = 0, 0, 0, 0, "Relative"
+                layer_params_corr3[layer] = {
+                    "active": active,
+                    "c_adj": c_adj,
+                    "m_adj": m_adj,
+                    "y_adj": y_adj,
+                    "k_adj": k_adj,
+                    "method": method
+                }
+    with st.sidebar.expander("Modifications Classiques (Corr 3)"):
+        classic_active_corr3 = st.checkbox("Activer modifs classiques", key="classic_active_corr3")
+        if classic_active_corr3:
+            brightness_corr3 = st.slider("Luminosité", -100, 100, 0, key="brightness_corr3")
+            contrast_corr3 = st.slider("Contraste (%)", 50, 150, 100, key="contrast_corr3")
+            saturation_corr3 = st.slider("Saturation (%)", 50, 150, 100, key="saturation_corr3")
+            gamma_corr3 = st.slider("Gamma", 50, 150, 100, key="gamma_corr3")
+        else:
+            brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3 = 0, 100, 100, 100
+
+# ----- Mode d'affichage -----
 st.sidebar.markdown("---")
-st.sidebar.title("Mode d'affichage")
+st.sidebar.subheader("Mode d'affichage")
 main_display_mode = st.sidebar.radio("Image modifiée", options=["Combinaison", "Couche active"], key="main_display_mode")
 color_layer_display_mode = st.sidebar.radio("Couche de couleur (fond blanc)", options=["Combinaison", "Couche active"], key="color_layer_display_mode")
 
 if main_display_mode == "Couche active":
-    if correction_mode == "Correction 1 seule":
+    if correction_sequence == "Correction 1 seule":
         active_layers = [layer for layer in layer_names if layer_params_corr1[layer]["active"]]
-        selected_main_layer = st.sidebar.selectbox("Sélectionnez la couche pour l'image modifiée (Corr 1)", options=active_layers, key="selected_main_corr1") if active_layers else None
-    else:
+        selected_main_layer = st.sidebar.selectbox("Sélectionnez la couche (Corr 1)", options=active_layers, key="selected_main_corr1") if active_layers else None
+    elif correction_sequence == "Correction 2 (en chaîne)":
         active_layers = [layer for layer in layer_names if layer_params_corr2[layer]["active"]]
-        selected_main_layer = st.sidebar.selectbox("Sélectionnez la couche pour l'image modifiée (Corr 2)", options=active_layers, key="selected_main_corr2") if active_layers else None
+        selected_main_layer = st.sidebar.selectbox("Sélectionnez la couche (Corr 2)", options=active_layers, key="selected_main_corr2") if active_layers else None
+    else:  # Correction 3
+        active_layers = [layer for layer in layer_names if layer_params_corr3[layer]["active"]]
+        selected_main_layer = st.sidebar.selectbox("Sélectionnez la couche (Corr 3)", options=active_layers, key="selected_main_corr3") if active_layers else None
 else:
     selected_main_layer = None
 
 if color_layer_display_mode == "Couche active":
-    if correction_mode == "Correction 1 seule":
+    if correction_sequence == "Correction 1 seule":
         active_layers = [layer for layer in layer_names if layer_params_corr1[layer]["active"]]
-        selected_color_layer = st.sidebar.selectbox("Sélectionnez la couche pour la couleur (Corr 1)", options=active_layers, key="selected_color_corr1") if active_layers else None
-    else:
+        selected_color_layer = st.sidebar.selectbox("Sélectionnez la couche (Corr 1)", options=active_layers, key="selected_color_corr1") if active_layers else None
+    elif correction_sequence == "Correction 2 (en chaîne)":
         active_layers = [layer for layer in layer_names if layer_params_corr2[layer]["active"]]
-        selected_color_layer = st.sidebar.selectbox("Sélectionnez la couche pour la couleur (Corr 2)", options=active_layers, key="selected_color_corr2") if active_layers else None
+        selected_color_layer = st.sidebar.selectbox("Sélectionnez la couche (Corr 2)", options=active_layers, key="selected_color_corr2") if active_layers else None
+    else:
+        active_layers = [layer for layer in layer_names if layer_params_corr3[layer]["active"]]
+        selected_color_layer = st.sidebar.selectbox("Sélectionnez la couche (Corr 3)", options=active_layers, key="selected_color_corr3") if active_layers else None
 else:
     selected_color_layer = None
 
+# ----------------------------------------------------------------------------
+# 8) Traitement de l'image et application des corrections
+# ----------------------------------------------------------------------------
 st.title("Correction Sélective – Mode Multicouche Dynamique")
-
-# ----------------------------------------------------------------------------
-# 8) Chargement de l'image et calcul des résultats
-# ----------------------------------------------------------------------------
 uploaded_file = st.file_uploader("Téléversez une image (JPEG/PNG)", type=["jpg", "jpeg", "png"])
 if uploaded_file is not None:
     pil_img = Image.open(uploaded_file).convert("RGB")
     original_bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-
     st.subheader("Image originale")
     st.image(pil_img, use_container_width=True)
 
-    # === Correction 1 : Application sur l'image originale ===
+    # --- Correction 1 sur l'image d'origine ---
     layer_results_corr1 = {}
     for layer in layer_names:
         if layer_params_corr1[layer]["active"]:
@@ -246,23 +284,19 @@ if uploaded_file is not None:
             result = apply_selective_color(original_bgr, mask, params["c_adj"], params["m_adj"],
                                            params["y_adj"], params["k_adj"], params["method"])
             layer_results_corr1[layer] = {"mask": mask, "result": result}
-
     combined_main_corr1 = original_bgr.copy()
     for layer in layer_results_corr1:
         mask = layer_results_corr1[layer]["mask"]
         combined_main_corr1[mask != 0] = layer_results_corr1[layer]["result"][mask != 0]
-
     h, w = original_bgr.shape[:2]
     combined_color_corr1 = np.full((h, w, 3), 255, dtype=np.uint8)
     for layer in layer_results_corr1:
         mask = layer_results_corr1[layer]["mask"]
         combined_color_corr1[mask != 0] = layer_results_corr1[layer]["result"][mask != 0]
-
     if main_display_mode == "Couche active" and selected_main_layer in layer_results_corr1:
         main_display_corr1 = layer_results_corr1[selected_main_layer]["result"]
     else:
         main_display_corr1 = combined_main_corr1
-
     if color_layer_display_mode == "Couche active" and selected_color_layer in layer_results_corr1:
         single_color = np.full((h, w, 3), 255, dtype=np.uint8)
         mask = layer_results_corr1[selected_color_layer]["mask"]
@@ -270,8 +304,6 @@ if uploaded_file is not None:
         color_display_corr1 = single_color
     else:
         color_display_corr1 = combined_color_corr1
-
-    # Application des modifs classiques (Corr 1) si activées
     if classic_active_corr1:
         contrast_factor_corr1 = contrast_corr1 / 100.0
         saturation_factor_corr1 = saturation_corr1 / 100.0
@@ -284,71 +316,106 @@ if uploaded_file is not None:
                                                           contrast=contrast_factor_corr1,
                                                           saturation=saturation_factor_corr1,
                                                           gamma=gamma_factor_corr1)
-
-    # --- Si l'utilisateur choisit uniquement Correction 1 ---
-    if correction_mode == "Correction 1 seule":
+    # Si seule Correction 1 est choisie
+    if correction_sequence == "Correction 1 seule":
         st.subheader("Image modifiée (Correction 1)")
         st.image(cv2.cvtColor(main_display_corr1, cv2.COLOR_BGR2RGB), use_container_width=True)
         st.subheader("Couche de couleur (fond blanc) - Correction 1")
         st.image(cv2.cvtColor(color_display_corr1, cv2.COLOR_BGR2RGB), use_container_width=True)
 
-    # --- Sinon, Correction 2 en chaîne ---
-    else:
-        # Si aucun résultat de Correction 1 n'existe (théoriquement impossible si image chargée)
-        if main_display_corr1 is None:
-            st.write("Appliquer Correction 1")
+    # --- Correction 2 en chaîne (à partir de Corr 1) ---
+    elif correction_sequence in ["Correction 2 (en chaîne)", "Correction 3 (en chaîne)"]:
+        corr1_source = main_display_corr1.copy()
+        layer_results_corr2 = {}
+        for layer in layer_names:
+            if layer_params_corr2[layer]["active"]:
+                mask = get_color_mask(corr1_source, layer)
+                params = layer_params_corr2[layer]
+                result = apply_selective_color(corr1_source, mask, params["c_adj"], params["m_adj"],
+                                               params["y_adj"], params["k_adj"], params["method"])
+                layer_results_corr2[layer] = {"mask": mask, "result": result}
+        combined_main_corr2 = corr1_source.copy()
+        for layer in layer_results_corr2:
+            mask = layer_results_corr2[layer]["mask"]
+            combined_main_corr2[mask != 0] = layer_results_corr2[layer]["result"][mask != 0]
+        combined_color_corr2 = np.full((h, w, 3), 255, dtype=np.uint8)
+        for layer in layer_results_corr2:
+            mask = layer_results_corr2[layer]["mask"]
+            combined_color_corr2[mask != 0] = layer_results_corr2[layer]["result"][mask != 0]
+        if main_display_mode == "Couche active" and selected_main_layer in layer_results_corr2:
+            main_display_corr2 = layer_results_corr2[selected_main_layer]["result"]
         else:
-            # Utiliser le résultat de Correction 1 comme image source pour Correction 2
-            corr1_source = main_display_corr1.copy()
-            layer_results_corr2 = {}
-            for layer in layer_names:
-                if layer_params_corr2[layer]["active"]:
-                    mask = get_color_mask(corr1_source, layer)
-                    params = layer_params_corr2[layer]
-                    result = apply_selective_color(corr1_source, mask, params["c_adj"], params["m_adj"],
-                                                   params["y_adj"], params["k_adj"], params["method"])
-                    layer_results_corr2[layer] = {"mask": mask, "result": result}
-
-            combined_main_corr2 = corr1_source.copy()
-            for layer in layer_results_corr2:
-                mask = layer_results_corr2[layer]["mask"]
-                combined_main_corr2[mask != 0] = layer_results_corr2[layer]["result"][mask != 0]
-
-            combined_color_corr2 = np.full((h, w, 3), 255, dtype=np.uint8)
-            for layer in layer_results_corr2:
-                mask = layer_results_corr2[layer]["mask"]
-                combined_color_corr2[mask != 0] = layer_results_corr2[layer]["result"][mask != 0]
-
-            if main_display_mode == "Couche active" and selected_main_layer in layer_results_corr2:
-                main_display_corr2 = layer_results_corr2[selected_main_layer]["result"]
-            else:
-                main_display_corr2 = combined_main_corr2
-
-            if color_layer_display_mode == "Couche active" and selected_color_layer in layer_results_corr2:
-                single_color_corr2 = np.full((h, w, 3), 255, dtype=np.uint8)
-                mask = layer_results_corr2[selected_color_layer]["mask"]
-                single_color_corr2[mask != 0] = layer_results_corr2[selected_color_layer]["result"][mask != 0]
-                color_display_corr2 = single_color_corr2
-            else:
-                color_display_corr2 = combined_color_corr2
-
-            # Application des modifs classiques (Corr 2) si activées
-            if classic_active_corr2:
-                contrast_factor_corr2 = contrast_corr2 / 100.0
-                saturation_factor_corr2 = saturation_corr2 / 100.0
-                gamma_factor_corr2 = gamma_corr2 / 100.0
-                main_display_corr2 = apply_classic_modifications(main_display_corr2, brightness=brightness_corr2,
-                                                                 contrast=contrast_factor_corr2,
-                                                                 saturation=saturation_factor_corr2,
-                                                                 gamma=gamma_factor_corr2)
-                color_display_corr2 = apply_classic_modifications(color_display_corr2, brightness=brightness_corr2,
-                                                                  contrast=contrast_factor_corr2,
-                                                                  saturation=saturation_factor_corr2,
-                                                                  gamma=gamma_factor_corr2)
-
+            main_display_corr2 = combined_main_corr2
+        if color_layer_display_mode == "Couche active" and selected_color_layer in layer_results_corr2:
+            single_color_corr2 = np.full((h, w, 3), 255, dtype=np.uint8)
+            mask = layer_results_corr2[selected_color_layer]["mask"]
+            single_color_corr2[mask != 0] = layer_results_corr2[selected_color_layer]["result"][mask != 0]
+            color_display_corr2 = single_color_corr2
+        else:
+            color_display_corr2 = combined_color_corr2
+        if classic_active_corr2:
+            contrast_factor_corr2 = contrast_corr2 / 100.0
+            saturation_factor_corr2 = saturation_corr2 / 100.0
+            gamma_factor_corr2 = gamma_corr2 / 100.0
+            main_display_corr2 = apply_classic_modifications(main_display_corr2, brightness=brightness_corr2,
+                                                             contrast=contrast_factor_corr2,
+                                                             saturation=saturation_factor_corr2,
+                                                             gamma=gamma_factor_corr2)
+            color_display_corr2 = apply_classic_modifications(color_display_corr2, brightness=brightness_corr2,
+                                                              contrast=contrast_factor_corr2,
+                                                              saturation=saturation_factor_corr2,
+                                                              gamma=gamma_factor_corr2)
+        # Si on a choisi Correction 2 uniquement
+        if correction_sequence == "Correction 2 (en chaîne)":
             st.subheader("Image modifiée (Correction 2)")
             st.image(cv2.cvtColor(main_display_corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
             st.subheader("Couche de couleur (fond blanc) - Correction 2")
             st.image(cv2.cvtColor(color_display_corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
+        # --- Sinon, on passe à Correction 3 ---
+        else:
+            corr2_source = main_display_corr2.copy()
+            layer_results_corr3 = {}
+            for layer in layer_names:
+                if layer_params_corr3[layer]["active"]:
+                    mask = get_color_mask(corr2_source, layer)
+                    params = layer_params_corr3[layer]
+                    result = apply_selective_color(corr2_source, mask, params["c_adj"], params["m_adj"],
+                                                   params["y_adj"], params["k_adj"], params["method"])
+                    layer_results_corr3[layer] = {"mask": mask, "result": result}
+            combined_main_corr3 = corr2_source.copy()
+            for layer in layer_results_corr3:
+                mask = layer_results_corr3[layer]["mask"]
+                combined_main_corr3[mask != 0] = layer_results_corr3[layer]["result"][mask != 0]
+            combined_color_corr3 = np.full((h, w, 3), 255, dtype=np.uint8)
+            for layer in layer_results_corr3:
+                mask = layer_results_corr3[layer]["mask"]
+                combined_color_corr3[mask != 0] = layer_results_corr3[layer]["result"][mask != 0]
+            if main_display_mode == "Couche active" and selected_main_layer in layer_results_corr3:
+                main_display_corr3 = layer_results_corr3[selected_main_layer]["result"]
+            else:
+                main_display_corr3 = combined_main_corr3
+            if color_layer_display_mode == "Couche active" and selected_color_layer in layer_results_corr3:
+                single_color_corr3 = np.full((h, w, 3), 255, dtype=np.uint8)
+                mask = layer_results_corr3[selected_color_layer]["mask"]
+                single_color_corr3[mask != 0] = layer_results_corr3[selected_color_layer]["result"][mask != 0]
+                color_display_corr3 = single_color_corr3
+            else:
+                color_display_corr3 = combined_color_corr3
+            if classic_active_corr3:
+                contrast_factor_corr3 = contrast_corr3 / 100.0
+                saturation_factor_corr3 = saturation_corr3 / 100.0
+                gamma_factor_corr3 = gamma_corr3 / 100.0
+                main_display_corr3 = apply_classic_modifications(main_display_corr3, brightness=brightness_corr3,
+                                                                 contrast=contrast_factor_corr3,
+                                                                 saturation=saturation_factor_corr3,
+                                                                 gamma=gamma_factor_corr3)
+                color_display_corr3 = apply_classic_modifications(color_display_corr3, brightness=brightness_corr3,
+                                                                  contrast=contrast_factor_corr3,
+                                                                  saturation=saturation_factor_corr3,
+                                                                  gamma=gamma_factor_corr3)
+            st.subheader("Image modifiée (Correction 3)")
+            st.image(cv2.cvtColor(main_display_corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
+            st.subheader("Couche de couleur (fond blanc) - Correction 3")
+            st.image(cv2.cvtColor(color_display_corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
 else:
     st.write("Veuillez téléverser une image pour commencer.")
