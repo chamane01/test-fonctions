@@ -7,13 +7,13 @@ from PIL import Image
 # 1) Définir les gammes de couleurs (approximation HSV ou via V/S)
 # ----------------------------------------------------------------------------
 color_ranges = {
-    "Rouges":   [((0,   50,  50), (10,  255, 255)),
-                 ((170, 50,  50), (180, 255, 255))],
-    "Jaunes":   [((20,  50,  50), (35,  255, 255))],
-    "Verts":    [((35,  50,  50), (85,  255, 255))],
-    "Cyans":    [((85,  50,  50), (100, 255, 255))],
-    "Bleus":    [((100, 50,  50), (130, 255, 255))],
-    "Magentas": [((130, 50,  50), (170, 255, 255))],
+    "Rouges":   [((0, 50, 50), (10, 255, 255)),
+                 ((170, 50, 50), (180, 255, 255))],
+    "Jaunes":   [((20, 50, 50), (35, 255, 255))],
+    "Verts":    [((35, 50, 50), (85, 255, 255))],
+    "Cyans":    [((85, 50, 50), (100, 255, 255))],
+    "Bleus":    [((100, 50, 50), (130, 255, 255))],
+    "Magentas": [((130, 50, 50), (170, 255, 255))],
     "Blancs":   "whites",
     "Neutres":  "neutrals",
     "Noirs":    "blacks"
@@ -136,7 +136,7 @@ st.sidebar.subheader("Correction 1")
 with st.sidebar.expander("Paramètres par Couche (Corr 1)"):
     layer_params_corr1 = {}
     for layer in layer_names:
-        with st.expander(f"Couche {layer}"):
+        with st.sidebar.expander(f"Couche {layer}"):
             active = st.checkbox("Activer", value=False, key=f"active_corr1_{layer}")
             if active:
                 c_adj = st.slider("Cyan", -100, 100, 0, key=f"c_corr1_{layer}")
@@ -164,13 +164,13 @@ with st.sidebar.expander("Modifications Classiques (Corr 1)"):
     else:
         brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1 = 0, 100, 100, 100
 
-# ----- Correction 2 (affichée si nécessaire) -----
+# ----- Correction 2 (si applicable) -----
 if correction_sequence in ["Correction 2 (en chaîne)", "Correction 3 (en chaîne)"]:
     st.sidebar.subheader("Correction 2")
     with st.sidebar.expander("Paramètres par Couche (Corr 2)"):
         layer_params_corr2 = {}
         for layer in layer_names:
-            with st.expander(f"Couche {layer}"):
+            with st.sidebar.expander(f"Couche {layer}"):
                 active = st.checkbox("Activer", value=False, key=f"active_corr2_{layer}")
                 if active:
                     c_adj = st.slider("Cyan", -100, 100, 0, key=f"c_corr2_{layer}")
@@ -198,13 +198,13 @@ if correction_sequence in ["Correction 2 (en chaîne)", "Correction 3 (en chaîn
         else:
             brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2 = 0, 100, 100, 100
 
-# ----- Correction 3 (affichée uniquement si sélectionnée) -----
+# ----- Correction 3 (si applicable) -----
 if correction_sequence == "Correction 3 (en chaîne)":
     st.sidebar.subheader("Correction 3")
     with st.sidebar.expander("Paramètres par Couche (Corr 3)"):
         layer_params_corr3 = {}
         for layer in layer_names:
-            with st.expander(f"Couche {layer}"):
+            with st.sidebar.expander(f"Couche {layer}"):
                 active = st.checkbox("Activer", value=False, key=f"active_corr3_{layer}")
                 if active:
                     c_adj = st.slider("Cyan", -100, 100, 0, key=f"c_corr3_{layer}")
@@ -245,7 +245,7 @@ if main_display_mode == "Couche active":
     elif correction_sequence == "Correction 2 (en chaîne)":
         active_layers = [layer for layer in layer_names if layer_params_corr2[layer]["active"]]
         selected_main_layer = st.sidebar.selectbox("Sélectionnez la couche (Corr 2)", options=active_layers, key="selected_main_corr2") if active_layers else None
-    else:  # Correction 3
+    else:
         active_layers = [layer for layer in layer_names if layer_params_corr3[layer]["active"]]
         selected_main_layer = st.sidebar.selectbox("Sélectionnez la couche (Corr 3)", options=active_layers, key="selected_main_corr3") if active_layers else None
 else:
@@ -275,7 +275,7 @@ if uploaded_file is not None:
     st.subheader("Image originale")
     st.image(pil_img, use_container_width=True)
 
-    # --- Correction 1 sur l'image d'origine ---
+    # --- Correction 1 ---
     layer_results_corr1 = {}
     for layer in layer_names:
         if layer_params_corr1[layer]["active"]:
@@ -316,7 +316,6 @@ if uploaded_file is not None:
                                                           contrast=contrast_factor_corr1,
                                                           saturation=saturation_factor_corr1,
                                                           gamma=gamma_factor_corr1)
-    # Si seule Correction 1 est choisie
     if correction_sequence == "Correction 1 seule":
         st.subheader("Image modifiée (Correction 1)")
         st.image(cv2.cvtColor(main_display_corr1, cv2.COLOR_BGR2RGB), use_container_width=True)
@@ -365,13 +364,12 @@ if uploaded_file is not None:
                                                               contrast=contrast_factor_corr2,
                                                               saturation=saturation_factor_corr2,
                                                               gamma=gamma_factor_corr2)
-        # Si on a choisi Correction 2 uniquement
         if correction_sequence == "Correction 2 (en chaîne)":
             st.subheader("Image modifiée (Correction 2)")
             st.image(cv2.cvtColor(main_display_corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
             st.subheader("Couche de couleur (fond blanc) - Correction 2")
             st.image(cv2.cvtColor(color_display_corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
-        # --- Sinon, on passe à Correction 3 ---
+        # --- Correction 3 en chaîne (à partir de Corr 2) ---
         else:
             corr2_source = main_display_corr2.copy()
             layer_results_corr3 = {}
