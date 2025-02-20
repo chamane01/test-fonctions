@@ -2,13 +2,14 @@ import streamlit as st
 import cv2
 import numpy as np
 from PIL import Image
+import matplotlib.colors as mcolors
 
 def main():
-    st.title("Remplissage de Polygones – Image Magenta sur Fond Blanc")
+    st.title("Remplissage de Polygones – Couleur variable")
     st.write(
         """
-        Cet outil permet de prendre une image où les objets (ex. bâtiments) sont en magenta 
-        sur fond blanc et de produire une image où chaque bloc est rempli, sans trous.
+        Cet outil permet de segmenter puis de remplir des blocs de n'importe quelle couleur 
+        (rouge, jaune, noir, etc.) en les transformant en polygones pleins.
         """
     )
 
@@ -21,29 +22,48 @@ def main():
         st.subheader("Aperçu de l'image originale")
         st.image(pil_img, use_container_width=True)
 
-        # --- Paramètres de seuillage HSV ---
-        st.sidebar.title("Paramètres de seuillage (HSV)")
-        st.sidebar.write("Ajustez pour extraire la zone magenta")
-        h_lower = st.sidebar.slider("H min", 0, 179, 140)
-        s_lower = st.sidebar.slider("S min", 0, 255, 50)
-        v_lower = st.sidebar.slider("V min", 0, 255, 50)
-        h_upper = st.sidebar.slider("H max", 0, 179, 160)
-        s_upper = st.sidebar.slider("S max", 0, 255, 255)
-        v_upper = st.sidebar.slider("V max", 0, 255, 255)
+        # --- Sélecteur de couleur + tolérances ---
+        st.sidebar.title("Sélection de la couleur cible")
+        picked_color = st.sidebar.color_picker("Choisissez la couleur principale à segmenter", "#00FFFF")
+        
+        # Convertir la couleur hex en (R,G,B)
+        rgb_float = mcolors.to_rgb(picked_color)  # Ex. "#ff00ff" => (1.0, 0.0, 1.0)
+        r, g, b = [int(x*255) for x in rgb_float]
+        
+        # Conversion de (B, G, R) en HSV (OpenCV attend BGR)
+        test_patch = np.uint8([[[b, g, r]]])  # patch 1x1
+        hsv_patch = cv2.cvtColor(test_patch, cv2.COLOR_BGR2HSV)[0][0]
+        hue_center, sat_center, val_center = hsv_patch
+        
+        st.sidebar.write("Couleur sélectionnée en HSV : ", (hue_center, sat_center, val_center))
+        
+        # Tolérances sur H, S, V
+        st.sidebar.title("Tolérances HSV")
+        h_tolerance = st.sidebar.slider("Tolérance Hue", 0, 179, 10)
+        s_tolerance = st.sidebar.slider("Tolérance Saturation", 0, 255, 50)
+        v_tolerance = st.sidebar.slider("Tolérance Value", 0, 255, 50)
+
+        # Calcul des bornes HSV (en tenant compte des limites [0,179] pour H et [0,255] pour S,V)
+        lower_h = max(hue_center - h_tolerance, 0)
+        upper_h = min(hue_center + h_tolerance, 179)
+        lower_s = max(sat_center - s_tolerance, 0)
+        upper_s = min(sat_center + s_tolerance, 255)
+        lower_v = max(val_center - v_tolerance, 0)
+        upper_v = min(val_center + v_tolerance, 255)
+
+        lower = np.array([lower_h, lower_s, lower_v], dtype=np.uint8)
+        upper = np.array([upper_h, upper_s, upper_v], dtype=np.uint8)
 
         # --- Paramètres morphologiques (optionnel) ---
         st.sidebar.title("Paramètres Morphologiques")
-        use_morph = st.sidebar.checkbox("Activer un closing morphologique (pour boucher les petits trous)", value=False)
-        morph_kernel = st.sidebar.slider("Taille du kernel", 1, 20, 5)
+        use_morph = st.sidebar.checkbox("Activer un closing morphologique", value=False)
+        morph_kernel = st.sidebar.slider("Taille du kernel (closing)", 1, 20, 5)
 
         # Conversion en HSV et seuillage
         hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-        lower = np.array([h_lower, s_lower, v_lower], dtype=np.uint8)
-        upper = np.array([h_upper, s_upper, v_upper], dtype=np.uint8)
         mask = cv2.inRange(hsv, lower, upper)
 
-        # Optionnel : opération morpho "closing" pour réduire les petits trous
-        # (si vos blocs présentent encore des discontinuités)
+        # Optionnel : opération morpho "closing" pour boucher les petits trous
         if use_morph:
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel, morph_kernel))
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
@@ -57,8 +77,14 @@ def main():
 
         # On reconstruit une image BGR finale : fond blanc
         result_bgr = np.ones_like(img_bgr) * 255
-        # Là où filled_mask == 255, on applique la couleur magenta (BGR = 255,0,255)
-        result_bgr[filled_mask == 255] = (255, 0, 255)
+
+        # Couleur cible en BGR (mêmes R, G, B inversés)
+        # picked_color était en #RRGGBB, on l'a en (r,g,b)
+        # => BGR = (b, g, r)
+        color_bgr = (b, g, r)
+
+        # Là où filled_mask == 255, on applique la couleur sélectionnée
+        result_bgr[filled_mask == 255] = color_bgr
 
         # --- Affichage du résultat ---
         st.subheader("Image avec polygones remplis")
