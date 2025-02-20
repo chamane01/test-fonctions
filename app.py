@@ -79,7 +79,22 @@ def get_color_mask(img_bgr, target_color):
     return mask
 
 # ----------------------------------------------------------------------------
-# 5) Appliquer la correction sélective sur une zone (masque)
+# 5) Suppression des petites composantes connectées (filtrage du bruit)
+# ----------------------------------------------------------------------------
+def remove_small_components(mask, min_area):
+    """
+    Supprime les composantes connectées dont l'aire est inférieure à 'min_area'.
+    """
+    nb_components, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    new_mask = np.zeros_like(mask)
+    for i in range(1, nb_components):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area >= min_area:
+            new_mask[labels == i] = 255
+    return new_mask
+
+# ----------------------------------------------------------------------------
+# 6) Appliquer la correction sélective sur une zone (masque)
 # ----------------------------------------------------------------------------
 def apply_selective_color(img_bgr, mask, c_adj, m_adj, y_adj, k_adj, method="Relative"):
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -109,7 +124,7 @@ def apply_selective_color(img_bgr, mask, c_adj, m_adj, y_adj, k_adj, method="Rel
     return cv2.cvtColor(out_img, cv2.COLOR_RGB2BGR)
 
 # ----------------------------------------------------------------------------
-# 6) Fonction d'application des modifications classiques
+# 7) Appliquer les modifications classiques
 # ----------------------------------------------------------------------------
 def apply_classic_modifications(img, brightness=0, contrast=1.0, saturation=1.0, gamma=1.0):
     img = img.astype(np.float32)
@@ -126,13 +141,42 @@ def apply_classic_modifications(img, brightness=0, contrast=1.0, saturation=1.0,
     return img
 
 # ----------------------------------------------------------------------------
-# 7) Barre latérale : organisation des paramètres
+# 8) Génération d'un PDF cumulatif
+# ----------------------------------------------------------------------------
+def generate_pdf_cumulative(export_text, image_list):
+    """
+    Génère un PDF avec en première page le texte d'export,
+    puis une page par image présente dans image_list.
+    """
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.multi_cell(0, 10, export_text)
+    for img in image_list:
+        pdf.add_page()
+        temp_img_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        cv2.imwrite(temp_img_file.name, cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        pdf.image(temp_img_file.name, x=10, y=10, w=pdf.w - 20)
+        os.unlink(temp_img_file.name)
+    pdf_bytes = pdf.output(dest="S").encode("latin-1")
+    return pdf_bytes
+
+# ----------------------------------------------------------------------------
+# 9) Barre latérale : paramètres et filtres
 # ----------------------------------------------------------------------------
 st.sidebar.title("Paramètres de Correction")
 
-# Choix de la séquence de corrections
+# Séquence de corrections
 correction_sequence = st.sidebar.radio("Séquence de corrections",
                                          options=["Correction 1 seule", "Correction 2 (en chaîne)", "Correction 3 (en chaîne)"])
+
+# Filtrage du bruit
+st.sidebar.subheader("Filtrage du bruit")
+remove_noise_active = st.sidebar.checkbox("Activer le filtrage du bruit", value=False)
+if remove_noise_active:
+    min_area = st.sidebar.slider("Taille minimale des zones (pixels)", 0, 5000, 50)
+else:
+    min_area = 0
 
 # ----- Correction 1 -----
 st.sidebar.subheader("Correction 1")
@@ -268,7 +312,7 @@ else:
     selected_color_layer = None
 
 # ----------------------------------------------------------------------------
-# Fonction d'export : génération du texte et du PDF (avec 3 images : originale, modifiée, couche)
+# Fonction d'export texte (rapport)
 # ----------------------------------------------------------------------------
 def generate_export_text(correction_label, layer_params, classic_active, brightness, contrast, saturation, gamma):
     text = f"Export pour {correction_label}\n\n"
@@ -286,35 +330,8 @@ def generate_export_text(correction_label, layer_params, classic_active, brightn
         text += f"   Gamma: {gamma}\n"
     return text
 
-def generate_pdf(export_text, original_img, main_img, color_img):
-    pdf = FPDF()
-    # Page 1 : texte d'export
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.multi_cell(0, 10, export_text)
-    # Page 2 : Image originale
-    pdf.add_page()
-    temp_img_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    cv2.imwrite(temp_img_file.name, cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB))
-    pdf.image(temp_img_file.name, x=10, y=10, w=pdf.w - 20)
-    os.unlink(temp_img_file.name)
-    # Page 3 : Image modifiée
-    pdf.add_page()
-    temp_img_file2 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    cv2.imwrite(temp_img_file2.name, cv2.cvtColor(main_img, cv2.COLOR_BGR2RGB))
-    pdf.image(temp_img_file2.name, x=10, y=10, w=pdf.w - 20)
-    os.unlink(temp_img_file2.name)
-    # Page 4 : Image de la couche de couleur
-    pdf.add_page()
-    temp_img_file3 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    cv2.imwrite(temp_img_file3.name, cv2.cvtColor(color_img, cv2.COLOR_BGR2RGB))
-    pdf.image(temp_img_file3.name, x=10, y=10, w=pdf.w - 20)
-    os.unlink(temp_img_file3.name)
-    pdf_bytes = pdf.output(dest="S").encode("latin-1")
-    return pdf_bytes
-
 # ----------------------------------------------------------------------------
-# 8) Traitement de l'image et application des corrections
+# Traitement de l'image et application des corrections
 # ----------------------------------------------------------------------------
 st.title("Correction Sélective – Mode Multicouche Dynamique")
 uploaded_file = st.file_uploader("Téléversez une image (JPEG/PNG)", type=["jpg", "jpeg", "png"])
@@ -329,9 +346,13 @@ if uploaded_file is not None:
     for layer in layer_names:
         if layer_params_corr1[layer]["active"]:
             mask = get_color_mask(original_bgr, layer)
+            if remove_noise_active:
+                mask = remove_small_components(mask, min_area)
             params = layer_params_corr1[layer]
-            result = apply_selective_color(original_bgr, mask, params["c_adj"], params["m_adj"],
-                                           params["y_adj"], params["k_adj"], params["method"])
+            result = apply_selective_color(original_bgr, mask,
+                                           params["c_adj"], params["m_adj"],
+                                           params["y_adj"], params["k_adj"],
+                                           params["method"])
             layer_results_corr1[layer] = {"mask": mask, "result": result}
     combined_main_corr1 = original_bgr.copy()
     for layer in layer_results_corr1:
@@ -371,10 +392,10 @@ if uploaded_file is not None:
         st.subheader("Couche de couleur (fond blanc) - Correction 1")
         st.image(cv2.cvtColor(color_display_corr1, cv2.COLOR_BGR2RGB), use_container_width=True)
         
-        # Export de la correction 1
+        # Export Corr 1
         export_text_corr1 = generate_export_text("Correction 1", layer_params_corr1, classic_active_corr1,
                                                  brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
-        pdf_bytes_corr1 = generate_pdf(export_text_corr1, original_bgr, main_display_corr1, color_display_corr1)
+        pdf_bytes_corr1 = generate_pdf_cumulative(export_text_corr1, [original_bgr, main_display_corr1, color_display_corr1])
         st.download_button("Télécharger les paramètres (TXT) - Corr 1",
                            data=export_text_corr1,
                            file_name="export_correction1.txt",
@@ -383,7 +404,6 @@ if uploaded_file is not None:
                            data=pdf_bytes_corr1,
                            file_name="export_correction1.pdf",
                            mime="application/pdf")
-
     # --- Correction 2 en chaîne (à partir de Corr 1) ---
     elif correction_sequence in ["Correction 2 (en chaîne)", "Correction 3 (en chaîne)"]:
         corr1_source = main_display_corr1.copy()
@@ -391,9 +411,13 @@ if uploaded_file is not None:
         for layer in layer_names:
             if layer_params_corr2[layer]["active"]:
                 mask = get_color_mask(corr1_source, layer)
+                if remove_noise_active:
+                    mask = remove_small_components(mask, min_area)
                 params = layer_params_corr2[layer]
-                result = apply_selective_color(corr1_source, mask, params["c_adj"], params["m_adj"],
-                                               params["y_adj"], params["k_adj"], params["method"])
+                result = apply_selective_color(corr1_source, mask,
+                                               params["c_adj"], params["m_adj"],
+                                               params["y_adj"], params["k_adj"],
+                                               params["method"])
                 layer_results_corr2[layer] = {"mask": mask, "result": result}
         combined_main_corr2 = corr1_source.copy()
         for layer in layer_results_corr2:
@@ -431,13 +455,15 @@ if uploaded_file is not None:
         st.subheader("Couche de couleur (fond blanc) - Correction 2")
         st.image(cv2.cvtColor(color_display_corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
         
-        # Export de la correction 2 avec cumul des paramètres de Corr 1 et Corr 2
+        # Export Corr 2 : rapport cumulatif (Corr 1 + Corr 2)
         export_text_corr2 = "Export cumulatif pour Correction 2\n\n"
         export_text_corr2 += generate_export_text("Correction 1", layer_params_corr1, classic_active_corr1,
                                                   brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
         export_text_corr2 += "\n" + generate_export_text("Correction 2", layer_params_corr2, classic_active_corr2,
                                                         brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
-        pdf_bytes_corr2 = generate_pdf(export_text_corr2, original_bgr, main_display_corr2, color_display_corr2)
+        # PDF cumulé : original, Corr 1, Corr 2, et couche de couleur Corr 2
+        pdf_bytes_corr2 = generate_pdf_cumulative(export_text_corr2,
+                                                  [original_bgr, main_display_corr1, main_display_corr2, color_display_corr2])
         st.download_button("Télécharger les paramètres (TXT) - Corr 2",
                            data=export_text_corr2,
                            file_name="export_correction2.txt",
@@ -454,9 +480,13 @@ if uploaded_file is not None:
             for layer in layer_names:
                 if layer_params_corr3[layer]["active"]:
                     mask = get_color_mask(corr2_source, layer)
+                    if remove_noise_active:
+                        mask = remove_small_components(mask, min_area)
                     params = layer_params_corr3[layer]
-                    result = apply_selective_color(corr2_source, mask, params["c_adj"], params["m_adj"],
-                                                   params["y_adj"], params["k_adj"], params["method"])
+                    result = apply_selective_color(corr2_source, mask,
+                                                   params["c_adj"], params["m_adj"],
+                                                   params["y_adj"], params["k_adj"],
+                                                   params["method"])
                     layer_results_corr3[layer] = {"mask": mask, "result": result}
             combined_main_corr3 = corr2_source.copy()
             for layer in layer_results_corr3:
@@ -494,7 +524,7 @@ if uploaded_file is not None:
             st.subheader("Couche de couleur (fond blanc) - Correction 3")
             st.image(cv2.cvtColor(color_display_corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
             
-            # Export de la correction 3 avec cumul des paramètres de Corr 1, Corr 2 et Corr 3
+            # Export Corr 3 : rapport cumulatif (Corr 1 + Corr 2 + Corr 3)
             export_text_corr3 = "Export cumulatif pour Correction 3\n\n"
             export_text_corr3 += generate_export_text("Correction 1", layer_params_corr1, classic_active_corr1,
                                                       brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
@@ -502,7 +532,9 @@ if uploaded_file is not None:
                                                             brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
             export_text_corr3 += "\n" + generate_export_text("Correction 3", layer_params_corr3, classic_active_corr3,
                                                             brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3)
-            pdf_bytes_corr3 = generate_pdf(export_text_corr3, original_bgr, main_display_corr3, color_display_corr3)
+            # PDF cumulé : original, Corr 1, Corr 2, Corr 3 et couche de couleur Corr 3
+            pdf_bytes_corr3 = generate_pdf_cumulative(export_text_corr3,
+                                                      [original_bgr, main_display_corr1, main_display_corr2, main_display_corr3, color_display_corr3])
             st.download_button("Télécharger les paramètres (TXT) - Corr 3",
                                data=export_text_corr3,
                                file_name="export_correction3.txt",
