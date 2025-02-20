@@ -170,13 +170,7 @@ st.sidebar.title("Paramètres de Correction")
 correction_sequence = st.sidebar.radio("Séquence de corrections",
                                          options=["Correction 1 seule", "Correction 2 (en chaîne)", "Correction 3 (en chaîne)"])
 
-# Filtrage du bruit (applicé individuellement pour chaque couleur)
-st.sidebar.subheader("Filtrage du bruit")
-remove_noise_active = st.sidebar.checkbox("Activer le filtrage du bruit", value=False)
-if remove_noise_active:
-    min_area = st.sidebar.slider("Taille minimale des zones (pixels)", 0, 5000, 50)
-else:
-    min_area = 0
+# ----- Pour chaque correction, dans chaque couche, on ajoute le contrôle du filtrage bruit -----
 
 # ----- Correction 1 -----
 st.sidebar.subheader("Correction 1")
@@ -191,15 +185,25 @@ with st.sidebar.expander("Paramètres par Couche (Corr 1)"):
                 y_adj = st.slider("Jaune", -100, 100, 0, key=f"y_corr1_{layer}")
                 k_adj = st.slider("Noir", -100, 100, 0, key=f"k_corr1_{layer}")
                 method = st.radio("Méthode", options=["Relative", "Absolute"], index=0, key=f"method_corr1_{layer}")
+                # --- Contrôle de filtrage du bruit pour cette couche
+                noise_active = st.checkbox("Activer filtrage bruit", value=False, key=f"noise_active_corr1_{layer}")
+                if noise_active:
+                    noise_min_area = st.slider("Taille minimale (pixels)", 0, 5000, 50, key=f"noise_min_corr1_{layer}")
+                else:
+                    noise_min_area = 0
             else:
                 c_adj, m_adj, y_adj, k_adj, method = 0, 0, 0, 0, "Relative"
+                noise_active = False
+                noise_min_area = 0
             layer_params_corr1[layer] = {
                 "active": active,
                 "c_adj": c_adj,
                 "m_adj": m_adj,
                 "y_adj": y_adj,
                 "k_adj": k_adj,
-                "method": method
+                "method": method,
+                "noise_active": noise_active,
+                "noise_min_area": noise_min_area
             }
 with st.sidebar.expander("Modifications Classiques (Corr 1)"):
     classic_active_corr1 = st.checkbox("Activer modifs classiques", key="classic_active_corr1")
@@ -225,15 +229,24 @@ if correction_sequence in ["Correction 2 (en chaîne)", "Correction 3 (en chaîn
                     y_adj = st.slider("Jaune", -100, 100, 0, key=f"y_corr2_{layer}")
                     k_adj = st.slider("Noir", -100, 100, 0, key=f"k_corr2_{layer}")
                     method = st.radio("Méthode", options=["Relative", "Absolute"], index=0, key=f"method_corr2_{layer}")
+                    noise_active = st.checkbox("Activer filtrage bruit", value=False, key=f"noise_active_corr2_{layer}")
+                    if noise_active:
+                        noise_min_area = st.slider("Taille minimale (pixels)", 0, 5000, 50, key=f"noise_min_corr2_{layer}")
+                    else:
+                        noise_min_area = 0
                 else:
                     c_adj, m_adj, y_adj, k_adj, method = 0, 0, 0, 0, "Relative"
+                    noise_active = False
+                    noise_min_area = 0
                 layer_params_corr2[layer] = {
                     "active": active,
                     "c_adj": c_adj,
                     "m_adj": m_adj,
                     "y_adj": y_adj,
                     "k_adj": k_adj,
-                    "method": method
+                    "method": method,
+                    "noise_active": noise_active,
+                    "noise_min_area": noise_min_area
                 }
     with st.sidebar.expander("Modifications Classiques (Corr 2)"):
         classic_active_corr2 = st.checkbox("Activer modifs classiques", key="classic_active_corr2")
@@ -259,15 +272,24 @@ if correction_sequence == "Correction 3 (en chaîne)":
                     y_adj = st.slider("Jaune", -100, 100, 0, key=f"y_corr3_{layer}")
                     k_adj = st.slider("Noir", -100, 100, 0, key=f"k_corr3_{layer}")
                     method = st.radio("Méthode", options=["Relative", "Absolute"], index=0, key=f"method_corr3_{layer}")
+                    noise_active = st.checkbox("Activer filtrage bruit", value=False, key=f"noise_active_corr3_{layer}")
+                    if noise_active:
+                        noise_min_area = st.slider("Taille minimale (pixels)", 0, 5000, 50, key=f"noise_min_corr3_{layer}")
+                    else:
+                        noise_min_area = 0
                 else:
                     c_adj, m_adj, y_adj, k_adj, method = 0, 0, 0, 0, "Relative"
+                    noise_active = False
+                    noise_min_area = 0
                 layer_params_corr3[layer] = {
                     "active": active,
                     "c_adj": c_adj,
                     "m_adj": m_adj,
                     "y_adj": y_adj,
                     "k_adj": k_adj,
-                    "method": method
+                    "method": method,
+                    "noise_active": noise_active,
+                    "noise_min_area": noise_min_area
                 }
     with st.sidebar.expander("Modifications Classiques (Corr 3)"):
         classic_active_corr3 = st.checkbox("Activer modifs classiques", key="classic_active_corr3")
@@ -320,7 +342,8 @@ def generate_export_text(correction_label, layer_params, classic_active, brightn
     for layer in layer_names:
         params = layer_params.get(layer, None)
         if params and params["active"]:
-            text += f" - Couche {layer}: Cyan: {params['c_adj']}, Magenta: {params['m_adj']}, Jaune: {params['y_adj']}, Noir: {params['k_adj']}, Méthode: {params['method']}\n"
+            text += f" - Couche {layer}: Cyan: {params['c_adj']}, Magenta: {params['m_adj']}, Jaune: {params['y_adj']}, Noir: {params['k_adj']}, Méthode: {params['method']}"
+            text += f", Filtrage bruit: {params['noise_active']} (min: {params['noise_min_area']})\n"
     text += "\nModifications Classiques:\n"
     text += f" - Actif: {classic_active}\n"
     if classic_active:
@@ -346,8 +369,8 @@ if uploaded_file is not None:
     for layer in layer_names:
         if layer_params_corr1[layer]["active"]:
             mask = get_color_mask(original_bgr, layer)
-            if remove_noise_active:
-                mask = remove_small_components(mask, min_area)
+            if layer_params_corr1[layer]["noise_active"]:
+                mask = remove_small_components(mask, layer_params_corr1[layer]["noise_min_area"])
             params = layer_params_corr1[layer]
             result = apply_selective_color(original_bgr, mask,
                                            params["c_adj"], params["m_adj"],
@@ -411,8 +434,8 @@ if uploaded_file is not None:
         for layer in layer_names:
             if layer_params_corr2[layer]["active"]:
                 mask = get_color_mask(corr1_source, layer)
-                if remove_noise_active:
-                    mask = remove_small_components(mask, min_area)
+                if layer_params_corr2[layer]["noise_active"]:
+                    mask = remove_small_components(mask, layer_params_corr2[layer]["noise_min_area"])
                 params = layer_params_corr2[layer]
                 result = apply_selective_color(corr1_source, mask,
                                                params["c_adj"], params["m_adj"],
@@ -461,7 +484,6 @@ if uploaded_file is not None:
                                                   brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
         export_text_corr2 += "\n" + generate_export_text("Correction 2", layer_params_corr2, classic_active_corr2,
                                                         brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
-        # PDF cumulé : [original, Corr1 main, Corr1 couleur, Corr2 main, Corr2 couleur]
         pdf_bytes_corr2 = generate_pdf_cumulative(export_text_corr2,
                                                   [original_bgr, main_display_corr1, color_display_corr1, main_display_corr2, color_display_corr2])
         st.download_button("Télécharger les paramètres (TXT) - Corr 2",
@@ -480,8 +502,8 @@ if uploaded_file is not None:
             for layer in layer_names:
                 if layer_params_corr3[layer]["active"]:
                     mask = get_color_mask(corr2_source, layer)
-                    if remove_noise_active:
-                        mask = remove_small_components(mask, min_area)
+                    if layer_params_corr3[layer]["noise_active"]:
+                        mask = remove_small_components(mask, layer_params_corr3[layer]["noise_min_area"])
                     params = layer_params_corr3[layer]
                     result = apply_selective_color(corr2_source, mask,
                                                    params["c_adj"], params["m_adj"],
@@ -532,7 +554,6 @@ if uploaded_file is not None:
                                                             brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
             export_text_corr3 += "\n" + generate_export_text("Correction 3", layer_params_corr3, classic_active_corr3,
                                                             brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3)
-            # PDF cumulé : [original, Corr1 main, Corr1 couleur, Corr2 main, Corr2 couleur, Corr3 main, Corr3 couleur]
             pdf_bytes_corr3 = generate_pdf_cumulative(export_text_corr3,
                                                       [original_bgr, main_display_corr1, color_display_corr1,
                                                        main_display_corr2, color_display_corr2,
