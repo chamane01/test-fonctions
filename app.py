@@ -49,7 +49,7 @@ def cmyk_to_rgb(c, m, y, k):
     return (int(r_ * 255), int(g_ * 255), int(b_ * 255))
 
 # ----------------------------------------------------------------------------
-# 3) Masque pour les zones spéciales (Blancs, Neutres, Noirs)
+# 3) Masques pour zones spéciales et couleur ciblée
 # ----------------------------------------------------------------------------
 def mask_special_zones(img_hsv, zone):
     H, S, V = cv2.split(img_hsv)
@@ -62,9 +62,6 @@ def mask_special_zones(img_hsv, zone):
         mask[(S < 50) & (V >= 50) & (V <= 200)] = 255
     return mask
 
-# ----------------------------------------------------------------------------
-# 4) Récupérer le masque pour une gamme de couleur donnée
-# ----------------------------------------------------------------------------
 def get_color_mask(img_bgr, target_color):
     img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     if target_color in ["Blancs", "Neutres", "Noirs"]:
@@ -78,8 +75,24 @@ def get_color_mask(img_bgr, target_color):
             mask = cv2.bitwise_or(mask, temp_mask)
     return mask
 
+def get_specific_color_mask(img_bgr, target_hex, tolerance):
+    """
+    Génère un masque pour les pixels dont la teinte est proche de la couleur sélectionnée.
+    On compare la composante H en prenant en compte le caractère circulaire de la teinte.
+    """
+    # Convertir le code hexadécimal en tuple RGB, puis en BGR
+    target_rgb = tuple(int(target_hex.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+    target_bgr = (target_rgb[2], target_rgb[1], target_rgb[0])
+    target_hsv = cv2.cvtColor(np.uint8([[target_bgr]]), cv2.COLOR_BGR2HSV)[0][0]
+    img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    # Calcul de la différence sur la composante H en tenant compte du cycle (0-180)
+    diff = cv2.absdiff(img_hsv[:,:,0], np.uint8(target_hsv[0]))
+    diff = np.minimum(diff, 180 - diff)
+    mask = cv2.inRange(diff, 0, tolerance)
+    return mask
+
 # ----------------------------------------------------------------------------
-# 5) Appliquer la correction sélective sur une zone (masque)
+# 4) Appliquer la correction sélective sur une zone (masque)
 # ----------------------------------------------------------------------------
 def apply_selective_color(img_bgr, mask, c_adj, m_adj, y_adj, k_adj, method="Relative"):
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -109,7 +122,7 @@ def apply_selective_color(img_bgr, mask, c_adj, m_adj, y_adj, k_adj, method="Rel
     return cv2.cvtColor(out_img, cv2.COLOR_RGB2BGR)
 
 # ----------------------------------------------------------------------------
-# 6) Fonction d'application des modifications classiques
+# 5) Fonction d'application des modifications classiques
 # ----------------------------------------------------------------------------
 def apply_classic_modifications(img, brightness=0, contrast=1.0, saturation=1.0, gamma=1.0):
     img = img.astype(np.float32)
@@ -126,7 +139,7 @@ def apply_classic_modifications(img, brightness=0, contrast=1.0, saturation=1.0,
     return img
 
 # ----------------------------------------------------------------------------
-# 7) Barre latérale : organisation des paramètres
+# 6) Barre latérale : organisation des paramètres de correction
 # ----------------------------------------------------------------------------
 st.sidebar.title("Paramètres de Correction")
 
@@ -234,6 +247,22 @@ if correction_sequence == "Correction 3 (en chaîne)":
             gamma_corr3 = st.slider("Gamma", 50, 150, 100, key="gamma_corr3")
         else:
             brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3 = 0, 100, 100, 100
+
+# ----------------------------------------------------------------------------
+# 7) Section : Modification couleur spécifique
+# ----------------------------------------------------------------------------
+st.sidebar.markdown("---")
+st.sidebar.subheader("Modification couleur spécifique")
+active_specific = st.sidebar.checkbox("Activer modification couleur spécifique", key="active_specific")
+if active_specific:
+    specific_color = st.sidebar.color_picker("Sélectionnez la couleur", "#FF0000", key="specific_color")
+    specific_tolerance = st.sidebar.slider("Tolérance", 0, 100, 30, key="specific_tolerance")
+    # Paramètres de modification pour la couleur spécifique
+    c_adj_specific = st.sidebar.slider("Cyan (Spécifique)", -100, 100, 0, key="c_adj_specific")
+    m_adj_specific = st.sidebar.slider("Magenta (Spécifique)", -100, 100, 0, key="m_adj_specific")
+    y_adj_specific = st.sidebar.slider("Jaune (Spécifique)", -100, 100, 0, key="y_adj_specific")
+    k_adj_specific = st.sidebar.slider("Noir (Spécifique)", -100, 100, 0, key="k_adj_specific")
+    method_specific = st.sidebar.radio("Méthode (Spécifique)", options=["Relative", "Absolute"], index=0, key="method_specific")
 
 # ----- Mode d'affichage -----
 st.sidebar.markdown("---")
@@ -419,7 +448,19 @@ if uploaded_file is not None:
             st.subheader("Couche de couleur (fond blanc) - Correction 3")
             st.image(cv2.cvtColor(color_display_corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
 
-    # ----- Section Export -----
+    # --- Modification couleur spécifique (appliquée sur l'image d'origine) ---
+    if active_specific:
+        mask_specific = get_specific_color_mask(original_bgr, specific_color, specific_tolerance)
+        specific_result = apply_selective_color(original_bgr, mask_specific, c_adj_specific, m_adj_specific,
+                                                y_adj_specific, k_adj_specific, method_specific)
+        st.subheader("Modification Couleur Spécifique")
+        st.image(cv2.cvtColor(specific_result, cv2.COLOR_BGR2RGB), use_container_width=True)
+
+    # ----------------------------------------------------------------------------
+    # 9) Section Export : Générer un rapport (TXT + PDF) incluant les paramètres,
+    #    l'image exportée (selon la correction choisie) ET, si activée, le résultat
+    #    de la modification couleur spécifique.
+    # ----------------------------------------------------------------------------
     # Détermination des corrections disponibles selon la séquence choisie
     if correction_sequence == "Correction 1 seule":
         available_exports = ["Correction 1"]
@@ -430,7 +471,6 @@ if uploaded_file is not None:
 
     export_selection = st.sidebar.selectbox("Sélectionnez la correction à exporter", options=available_exports, key="export_selection")
 
-    # Fonction utilitaire pour générer un texte d'export
     def generate_export_text(correction_label, layer_params, classic_active, brightness, contrast, saturation, gamma):
         text = f"Export pour {correction_label}\n\n"
         text += "Paramètres par Couche:\n"
@@ -461,18 +501,34 @@ if uploaded_file is not None:
                                            brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3)
         export_image = main_display_corr3
 
-    # Génération du PDF incluant le texte et l'image
+    # Si modification couleur spécifique est activée, ajouter ses paramètres au texte
+    if active_specific:
+        export_text += "\nModification Couleur Spécifique:\n"
+        export_text += f" - Couleur sélectionnée: {specific_color}\n"
+        export_text += f" - Tolérance: {specific_tolerance}\n"
+        export_text += f" - Cyan: {c_adj_specific}, Magenta: {m_adj_specific}, Jaune: {y_adj_specific}, Noir: {k_adj_specific}, Méthode: {method_specific}\n"
+
+    # Création du PDF avec FPDF
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     pdf.multi_cell(0, 10, export_text)
-    # Enregistrer temporairement l'image à exporter
+    # Sauvegarde temporaire de l'image exportée
     temp_img_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     cv2.imwrite(temp_img_file.name, export_image)
-    # Ajouter l'image au PDF (en ajustant la largeur)
+    # Ajout de l'image exportée
     pdf.image(temp_img_file.name, x=10, y=pdf.get_y() + 10, w=pdf.w - 20)
+    os.unlink(temp_img_file.name)
+    # Si la modification couleur spécifique est activée, ajouter son image sur une nouvelle page
+    if active_specific:
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(0, 10, "Résultat Modification Couleur Spécifique", ln=True)
+        temp_img_file2 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        cv2.imwrite(temp_img_file2.name, specific_result)
+        pdf.image(temp_img_file2.name, x=10, y=pdf.get_y() + 10, w=pdf.w - 20)
+        os.unlink(temp_img_file2.name)
     pdf_bytes = pdf.output(dest="S").encode("latin-1")
-    os.unlink(temp_img_file.name)  # suppression du fichier temporaire
 
     st.download_button("Télécharger les paramètres (TXT)",
                        data=export_text,
