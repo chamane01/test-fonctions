@@ -268,6 +268,45 @@ else:
     selected_color_layer = None
 
 # ----------------------------------------------------------------------------
+# Fonction d'export : génération du texte et du PDF (avec image de correction et image de couche)
+# ----------------------------------------------------------------------------
+def generate_export_text(correction_label, layer_params, classic_active, brightness, contrast, saturation, gamma):
+    text = f"Export pour {correction_label}\n\n"
+    text += "Paramètres par Couche:\n"
+    for layer in layer_names:
+        params = layer_params.get(layer, None)
+        if params and params["active"]:
+            text += f" - Couche {layer}: Cyan: {params['c_adj']}, Magenta: {params['m_adj']}, Jaune: {params['y_adj']}, Noir: {params['k_adj']}, Méthode: {params['method']}\n"
+    text += "\nModifications Classiques:\n"
+    text += f" - Actif: {classic_active}\n"
+    if classic_active:
+        text += f"   Luminosité: {brightness}\n"
+        text += f"   Contraste: {contrast}\n"
+        text += f"   Saturation: {saturation}\n"
+        text += f"   Gamma: {gamma}\n"
+    return text
+
+def generate_pdf(export_text, main_img, color_img):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.multi_cell(0, 10, export_text)
+    y = pdf.get_y() + 10
+    # Intégrer l'image de correction principale
+    temp_img_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    cv2.imwrite(temp_img_file.name, main_img)
+    pdf.image(temp_img_file.name, x=10, y=y, w=pdf.w - 20)
+    os.unlink(temp_img_file.name)
+    # Intégrer l'image de la couche de couleur
+    y2 = pdf.get_y() + 10
+    temp_img_file2 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    cv2.imwrite(temp_img_file2.name, color_img)
+    pdf.image(temp_img_file2.name, x=10, y=y2, w=pdf.w - 20)
+    os.unlink(temp_img_file2.name)
+    pdf_bytes = pdf.output(dest="S").encode("latin-1")
+    return pdf_bytes
+
+# ----------------------------------------------------------------------------
 # 8) Traitement de l'image et application des corrections
 # ----------------------------------------------------------------------------
 st.title("Correction Sélective – Mode Multicouche Dynamique")
@@ -324,6 +363,19 @@ if uploaded_file is not None:
         st.image(cv2.cvtColor(main_display_corr1, cv2.COLOR_BGR2RGB), use_container_width=True)
         st.subheader("Couche de couleur (fond blanc) - Correction 1")
         st.image(cv2.cvtColor(color_display_corr1, cv2.COLOR_BGR2RGB), use_container_width=True)
+        
+        # Export de la correction 1
+        export_text_corr1 = generate_export_text("Correction 1", layer_params_corr1, classic_active_corr1,
+                                                 brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
+        pdf_bytes_corr1 = generate_pdf(export_text_corr1, main_display_corr1, color_display_corr1)
+        st.download_button("Télécharger les paramètres (TXT) - Corr 1",
+                           data=export_text_corr1,
+                           file_name="export_correction1.txt",
+                           mime="text/plain")
+        st.download_button("Télécharger le rapport (PDF) - Corr 1",
+                           data=pdf_bytes_corr1,
+                           file_name="export_correction1.pdf",
+                           mime="application/pdf")
 
     # --- Correction 2 en chaîne (à partir de Corr 1) ---
     elif correction_sequence in ["Correction 2 (en chaîne)", "Correction 3 (en chaîne)"]:
@@ -367,13 +419,26 @@ if uploaded_file is not None:
                                                               contrast=contrast_factor_corr2,
                                                               saturation=saturation_factor_corr2,
                                                               gamma=gamma_factor_corr2)
-        if correction_sequence == "Correction 2 (en chaîne)":
-            st.subheader("Image modifiée (Correction 2)")
-            st.image(cv2.cvtColor(main_display_corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
-            st.subheader("Couche de couleur (fond blanc) - Correction 2")
-            st.image(cv2.cvtColor(color_display_corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
+        st.subheader("Image modifiée (Correction 2)")
+        st.image(cv2.cvtColor(main_display_corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
+        st.subheader("Couche de couleur (fond blanc) - Correction 2")
+        st.image(cv2.cvtColor(color_display_corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
+        
+        # Export de la correction 2
+        export_text_corr2 = generate_export_text("Correction 2", layer_params_corr2, classic_active_corr2,
+                                                 brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
+        pdf_bytes_corr2 = generate_pdf(export_text_corr2, main_display_corr2, color_display_corr2)
+        st.download_button("Télécharger les paramètres (TXT) - Corr 2",
+                           data=export_text_corr2,
+                           file_name="export_correction2.txt",
+                           mime="text/plain")
+        st.download_button("Télécharger le rapport (PDF) - Corr 2",
+                           data=pdf_bytes_corr2,
+                           file_name="export_correction2.pdf",
+                           mime="application/pdf")
+        
         # --- Correction 3 en chaîne (à partir de Corr 2) ---
-        else:
+        if correction_sequence == "Correction 3 (en chaîne)":
             corr2_source = main_display_corr2.copy()
             layer_results_corr3 = {}
             for layer in layer_names:
@@ -418,63 +483,18 @@ if uploaded_file is not None:
             st.image(cv2.cvtColor(main_display_corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
             st.subheader("Couche de couleur (fond blanc) - Correction 3")
             st.image(cv2.cvtColor(color_display_corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
-
-    # ----- Section Export -----
-    if correction_sequence == "Correction 1 seule":
-        available_exports = ["Correction 1"]
-    elif correction_sequence == "Correction 2 (en chaîne)":
-        available_exports = ["Correction 1", "Correction 2"]
-    else:
-        available_exports = ["Correction 1", "Correction 2", "Correction 3"]
-
-    export_selection = st.sidebar.selectbox("Sélectionnez la correction à exporter", options=available_exports, key="export_selection")
-
-    def generate_export_text(correction_label, layer_params, classic_active, brightness, contrast, saturation, gamma):
-        text = f"Export pour {correction_label}\n\n"
-        text += "Paramètres par Couche:\n"
-        for layer in layer_names:
-            params = layer_params.get(layer, None)
-            if params and params["active"]:
-                text += f" - Couche {layer}: Cyan: {params['c_adj']}, Magenta: {params['m_adj']}, Jaune: {params['y_adj']}, Noir: {params['k_adj']}, Méthode: {params['method']}\n"
-        text += "\nModifications Classiques:\n"
-        text += f" - Actif: {classic_active}\n"
-        if classic_active:
-            text += f"   Luminosité: {brightness}\n"
-            text += f"   Contraste: {contrast}\n"
-            text += f"   Saturation: {saturation}\n"
-            text += f"   Gamma: {gamma}\n"
-        return text
-
-    if export_selection == "Correction 1":
-        export_text = generate_export_text("Correction 1", layer_params_corr1, classic_active_corr1,
-                                           brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
-        export_image = main_display_corr1
-    elif export_selection == "Correction 2":
-        export_text = generate_export_text("Correction 2", layer_params_corr2, classic_active_corr2,
-                                           brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
-        export_image = main_display_corr2
-    elif export_selection == "Correction 3":
-        export_text = generate_export_text("Correction 3", layer_params_corr3, classic_active_corr3,
-                                           brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3)
-        export_image = main_display_corr3
-
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.multi_cell(0, 10, export_text)
-    temp_img_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    cv2.imwrite(temp_img_file.name, export_image)
-    pdf.image(temp_img_file.name, x=10, y=pdf.get_y() + 10, w=pdf.w - 20)
-    pdf_bytes = pdf.output(dest="S").encode("latin-1")
-    os.unlink(temp_img_file.name)
-    
-    st.download_button("Télécharger les paramètres (TXT)",
-                       data=export_text,
-                       file_name="export_correction.txt",
-                       mime="text/plain")
-    st.download_button("Télécharger le rapport (PDF)",
-                       data=pdf_bytes,
-                       file_name="export_correction.pdf",
-                       mime="application/pdf")
+            
+            # Export de la correction 3
+            export_text_corr3 = generate_export_text("Correction 3", layer_params_corr3, classic_active_corr3,
+                                                     brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3)
+            pdf_bytes_corr3 = generate_pdf(export_text_corr3, main_display_corr3, color_display_corr3)
+            st.download_button("Télécharger les paramètres (TXT) - Corr 3",
+                               data=export_text_corr3,
+                               file_name="export_correction3.txt",
+                               mime="text/plain")
+            st.download_button("Télécharger le rapport (PDF) - Corr 3",
+                               data=pdf_bytes_corr3,
+                               file_name="export_correction3.pdf",
+                               mime="application/pdf")
 else:
     st.write("Veuillez téléverser une image pour commencer.")
