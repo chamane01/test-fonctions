@@ -420,7 +420,6 @@ if uploaded_file is not None:
             st.image(cv2.cvtColor(color_display_corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
 
     # ----- Section Export -----
-    # Détermination des corrections disponibles selon la séquence choisie
     if correction_sequence == "Correction 1 seule":
         available_exports = ["Correction 1"]
     elif correction_sequence == "Correction 2 (en chaîne)":
@@ -430,7 +429,6 @@ if uploaded_file is not None:
 
     export_selection = st.sidebar.selectbox("Sélectionnez la correction à exporter", options=available_exports, key="export_selection")
 
-    # Fonction utilitaire pour générer un texte d'export
     def generate_export_text(correction_label, layer_params, classic_active, brightness, contrast, saturation, gamma):
         text = f"Export pour {correction_label}\n\n"
         text += "Paramètres par Couche:\n"
@@ -447,7 +445,6 @@ if uploaded_file is not None:
             text += f"   Gamma: {gamma}\n"
         return text
 
-    # Récupération de l'image et des paramètres d'export en fonction du choix
     if export_selection == "Correction 1":
         export_text = generate_export_text("Correction 1", layer_params_corr1, classic_active_corr1,
                                            brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
@@ -461,19 +458,16 @@ if uploaded_file is not None:
                                            brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3)
         export_image = main_display_corr3
 
-    # Génération du PDF incluant le texte et l'image
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     pdf.multi_cell(0, 10, export_text)
-    # Enregistrer temporairement l'image à exporter
     temp_img_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     cv2.imwrite(temp_img_file.name, export_image)
-    # Ajouter l'image au PDF (en ajustant la largeur)
     pdf.image(temp_img_file.name, x=10, y=pdf.get_y() + 10, w=pdf.w - 20)
     pdf_bytes = pdf.output(dest="S").encode("latin-1")
-    os.unlink(temp_img_file.name)  # suppression du fichier temporaire
-
+    os.unlink(temp_img_file.name)
+    
     st.download_button("Télécharger les paramètres (TXT)",
                        data=export_text,
                        file_name="export_correction.txt",
