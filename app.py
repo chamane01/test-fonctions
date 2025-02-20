@@ -4,7 +4,9 @@ import cv2
 from PIL import Image
 from fpdf import FPDF
 import tempfile, os
-from streamlit_drawable_canvas import st_canvas
+# >>> On n'utilise plus streamlit_drawable_canvas
+# from streamlit_drawable_canvas import st_canvas
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 # ----------------------------------------------------------------------------
 # 1) Définir les couches prédéfinies (approximation HSV)
@@ -115,12 +117,15 @@ def apply_selective_color(img_bgr, mask, c_adj, m_adj, y_adj, k_adj, method="Rel
 # ----------------------------------------------------------------------------
 def apply_classic_modifications(img, brightness=0, contrast=1.0, saturation=1.0, gamma=1.0):
     img = img.astype(np.float32)
+    # Luminosité & contraste
     img = img*contrast + brightness
     img = np.clip(img,0,255).astype(np.uint8)
+    # Saturation
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
     hsv[...,1] *= saturation
     hsv[...,1] = np.clip(hsv[...,1],0,255)
     img = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+    # Gamma
     if gamma != 1.0:
         invGamma = 1.0/gamma
         table = np.array([((i/255.0)**invGamma)*255 for i in np.arange(256)]).astype("uint8")
@@ -133,10 +138,11 @@ def apply_classic_modifications(img, brightness=0, contrast=1.0, saturation=1.0,
 st.sidebar.title("Paramètres de Correction")
 
 # Choix de la séquence de corrections
-correction_sequence = st.sidebar.radio("Séquence de corrections",
-    options=["Correction 1 seule", "Correction 2 (en chaîne)", "Correction 3 (en chaîne)"])
+correction_sequence = st.sidebar.radio(
+    "Séquence de corrections",
+    options=["Correction 1 seule", "Correction 2 (en chaîne)", "Correction 3 (en chaîne)"]
+)
 
-# Pour chaque correction, on définit les paramètres par couche et les modifications classiques.
 # -- Correction 1 --
 st.sidebar.subheader("Correction 1")
 with st.sidebar.expander("Paramètres par Couche (Corr 1)"):
@@ -152,8 +158,15 @@ with st.sidebar.expander("Paramètres par Couche (Corr 1)"):
                 method = st.radio("Méthode", options=["Relative", "Absolute"], index=0, key=f"method_corr1_{layer}")
             else:
                 c_adj, m_adj, y_adj, k_adj, method = 0,0,0,0,"Relative"
-            layer_params_corr1[layer] = {"active": active, "c_adj": c_adj, "m_adj": m_adj,
-                                         "y_adj": y_adj, "k_adj": k_adj, "method": method}
+            layer_params_corr1[layer] = {
+                "active": active, 
+                "c_adj": c_adj, 
+                "m_adj": m_adj,
+                "y_adj": y_adj, 
+                "k_adj": k_adj, 
+                "method": method
+            }
+
 with st.sidebar.expander("Modifications Classiques (Corr 1)"):
     classic_active_corr1 = st.checkbox("Activer modifs classiques", key="classic_active_corr1")
     if classic_active_corr1:
@@ -180,8 +193,14 @@ if correction_sequence in ["Correction 2 (en chaîne)", "Correction 3 (en chaîn
                     method = st.radio("Méthode", options=["Relative", "Absolute"], index=0, key=f"method_corr2_{layer}")
                 else:
                     c_adj, m_adj, y_adj, k_adj, method = 0,0,0,0,"Relative"
-                layer_params_corr2[layer] = {"active": active, "c_adj": c_adj, "m_adj": m_adj,
-                                             "y_adj": y_adj, "k_adj": k_adj, "method": method}
+                layer_params_corr2[layer] = {
+                    "active": active, 
+                    "c_adj": c_adj, 
+                    "m_adj": m_adj,
+                    "y_adj": y_adj, 
+                    "k_adj": k_adj, 
+                    "method": method
+                }
     with st.sidebar.expander("Modifications Classiques (Corr 2)"):
         classic_active_corr2 = st.checkbox("Activer modifs classiques", key="classic_active_corr2")
         if classic_active_corr2:
@@ -208,8 +227,14 @@ if correction_sequence == "Correction 3 (en chaîne)":
                     method = st.radio("Méthode", options=["Relative", "Absolute"], index=0, key=f"method_corr3_{layer}")
                 else:
                     c_adj, m_adj, y_adj, k_adj, method = 0,0,0,0,"Relative"
-                layer_params_corr3[layer] = {"active": active, "c_adj": c_adj, "m_adj": m_adj,
-                                             "y_adj": y_adj, "k_adj": k_adj, "method": method}
+                layer_params_corr3[layer] = {
+                    "active": active, 
+                    "c_adj": c_adj, 
+                    "m_adj": m_adj,
+                    "y_adj": y_adj, 
+                    "k_adj": k_adj, 
+                    "method": method
+                }
     with st.sidebar.expander("Modifications Classiques (Corr 3)"):
         classic_active_corr3 = st.checkbox("Activer modifs classiques", key="classic_active_corr3")
         if classic_active_corr3:
@@ -242,38 +267,30 @@ if uploaded_file is not None:
     original_bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
     st.subheader("Image originale")
     st.image(pil_img, use_container_width=True)
-    
-    # Si la couche pupette est activée, permettre à l'utilisateur de sélectionner une couleur sur l'image
+
+    # Si la couche pupette est activée, on propose la sélection de couleur via streamlit_image_coordinates
+    custom_color = None
     if custom_layer_enabled:
-        st.markdown("### Outil Pupette – Couche personnalisée")
-        canvas_custom = st_canvas(
-            fill_color="rgba(255, 165, 0, 0.3)",
-            stroke_width=3,
-            stroke_color="#ff0000",
-            background_image=pil_img,
-            update_streamlit=True,
-            height=pil_img.height,
-            width=pil_img.width,
-            drawing_mode="point",
-            key="canvas_custom"
+        st.markdown("### Outil Pipette – Couche personnalisée")
+        # On affiche l'image cliquable pour récupérer les coordonnées
+        coords = streamlit_image_coordinates(
+            "Cliquez sur l'image pour sélectionner un pixel",
+            pil_img,
+            key="custom_pipette"
         )
-        if canvas_custom.json_data is not None and "objects" in canvas_custom.json_data and len(canvas_custom.json_data["objects"]) > 0:
-            last_obj = canvas_custom.json_data["objects"][-1]
-            x_custom = int(last_obj.get("left", 0))
-            y_custom = int(last_obj.get("top", 0))
-            pixel = original_bgr[y_custom, x_custom]  # BGR
-            pixel_rgb = cv2.cvtColor(np.uint8([[pixel]]), cv2.COLOR_BGR2RGB)[0,0]
-            custom_color = '#%02x%02x%02x' % tuple(pixel_rgb)
-            st.write("Couleur pupette sélectionnée :", custom_color)
-        else:
-            custom_color = None
+        if coords is not None:
+            x_custom = int(coords["x"])
+            y_custom = int(coords["y"])
+            # Sécuriser si jamais on clique en dehors
+            if 0 <= x_custom < original_bgr.shape[1] and 0 <= y_custom < original_bgr.shape[0]:
+                pixel = original_bgr[y_custom, x_custom]  # BGR
+                pixel_rgb = cv2.cvtColor(np.uint8([[pixel]]), cv2.COLOR_BGR2RGB)[0,0]
+                custom_color = '#%02x%02x%02x' % tuple(pixel_rgb)
+                st.write("Couleur pupette sélectionnée :", custom_color)
 
     # ----------------------------------------------------------------------------
     # 8) Traitement des corrections (chaîne)
-    # Pour chaque correction, on part de l'image source (l'originale pour Corr 1, puis le résultat précédent)
-    # On applique d'abord les couches prédéfinies, puis si activée, la couche pupette.
     # ----------------------------------------------------------------------------
-    
     def process_correction(source_img, layer_params):
         """Applique les corrections par couche sur source_img à partir du dictionnaire layer_params."""
         combined = source_img.copy()
@@ -281,12 +298,16 @@ if uploaded_file is not None:
             if layer_params.get(layer, {}).get("active", False):
                 msk = get_color_mask(source_img, layer)
                 p = layer_params[layer]
-                res = apply_selective_color(source_img, msk, p["c_adj"], p["m_adj"], p["y_adj"], p["k_adj"], p["method"])
+                res = apply_selective_color(
+                    source_img, msk,
+                    p["c_adj"], p["m_adj"], p["y_adj"], p["k_adj"],
+                    p["method"]
+                )
                 combined[msk != 0] = res[msk != 0]
         return combined
 
-    # Fonction pour ajouter la couche pupette (si activée et une couleur est sélectionnée)
     def add_custom_layer(img):
+        """Applique la couche 'pupette' si activée et une couleur sélectionnée."""
         if custom_layer_enabled and custom_color is not None:
             msk = get_specific_color_mask(img, custom_color, custom_tolerance)
             res = apply_selective_color(img, msk, custom_c_adj, custom_m_adj, custom_y_adj, custom_k_adj, custom_method)
@@ -296,14 +317,19 @@ if uploaded_file is not None:
     # --- Correction 1 ---
     corr1 = process_correction(original_bgr, layer_params_corr1)
     if classic_active_corr1:
-        corr1 = apply_classic_modifications(corr1, brightness=brightness_corr1, contrast=contrast_corr1/100.0,
-                                            saturation=saturation_corr1/100.0, gamma=gamma_corr1/100.0)
-    # Ajouter la couche pupette à Corr 1 si activée
+        corr1 = apply_classic_modifications(
+            corr1,
+            brightness=brightness_corr1,
+            contrast=contrast_corr1/100.0,
+            saturation=saturation_corr1/100.0,
+            gamma=gamma_corr1/100.0
+        )
+    # Ajouter la couche pupette
     corr1 = add_custom_layer(corr1)
     st.header("Correction 1")
     st.image(cv2.cvtColor(corr1, cv2.COLOR_BGR2RGB), use_container_width=True)
-    
-    # Export Correction 1 (affiché sous Corr 1)
+
+    # Export Correction 1
     export_text1 = "Export Correction 1\n\nParamètres par Couche:\n"
     for layer in predef_layers:
         p = layer_params_corr1.get(layer)
@@ -312,7 +338,9 @@ if uploaded_file is not None:
     if classic_active_corr1:
         export_text1 += f"\nModifs Classiques: Luminosité {brightness_corr1}, Contraste {contrast_corr1}, Saturation {saturation_corr1}, Gamma {gamma_corr1}\n"
     if custom_layer_enabled and custom_color is not None:
-        export_text1 += f"\nCouche Pupette: Couleur {custom_color}, Tolérance {custom_tolerance}, Cyan {custom_c_adj}, Magenta {custom_m_adj}, Jaune {custom_y_adj}, Noir {custom_k_adj}, Méthode {custom_method}\n"
+        export_text1 += f"\nCouche Pupette: Couleur {custom_color}, Tolérance {custom_tolerance}, "
+        export_text1 += f"Cyan {custom_c_adj}, Magenta {custom_m_adj}, Jaune {custom_y_adj}, Noir {custom_k_adj}, Méthode {custom_method}\n"
+
     pdf1 = FPDF()
     pdf1.add_page()
     pdf1.set_font("Arial", size=12)
@@ -324,16 +352,22 @@ if uploaded_file is not None:
     pdf1_bytes = pdf1.output(dest="S").encode("latin-1")
     st.download_button("Exporter Correction 1 (PDF)", data=pdf1_bytes, file_name="corr1.pdf", mime="application/pdf")
     st.download_button("Exporter Correction 1 (TXT)", data=export_text1, file_name="corr1.txt", mime="text/plain")
-    
-    # --- Correction 2 (si applicable) ---
+
+    # --- Correction 2 ---
     if correction_sequence in ["Correction 2 (en chaîne)", "Correction 3 (en chaîne)"]:
         corr2 = process_correction(corr1, layer_params_corr2)
         if classic_active_corr2:
-            corr2 = apply_classic_modifications(corr2, brightness=brightness_corr2, contrast=contrast_corr2/100.0,
-                                                saturation=saturation_corr2/100.0, gamma=gamma_corr2/100.0)
+            corr2 = apply_classic_modifications(
+                corr2,
+                brightness=brightness_corr2,
+                contrast=contrast_corr2/100.0,
+                saturation=saturation_corr2/100.0,
+                gamma=gamma_corr2/100.0
+            )
         corr2 = add_custom_layer(corr2)
         st.header("Correction 2")
         st.image(cv2.cvtColor(corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
+
         export_text2 = "Export Correction 2\n\nParamètres par Couche:\n"
         for layer in predef_layers:
             p = layer_params_corr2.get(layer)
@@ -342,7 +376,9 @@ if uploaded_file is not None:
         if classic_active_corr2:
             export_text2 += f"\nModifs Classiques: Luminosité {brightness_corr2}, Contraste {contrast_corr2}, Saturation {saturation_corr2}, Gamma {gamma_corr2}\n"
         if custom_layer_enabled and custom_color is not None:
-            export_text2 += f"\nCouche Pupette: Couleur {custom_color}, Tolérance {custom_tolerance}, Cyan {custom_c_adj}, Magenta {custom_m_adj}, Jaune {custom_y_adj}, Noir {custom_k_adj}, Méthode {custom_method}\n"
+            export_text2 += f"\nCouche Pupette: Couleur {custom_color}, Tolérance {custom_tolerance}, "
+            export_text2 += f"Cyan {custom_c_adj}, Magenta {custom_m_adj}, Jaune {custom_y_adj}, Noir {custom_k_adj}, Méthode {custom_method}\n"
+
         pdf2 = FPDF()
         pdf2.add_page()
         pdf2.set_font("Arial", size=12)
@@ -354,35 +390,43 @@ if uploaded_file is not None:
         pdf2_bytes = pdf2.output(dest="S").encode("latin-1")
         st.download_button("Exporter Correction 2 (PDF)", data=pdf2_bytes, file_name="corr2.pdf", mime="application/pdf")
         st.download_button("Exporter Correction 2 (TXT)", data=export_text2, file_name="corr2.txt", mime="text/plain")
-    
-    # --- Correction 3 (si applicable) ---
-    if correction_sequence == "Correction 3 (en chaîne)":
-        corr3 = process_correction(corr2, layer_params_corr3)
-        if classic_active_corr3:
-            corr3 = apply_classic_modifications(corr3, brightness=brightness_corr3, contrast=contrast_corr3/100.0,
-                                                saturation=saturation_corr3/100.0, gamma=gamma_corr3/100.0)
-        corr3 = add_custom_layer(corr3)
-        st.header("Correction 3")
-        st.image(cv2.cvtColor(corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
-        export_text3 = "Export Correction 3\n\nParamètres par Couche:\n"
-        for layer in predef_layers:
-            p = layer_params_corr3.get(layer)
-            if p and p["active"]:
-                export_text3 += f" - Couche {layer}: Cyan {p['c_adj']}, Magenta {p['m_adj']}, Jaune {p['y_adj']}, Noir {p['k_adj']}, Méthode {p['method']}\n"
-        if classic_active_corr3:
-            export_text3 += f"\nModifs Classiques: Luminosité {brightness_corr3}, Contraste {contrast_corr3}, Saturation {saturation_corr3}, Gamma {gamma_corr3}\n"
-        if custom_layer_enabled and custom_color is not None:
-            export_text3 += f"\nCouche Pupette: Couleur {custom_color}, Tolérance {custom_tolerance}, Cyan {custom_c_adj}, Magenta {custom_m_adj}, Jaune {custom_y_adj}, Noir {custom_k_adj}, Méthode {custom_method}\n"
-        pdf3 = FPDF()
-        pdf3.add_page()
-        pdf3.set_font("Arial", size=12)
-        pdf3.multi_cell(0, 10, export_text3)
-        temp_file3 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-        cv2.imwrite(temp_file3.name, corr3)
-        pdf3.image(temp_file3.name, x=10, y=pdf3.get_y()+10, w=pdf3.w-20)
-        os.unlink(temp_file3.name)
-        pdf3_bytes = pdf3.output(dest="S").encode("latin-1")
-        st.download_button("Exporter Correction 3 (PDF)", data=pdf3_bytes, file_name="corr3.pdf", mime="application/pdf")
-        st.download_button("Exporter Correction 3 (TXT)", data=export_text3, file_name="corr3.txt", mime="text/plain")
+
+        # --- Correction 3 ---
+        if correction_sequence == "Correction 3 (en chaîne)":
+            corr3 = process_correction(corr2, layer_params_corr3)
+            if classic_active_corr3:
+                corr3 = apply_classic_modifications(
+                    corr3,
+                    brightness=brightness_corr3,
+                    contrast=contrast_corr3/100.0,
+                    saturation=saturation_corr3/100.0,
+                    gamma=gamma_corr3/100.0
+                )
+            corr3 = add_custom_layer(corr3)
+            st.header("Correction 3")
+            st.image(cv2.cvtColor(corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
+
+            export_text3 = "Export Correction 3\n\nParamètres par Couche:\n"
+            for layer in predef_layers:
+                p = layer_params_corr3.get(layer)
+                if p and p["active"]:
+                    export_text3 += f" - Couche {layer}: Cyan {p['c_adj']}, Magenta {p['m_adj']}, Jaune {p['y_adj']}, Noir {p['k_adj']}, Méthode {p['method']}\n"
+            if classic_active_corr3:
+                export_text3 += f"\nModifs Classiques: Luminosité {brightness_corr3}, Contraste {contrast_corr3}, Saturation {saturation_corr3}, Gamma {gamma_corr3}\n"
+            if custom_layer_enabled and custom_color is not None:
+                export_text3 += f"\nCouche Pupette: Couleur {custom_color}, Tolérance {custom_tolerance}, "
+                export_text3 += f"Cyan {custom_c_adj}, Magenta {custom_m_adj}, Jaune {custom_y_adj}, Noir {custom_k_adj}, Méthode {custom_method}\n"
+
+            pdf3 = FPDF()
+            pdf3.add_page()
+            pdf3.set_font("Arial", size=12)
+            pdf3.multi_cell(0, 10, export_text3)
+            temp_file3 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            cv2.imwrite(temp_file3.name, corr3)
+            pdf3.image(temp_file3.name, x=10, y=pdf3.get_y()+10, w=pdf3.w-20)
+            os.unlink(temp_file3.name)
+            pdf3_bytes = pdf3.output(dest="S").encode("latin-1")
+            st.download_button("Exporter Correction 3 (PDF)", data=pdf3_bytes, file_name="corr3.pdf", mime="application/pdf")
+            st.download_button("Exporter Correction 3 (TXT)", data=export_text3, file_name="corr3.txt", mime="text/plain")
 else:
     st.write("Veuillez téléverser une image pour commencer.")
