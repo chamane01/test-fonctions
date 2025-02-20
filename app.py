@@ -18,31 +18,32 @@ uploaded_file = st.file_uploader("Téléverser une image", type=["png", "jpg", "
 if uploaded_file is not None:
     # Ouvrir l'image avec PIL
     image = Image.open(uploaded_file)
-    # Définir un format par défaut si nécessaire
+    # Si l'image n'a pas de format, on définit PNG par défaut
     image_format = image.format if image.format is not None else "PNG"
     
-    # Conversion de l'image en URL via base64
+    # Création de l'URL de l'image via base64
     image_url = pil_image_to_data_url(image, format=image_format)
     
     st.image(image, caption="Image téléversée", use_column_width=True)
     
-    # Conversion de l'image en tableau numpy pour extraire la couleur
+    # Conversion de l'image en tableau numpy pour l'extraction de couleur
     image_np = np.array(image)
     
-    # Création du canvas en utilisant l'URL de l'image en fond
+    # Création du canvas en passant à la fois l'image et l'URL générée
     canvas_result = st_canvas(
         fill_color="rgba(0, 0, 0, 0)",  # Remplissage transparent
         stroke_width=1,
         stroke_color="#ffffff",
-        background_image_url=image_url,  # Utilisation de l'URL générée
+        background_image=image,         # Objet PIL
+        background_image_url=image_url,   # URL générée manuellement
         height=image.height,
         width=image.width,
-        drawing_mode="point",  # Mode "point" pour capturer le clic
+        drawing_mode="point",             # Mode "point" pour capturer le clic
         point_display_radius=3,
         key="canvas",
     )
     
-    # Si l'utilisateur clique, récupérer les coordonnées et la couleur
+    # Si l'utilisateur clique, récupérer les coordonnées et extraire la couleur
     if canvas_result.json_data is not None:
         objects = canvas_result.json_data.get("objects", [])
         if objects:
