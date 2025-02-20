@@ -7,7 +7,7 @@ import exifread
 import numpy as np
 import cv2
 import os
-from pyproj import Transformer
+from pyproj import CRS, Transformer
 import io
 import math
 
@@ -26,7 +26,6 @@ def extract_exif_info(image_file):
     image_file.seek(0)
     tags = exifread.process_file(image_file, details=False)
     
-    # GPS Latitude / Longitude
     lat = lon = None
     if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
         lat_vals = tags['GPS GPSLatitude'].values
@@ -45,19 +44,16 @@ def extract_exif_info(image_file):
             if lon_ref.printable.strip().upper() == 'W':
                 lon = -lon
 
-    # Altitude (supposée AGL)
     altitude = None
     if 'GPS GPSAltitude' in tags:
         alt_tag = tags['GPS GPSAltitude']
         altitude = float(alt_tag.values[0].num) / alt_tag.values[0].den
 
-    # Focale
     focal_length = None
     if 'EXIF FocalLength' in tags:
         focal_tag = tags['EXIF FocalLength']
         focal_length = float(focal_tag.values[0].num) / focal_tag.values[0].den
 
-    # Résolution focale (pour estimer largeur capteur)
     fp_x_res = None
     fp_unit = None
     if 'EXIF FocalPlaneXResolution' in tags and 'EXIF FocalPlaneResolutionUnit' in tags:
@@ -66,7 +62,6 @@ def extract_exif_info(image_file):
         fp_x_res = float(fp_res_tag.values[0].num) / fp_res_tag.values[0].den
         fp_unit = int(fp_unit_tag.values[0])
     
-    # Direction de l'image (yaw) en degrés
     gps_img_direction = None
     if 'GPS GPSImgDirection' in tags:
         dir_tag = tags['GPS GPSImgDirection']
@@ -83,21 +78,21 @@ def extract_exif_info(image_file):
     }
 
 #####################################
-# 2. Conversion GPS -> UTM
+# 2. Conversion GPS -> UTM (renvoie un objet CRS)
 #####################################
 def latlon_to_utm(lat, lon):
     """
     Convertit lat/lon (WGS84) en coordonnées UTM.
-    Renvoie (utm_x, utm_y, utm_crs)
+    Renvoie (utm_x, utm_y, crs_utm) avec crs_utm un objet pyproj.CRS.
     """
     zone = int((lon + 180) / 6) + 1
     if lat >= 0:
-        utm_crs = f"EPSG:326{zone:02d}"
+        crs_utm = CRS.from_epsg(32600 + zone)
     else:
-        utm_crs = f"EPSG:327{zone:02d}"
-    transformer = Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
+        crs_utm = CRS.from_epsg(32700 + zone)
+    transformer = Transformer.from_crs(CRS.from_epsg(4326), crs_utm, always_xy=True)
     utm_x, utm_y = transformer.transform(lon, lat)
-    return utm_x, utm_y, utm_crs
+    return utm_x, utm_y, crs_utm
 
 #####################################
 # 3. Modèle de la caméra
@@ -108,8 +103,6 @@ def compute_camera_matrix(focal_length, sensor_width, image_width, image_height)
     focal_length et sensor_width en mm, image_width en pixels.
     On suppose que le centre optique est au centre de l'image.
     """
-    # Conversion de la focale en pixels : 
-    # f_pixels = (focale_mm / largeur_capteur_mm) * largeur_image_pixels
     f_pixels = (focal_length / sensor_width) * image_width
     cx = image_width / 2.0
     cy = image_height / 2.0
@@ -127,10 +120,8 @@ def rotation_matrix_from_yaw(yaw_deg):
     R_yaw = np.array([[np.cos(yaw), -np.sin(yaw), 0],
                       [np.sin(yaw),  np.cos(yaw), 0],
                       [0, 0, 1]])
-    # Correction pour que l'axe optique initial (0,0,1) devienne (0,0,-1)
     R_fixed = np.diag([1, 1, -1])
-    R = R_yaw @ R_fixed
-    return R
+    return R_yaw @ R_fixed
 
 #####################################
 # 4. Projection de pixels sur le sol (terrain plat, Z=0)
@@ -145,15 +136,13 @@ def image_to_ground(u, v, K, R, T):
     """
     invK = np.linalg.inv(K)
     pixel_homog = np.array([u, v, 1])
-    d_cam = invK @ pixel_homog            # vecteur direction dans le repère caméra
-    d_world = R @ d_cam                   # direction dans le repère monde
-    # Calcul de lambda tel que T_z + lambda*d_world_z = 0 (intersection avec le sol Z=0)
+    d_cam = invK @ pixel_homog
+    d_world = R @ d_cam
     if d_world[2] == 0:
         lambda_val = 0
     else:
         lambda_val = -T[2] / d_world[2]
-    ground_point = T + lambda_val * d_world
-    return ground_point
+    return T + lambda_val * d_world
 
 #####################################
 # 5. Orthorectification de l'image
@@ -164,19 +153,16 @@ def orthorectify_image(image_bytes, exif_data, fallback_sensor_width=6.17):
     On considère un terrain plat (Z=0) et on suppose que l'altitude est donnée en AGL.
     Retourne l'image orthorectifiée, sa géotransformation et le CRS.
     """
-    # Chargement de l'image
     pil_img = Image.open(io.BytesIO(image_bytes))
     image = np.array(pil_img)
     img_height, img_width = image.shape[:2]
 
-    # Vérification des métadonnées essentielles
     lat = exif_data.get('lat')
     lon = exif_data.get('lon')
-    altitude = exif_data.get('altitude')  # en m (AGL)
-    focal_length = exif_data.get('focal_length')  # en mm
+    altitude = exif_data.get('altitude')
+    focal_length = exif_data.get('focal_length')
     sensor_width = None
     if exif_data.get('fp_x_res') and exif_data.get('fp_unit'):
-        # fp_unit : 2=pouces, 3=cm, 4=mm
         if exif_data['fp_unit'] == 2:
             sensor_width = (img_width / exif_data['fp_x_res']) * 25.4
         elif exif_data['fp_unit'] == 3:
@@ -184,87 +170,65 @@ def orthorectify_image(image_bytes, exif_data, fallback_sensor_width=6.17):
         elif exif_data['fp_unit'] == 4:
             sensor_width = (img_width / exif_data['fp_x_res'])
     if sensor_width is None:
-        sensor_width = fallback_sensor_width  # valeur par défaut en mm
+        sensor_width = fallback_sensor_width
 
     if None in [lat, lon, altitude, focal_length]:
         st.error("Les métadonnées EXIF essentielles (GPS, altitude, focale) sont manquantes.")
         return None, None, None
 
-    # Conversion en UTM
     utm_x, utm_y, utm_crs = latlon_to_utm(lat, lon)
-    # Position de la caméra : on considère que l'altitude est AGL (donc le sol est à Z=0)
     T = np.array([utm_x, utm_y, altitude])
 
-    # Matrice intrinsèque
     K = compute_camera_matrix(focal_length, sensor_width, img_width, img_height)
-
-    # Rotation : utiliser GPSImgDirection si disponible, sinon 0
-    yaw = exif_data.get('gps_img_direction')
-    if yaw is None:
-        yaw = 0
+    yaw = exif_data.get('gps_img_direction') or 0
     R = rotation_matrix_from_yaw(yaw)
 
-    # Projection sur le sol des 4 coins de l'image
-    pts_img = np.array([
-        [0, 0],
-        [img_width, 0],
-        [img_width, img_height],
-        [0, img_height]
-    ], dtype=np.float32)
+    pts_img = np.array([[0, 0],
+                        [img_width, 0],
+                        [img_width, img_height],
+                        [0, img_height]], dtype=np.float32)
     pts_ground = []
     for pt in pts_img:
         gp = image_to_ground(pt[0], pt[1], K, R, T)
         pts_ground.append([gp[0], gp[1]])
     pts_ground = np.array(pts_ground, dtype=np.float32)
 
-    # Calcul de l'homographie H qui mappe les points de l'image vers le sol
     H, status = cv2.findHomography(pts_img, pts_ground)
 
-    # Estimation de la résolution au sol (m/pixel) par différentiel autour du coin supérieur gauche
     gp_00 = image_to_ground(0, 0, K, R, T)
     gp_10 = image_to_ground(1, 0, K, R, T)
     res_x = np.linalg.norm(np.array(gp_10[:2]) - np.array(gp_00[:2]))
     gp_01 = image_to_ground(0, 1, K, R, T)
     res_y = np.linalg.norm(np.array(gp_01[:2]) - np.array(gp_00[:2]))
-    desired_resolution = (res_x + res_y) / 2.0  # en m/pixel
+    desired_resolution = (res_x + res_y) / 2.0
 
-    # Détermination de l'étendue au sol
     min_x, min_y = np.min(pts_ground, axis=0)
     max_x, max_y = np.max(pts_ground, axis=0)
     out_width = int(np.ceil((max_x - min_x) / desired_resolution))
     out_height = int(np.ceil((max_y - min_y) / desired_resolution))
 
-    # Construction de la matrice de transformation "destination" D
-    D = np.array([
-        [desired_resolution, 0, min_x],
-        [0, -desired_resolution, max_y],
-        [0, 0, 1]
-    ])
-
-    # La transformation totale T_total qui mappe l'image orthorectifiée vers l'image source
+    D = np.array([[desired_resolution, 0, min_x],
+                  [0, -desired_resolution, max_y],
+                  [0, 0, 1]])
     H_inv = np.linalg.inv(H)
     T_total = H_inv @ D
 
-    # Warping de l'image
     ortho_img = cv2.warpPerspective(image, T_total, (out_width, out_height))
-
-    # Géotransformation pour le GeoTIFF : (coin supérieur gauche, résolution)
     geotransform = (min_x, desired_resolution, 0, max_y, 0, -desired_resolution)
-
     return ortho_img, geotransform, utm_crs
 
 #####################################
 # 6. Sauvegarde en GeoTIFF
 #####################################
-def save_geotiff(filename, image_array, geotransform, crs):
+def save_geotiff(filename, image_array, geotransform, crs_obj):
     """
     Sauvegarde image_array en GeoTIFF avec la géotransformation et le CRS donnés.
-    La géotransformation est convertie en objet Affine pour Rasterio.
+    Le CRS est passé sous forme d'objet pyproj.CRS et converti en WKT.
     """
-    # Conversion de la géotransformation en objet Affine
     affine_transform = Affine(*[float(val) for val in geotransform])
     height, width = image_array.shape[:2]
     count = 3 if image_array.ndim == 3 and image_array.shape[2] == 3 else 1
+    crs_wkt = crs_obj.to_wkt()
     with rasterio.open(
         filename, 'w',
         driver='GTiff',
@@ -272,7 +236,7 @@ def save_geotiff(filename, image_array, geotransform, crs):
         width=width,
         count=count,
         dtype=image_array.dtype,
-        crs=crs,
+        crs=crs_wkt,
         transform=affine_transform
     ) as dst:
         if count == 3:
@@ -301,17 +265,16 @@ if uploaded_files:
         
         result = orthorectify_image(file_bytes, exif_data)
         if result[0] is None:
-            continue  # passe à l'image suivante si problème
+            continue
         ortho_img, geotransform, utm_crs = result
         
         st.image(ortho_img, caption=f"Image orthorectifiée : {up_file.name}", use_column_width=True)
         
-        # Sauvegarde temporaire en GeoTIFF
         output_path = "ortho_output.tif"
         save_geotiff(output_path, ortho_img, geotransform, utm_crs)
         
         st.write("**Informations GeoTIFF :**")
-        st.write(f"CRS : {utm_crs}")
+        st.write(f"CRS : {utm_crs.to_wkt()}")
         st.write(f"Géotransform : {geotransform}")
         
         with open(output_path, "rb") as f:
