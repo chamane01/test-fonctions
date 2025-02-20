@@ -13,3 +13,4 @@ pyproj
 geopandas
 exifread
 fpdf
+streamlit_image_coordinates
