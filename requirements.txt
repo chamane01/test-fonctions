@@ -12,3 +12,4 @@ rasterio
 pyproj 
 geopandas
 exifread
+fpdf
