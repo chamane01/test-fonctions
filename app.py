@@ -170,7 +170,7 @@ st.sidebar.title("Paramètres de Correction")
 correction_sequence = st.sidebar.radio("Séquence de corrections",
                                          options=["Correction 1 seule", "Correction 2 (en chaîne)", "Correction 3 (en chaîne)"])
 
-# Filtrage du bruit
+# Filtrage du bruit (applicé individuellement pour chaque couleur)
 st.sidebar.subheader("Filtrage du bruit")
 remove_noise_active = st.sidebar.checkbox("Activer le filtrage du bruit", value=False)
 if remove_noise_active:
@@ -461,9 +461,9 @@ if uploaded_file is not None:
                                                   brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
         export_text_corr2 += "\n" + generate_export_text("Correction 2", layer_params_corr2, classic_active_corr2,
                                                         brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
-        # PDF cumulé : original, Corr 1, Corr 2, et couche de couleur Corr 2
+        # PDF cumulé : [original, Corr1 main, Corr1 couleur, Corr2 main, Corr2 couleur]
         pdf_bytes_corr2 = generate_pdf_cumulative(export_text_corr2,
-                                                  [original_bgr, main_display_corr1, main_display_corr2, color_display_corr2])
+                                                  [original_bgr, main_display_corr1, color_display_corr1, main_display_corr2, color_display_corr2])
         st.download_button("Télécharger les paramètres (TXT) - Corr 2",
                            data=export_text_corr2,
                            file_name="export_correction2.txt",
@@ -532,9 +532,11 @@ if uploaded_file is not None:
                                                             brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
             export_text_corr3 += "\n" + generate_export_text("Correction 3", layer_params_corr3, classic_active_corr3,
                                                             brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3)
-            # PDF cumulé : original, Corr 1, Corr 2, Corr 3 et couche de couleur Corr 3
+            # PDF cumulé : [original, Corr1 main, Corr1 couleur, Corr2 main, Corr2 couleur, Corr3 main, Corr3 couleur]
             pdf_bytes_corr3 = generate_pdf_cumulative(export_text_corr3,
-                                                      [original_bgr, main_display_corr1, main_display_corr2, main_display_corr3, color_display_corr3])
+                                                      [original_bgr, main_display_corr1, color_display_corr1,
+                                                       main_display_corr2, color_display_corr2,
+                                                       main_display_corr3, color_display_corr3])
             st.download_button("Télécharger les paramètres (TXT) - Corr 3",
                                data=export_text_corr3,
                                file_name="export_correction3.txt",
