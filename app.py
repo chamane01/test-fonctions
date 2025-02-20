@@ -2,6 +2,9 @@ import streamlit as st
 import numpy as np
 import cv2
 from PIL import Image
+from fpdf import FPDF
+import tempfile
+import os
 
 # ----------------------------------------------------------------------------
 # 1) Définir les gammes de couleurs (approximation HSV ou via V/S)
@@ -415,5 +418,69 @@ if uploaded_file is not None:
             st.image(cv2.cvtColor(main_display_corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
             st.subheader("Couche de couleur (fond blanc) - Correction 3")
             st.image(cv2.cvtColor(color_display_corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
+
+    # ----- Section Export -----
+    # Détermination des corrections disponibles selon la séquence choisie
+    if correction_sequence == "Correction 1 seule":
+        available_exports = ["Correction 1"]
+    elif correction_sequence == "Correction 2 (en chaîne)":
+        available_exports = ["Correction 1", "Correction 2"]
+    else:
+        available_exports = ["Correction 1", "Correction 2", "Correction 3"]
+
+    export_selection = st.sidebar.selectbox("Sélectionnez la correction à exporter", options=available_exports, key="export_selection")
+
+    # Fonction utilitaire pour générer un texte d'export
+    def generate_export_text(correction_label, layer_params, classic_active, brightness, contrast, saturation, gamma):
+        text = f"Export pour {correction_label}\n\n"
+        text += "Paramètres par Couche:\n"
+        for layer in layer_names:
+            params = layer_params.get(layer, None)
+            if params and params["active"]:
+                text += f" - Couche {layer}: Cyan: {params['c_adj']}, Magenta: {params['m_adj']}, Jaune: {params['y_adj']}, Noir: {params['k_adj']}, Méthode: {params['method']}\n"
+        text += "\nModifications Classiques:\n"
+        text += f" - Actif: {classic_active}\n"
+        if classic_active:
+            text += f"   Luminosité: {brightness}\n"
+            text += f"   Contraste: {contrast}\n"
+            text += f"   Saturation: {saturation}\n"
+            text += f"   Gamma: {gamma}\n"
+        return text
+
+    # Récupération de l'image et des paramètres d'export en fonction du choix
+    if export_selection == "Correction 1":
+        export_text = generate_export_text("Correction 1", layer_params_corr1, classic_active_corr1,
+                                           brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
+        export_image = main_display_corr1
+    elif export_selection == "Correction 2":
+        export_text = generate_export_text("Correction 2", layer_params_corr2, classic_active_corr2,
+                                           brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
+        export_image = main_display_corr2
+    elif export_selection == "Correction 3":
+        export_text = generate_export_text("Correction 3", layer_params_corr3, classic_active_corr3,
+                                           brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3)
+        export_image = main_display_corr3
+
+    # Génération du PDF incluant le texte et l'image
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.multi_cell(0, 10, export_text)
+    # Enregistrer temporairement l'image à exporter
+    temp_img_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    cv2.imwrite(temp_img_file.name, export_image)
+    # Ajouter l'image au PDF (en ajustant la largeur)
+    pdf.image(temp_img_file.name, x=10, y=pdf.get_y() + 10, w=pdf.w - 20)
+    pdf_bytes = pdf.output(dest="S").encode("latin-1")
+    os.unlink(temp_img_file.name)  # suppression du fichier temporaire
+
+    st.download_button("Télécharger les paramètres (TXT)",
+                       data=export_text,
+                       file_name="export_correction.txt",
+                       mime="text/plain")
+    st.download_button("Télécharger le rapport (PDF)",
+                       data=pdf_bytes,
+                       file_name="export_correction.pdf",
+                       mime="application/pdf")
 else:
     st.write("Veuillez téléverser une image pour commencer.")
