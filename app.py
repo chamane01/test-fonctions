@@ -46,7 +46,7 @@ def extract_exif_info(image_file):
         focal_tag = tags['EXIF FocalLength']
         focal_length = float(focal_tag.values[0].num) / focal_tag.values[0].den
         
-    # Extraction des informations de résolution du capteur
+    # Extraction de la résolution du capteur
     fp_x_res = None
     fp_unit = None
     if 'EXIF FocalPlaneXResolution' in tags and 'EXIF FocalPlaneResolutionUnit' in tags:
@@ -115,6 +115,9 @@ def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs):
 
 st.title("Conversion JPEG → GeoTIFF avec échelle réelle")
 
+# Valeur par défaut pour la largeur du capteur (utilisée si la métadonnée manque)
+fallback_sensor_width = st.number_input("Largeur du capteur (mm) (sera utilisée si les métadonnées sont incomplètes)", value=6.17, step=0.01)
+
 uploaded_files = st.file_uploader("Choisissez une ou plusieurs images JPEG", type=['jpg', 'jpeg'], accept_multiple_files=True)
 
 if uploaded_files:
@@ -133,9 +136,8 @@ if uploaded_files:
         img = Image.open(io.BytesIO(file_bytes))
         image_width, image_height = img.size
         
-        # Calcul de la largeur physique du capteur à partir des métadonnées
-        sensor_width = None
-        if fp_x_res and fp_unit:
+        # Calcul de la largeur physique du capteur
+        if fp_x_res is not None and fp_unit is not None:
             if fp_unit == 2:  # unité en pouces
                 sensor_width = (image_width / fp_x_res) * 25.4
             elif fp_unit == 3:  # unité en centimètres
@@ -143,11 +145,11 @@ if uploaded_files:
             elif fp_unit == 4:  # unité en millimètres
                 sensor_width = (image_width / fp_x_res)
             else:
-                st.warning(f"Unité de résolution du capteur non reconnue pour {uploaded_file.name}")
-                continue
+                st.info(f"Unité de résolution non reconnue dans les métadonnées de {uploaded_file.name}. Utilisation de la valeur par défaut.")
+                sensor_width = fallback_sensor_width
         else:
-            st.warning(f"Les métadonnées de {uploaded_file.name} ne contiennent pas la résolution du capteur.")
-            continue
+            st.info(f"Les métadonnées de {uploaded_file.name} ne contiennent pas la résolution du capteur. Utilisation de la valeur par défaut.")
+            sensor_width = fallback_sensor_width
         
         utm_x, utm_y, utm_crs = latlon_to_utm(lat, lon)
         images_info.append({
@@ -165,21 +167,19 @@ if uploaded_files:
         })
     
     if len(images_info) == 0:
-        st.error("Aucune image avec des métadonnées complètes n'a été trouvée.")
+        st.error("Aucune image avec des informations GPS valides n'a été trouvée.")
     else:
         # Utilisation de la première image comme référence
         ref_image_info = images_info[0]
         ref_img = Image.open(io.BytesIO(ref_image_info['data']))
         ref_width, ref_height = ref_img.size
         
-        if (ref_image_info['altitude'] is not None and 
-            ref_image_info['focal_length'] is not None and 
-            ref_image_info['sensor_width'] is not None):
+        if ref_image_info['altitude'] is not None and ref_image_info['focal_length'] is not None:
             pixel_size = compute_gsd(ref_image_info['altitude'], ref_image_info['focal_length'], ref_image_info['sensor_width'], ref_width)
-            st.success(f"Échelle calculée via photogrammétrie : {pixel_size:.4f} m/pixel")
+            st.success(f"Échelle calculée : {pixel_size:.4f} m/pixel")
         else:
             st.error("Informations photogrammétriques incomplètes pour la première image.")
-            pixel_size = 1.0  # valeur par défaut
+            pixel_size = 1.0  # Valeur par défaut
         
         # Conversion de l'image de référence en GeoTIFF
         tiff_path = "output.tif"
