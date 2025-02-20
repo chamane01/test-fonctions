@@ -268,7 +268,7 @@ else:
     selected_color_layer = None
 
 # ----------------------------------------------------------------------------
-# Fonction d'export : génération du texte et du PDF (avec image de correction et image de couche)
+# Fonction d'export : génération du texte et du PDF (avec 3 images : originale, modifiée, couche)
 # ----------------------------------------------------------------------------
 def generate_export_text(correction_label, layer_params, classic_active, brightness, contrast, saturation, gamma):
     text = f"Export pour {correction_label}\n\n"
@@ -286,23 +286,31 @@ def generate_export_text(correction_label, layer_params, classic_active, brightn
         text += f"   Gamma: {gamma}\n"
     return text
 
-def generate_pdf(export_text, main_img, color_img):
+def generate_pdf(export_text, original_img, main_img, color_img):
     pdf = FPDF()
+    # Page 1 : texte d'export
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     pdf.multi_cell(0, 10, export_text)
-    y = pdf.get_y() + 10
-    # Intégrer l'image de correction principale
+    # Page 2 : Image originale
+    pdf.add_page()
     temp_img_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    cv2.imwrite(temp_img_file.name, main_img)
-    pdf.image(temp_img_file.name, x=10, y=y, w=pdf.w - 20)
+    # Convertir en RGB pour avoir les bonnes couleurs
+    cv2.imwrite(temp_img_file.name, cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB))
+    pdf.image(temp_img_file.name, x=10, y=10, w=pdf.w - 20)
     os.unlink(temp_img_file.name)
-    # Intégrer l'image de la couche de couleur
-    y2 = pdf.get_y() + 10
+    # Page 3 : Image modifiée
+    pdf.add_page()
     temp_img_file2 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    cv2.imwrite(temp_img_file2.name, color_img)
-    pdf.image(temp_img_file2.name, x=10, y=y2, w=pdf.w - 20)
+    cv2.imwrite(temp_img_file2.name, cv2.cvtColor(main_img, cv2.COLOR_BGR2RGB))
+    pdf.image(temp_img_file2.name, x=10, y=10, w=pdf.w - 20)
     os.unlink(temp_img_file2.name)
+    # Page 4 : Image de la couche de couleur
+    pdf.add_page()
+    temp_img_file3 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    cv2.imwrite(temp_img_file3.name, cv2.cvtColor(color_img, cv2.COLOR_BGR2RGB))
+    pdf.image(temp_img_file3.name, x=10, y=10, w=pdf.w - 20)
+    os.unlink(temp_img_file3.name)
     pdf_bytes = pdf.output(dest="S").encode("latin-1")
     return pdf_bytes
 
@@ -367,7 +375,7 @@ if uploaded_file is not None:
         # Export de la correction 1
         export_text_corr1 = generate_export_text("Correction 1", layer_params_corr1, classic_active_corr1,
                                                  brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
-        pdf_bytes_corr1 = generate_pdf(export_text_corr1, main_display_corr1, color_display_corr1)
+        pdf_bytes_corr1 = generate_pdf(export_text_corr1, original_bgr, main_display_corr1, color_display_corr1)
         st.download_button("Télécharger les paramètres (TXT) - Corr 1",
                            data=export_text_corr1,
                            file_name="export_correction1.txt",
@@ -427,7 +435,7 @@ if uploaded_file is not None:
         # Export de la correction 2
         export_text_corr2 = generate_export_text("Correction 2", layer_params_corr2, classic_active_corr2,
                                                  brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
-        pdf_bytes_corr2 = generate_pdf(export_text_corr2, main_display_corr2, color_display_corr2)
+        pdf_bytes_corr2 = generate_pdf(export_text_corr2, original_bgr, main_display_corr2, color_display_corr2)
         st.download_button("Télécharger les paramètres (TXT) - Corr 2",
                            data=export_text_corr2,
                            file_name="export_correction2.txt",
@@ -487,7 +495,7 @@ if uploaded_file is not None:
             # Export de la correction 3
             export_text_corr3 = generate_export_text("Correction 3", layer_params_corr3, classic_active_corr3,
                                                      brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3)
-            pdf_bytes_corr3 = generate_pdf(export_text_corr3, main_display_corr3, color_display_corr3)
+            pdf_bytes_corr3 = generate_pdf(export_text_corr3, original_bgr, main_display_corr3, color_display_corr3)
             st.download_button("Télécharger les paramètres (TXT) - Corr 3",
                                data=export_text_corr3,
                                file_name="export_correction3.txt",
