@@ -2,6 +2,14 @@ import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
 import numpy as np
+import io
+import base64
+
+def pil_image_to_data_url(image, format="PNG"):
+    buffered = io.BytesIO()
+    image.save(buffered, format=format)
+    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return f"data:image/{format.lower()};base64,{img_str}"
 
 st.title("Sélecteur de couleur avec pipette")
 
@@ -10,44 +18,42 @@ uploaded_file = st.file_uploader("Téléverser une image", type=["png", "jpg", "
 if uploaded_file is not None:
     # Ouvrir l'image avec PIL
     image = Image.open(uploaded_file)
-    # Assurez-vous que l'image possède un format (certains fichiers uploadés n'ont pas l'attribut "format")
-    if image.format is None:
-        image.format = "PNG"
+    # Définir un format par défaut si nécessaire
+    image_format = image.format if image.format is not None else "PNG"
+    
+    # Conversion de l'image en URL via base64
+    image_url = pil_image_to_data_url(image, format=image_format)
     
     st.image(image, caption="Image téléversée", use_column_width=True)
     
-    # Conversion de l'image en tableau numpy pour extraire la couleur plus tard
+    # Conversion de l'image en tableau numpy pour extraire la couleur
     image_np = np.array(image)
     
-    # Création du canvas avec l'image en arrière-plan
+    # Création du canvas en utilisant l'URL de l'image en fond
     canvas_result = st_canvas(
-        fill_color="rgba(0, 0, 0, 0)",  # Couleur de remplissage (transparent ici)
+        fill_color="rgba(0, 0, 0, 0)",  # Remplissage transparent
         stroke_width=1,
         stroke_color="#ffffff",
-        background_image=image,
+        background_image_url=image_url,  # Utilisation de l'URL générée
         height=image.height,
         width=image.width,
-        drawing_mode="point",  # Mode point pour capturer le clic
+        drawing_mode="point",  # Mode "point" pour capturer le clic
         point_display_radius=3,
         key="canvas",
     )
     
-    # Si l'utilisateur a cliqué, récupérer les coordonnées
+    # Si l'utilisateur clique, récupérer les coordonnées et la couleur
     if canvas_result.json_data is not None:
         objects = canvas_result.json_data.get("objects", [])
         if objects:
-            # On récupère le dernier point cliqué
             last_point = objects[-1]
             x = int(last_point["left"])
             y = int(last_point["top"])
             st.write(f"Coordonnées sélectionnées : x = {x}, y = {y}")
             
-            # Vérifier que les coordonnées sont bien dans les dimensions de l'image
             if x < image_np.shape[1] and y < image_np.shape[0]:
-                # Extraction de la couleur (RGB) au point cliqué
                 color = image_np[y, x]
                 st.write("Couleur sélectionnée (RGB) :", color)
-                # Conversion de la couleur en code hexadécimal
                 hex_color = '#%02x%02x%02x' % (color[0], color[1], color[2])
                 st.markdown(
                     f"<div style='width:100px; height:100px; background-color:{hex_color};'></div>",
