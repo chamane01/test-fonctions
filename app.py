@@ -4,22 +4,24 @@ from PIL import Image, ImageDraw
 import base64
 from io import BytesIO
 
-# --- Fonction pour convertir une image PIL en URL base64 ---
-def pil_to_data_url(image, fmt="PNG"):
-    buffered = BytesIO()
-    image.save(buffered, format=fmt)
-    img_bytes = buffered.getvalue()
-    encoded = base64.b64encode(img_bytes).decode("utf-8")
-    return f"data:image/{fmt.lower()};base64,{encoded}"
+# --- Monkey patch pour st.image.image_to_url si elle n'existe pas ---
+if not hasattr(st.image, "image_to_url"):
+    def image_to_url(image):
+        buffered = BytesIO()
+        image.save(buffered, format="PNG")
+        return f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode()}"
+    st.image.image_to_url = image_to_url
 
 # --- Fonction pour dessiner une grille sur une image ---
 def draw_grid(image, grid_cols=10, grid_rows=10, line_color=(255, 0, 0), line_width=1):
     img = image.copy()
     draw = ImageDraw.Draw(img)
     width, height = img.size
+    # Lignes verticales
     for i in range(1, grid_cols):
         x = i * width / grid_cols
         draw.line([(x, 0), (x, height)], fill=line_color, width=line_width)
+    # Lignes horizontales
     for j in range(1, grid_rows):
         y = j * height / grid_rows
         draw.line([(0, y), (width, y)], fill=line_color, width=line_width)
@@ -53,15 +55,12 @@ if uploaded_files:
     
     st.write("**Instructions :** Cliquez sur l'image pour placer un marqueur (point). Puis cliquez sur **Enregistrer marqueur** pour sauvegarder le marqueur avec la classe et la gravité choisies.")
     
-    # Conversion manuelle de l'image en URL base64
-    bg_url = pil_to_data_url(grid_image)
-    
-    # Canvas interactif pour dessiner le marqueur en mode "point"
+    # Passage direct de l'image PIL (grid_image) à st_canvas
     canvas_result = st_canvas(
         fill_color="rgba(0, 0, 255, 0.3)",  # couleur du marqueur
         stroke_width=10,                   # taille du marqueur
         stroke_color="#0000FF",
-        background_image=bg_url,           # utilisation de l'URL convertie
+        background_image=grid_image,       # image PIL directement
         update_streamlit=True,
         height=grid_image.height,
         width=grid_image.width,
@@ -83,7 +82,6 @@ if uploaded_files:
                 cell_height = height / 10
                 col = int(x // cell_width) + 1
                 row = int(y // cell_height) + 1
-                
                 marker_data = {
                     "x": x,
                     "y": y,
@@ -92,11 +90,9 @@ if uploaded_files:
                     "classe": selected_class,
                     "gravite": selected_gravity,
                 }
-                
                 if image_index not in st.session_state.markers:
                     st.session_state.markers[image_index] = []
                 st.session_state.markers[image_index].append(marker_data)
-                
                 st.success(f"Marqueur enregistré : {marker_data}")
             else:
                 st.warning("Aucun marqueur détecté sur le canvas.")
