@@ -1,16 +1,6 @@
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image, ImageDraw
-import base64
-from io import BytesIO
-
-# --- Monkey patch pour st.image.image_to_url si elle n'existe pas ---
-if not hasattr(st.image, "image_to_url"):
-    def image_to_url(image):
-        buffered = BytesIO()
-        image.save(buffered, format="PNG")
-        return f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode()}"
-    st.image.image_to_url = image_to_url
 
 # --- Fonction pour dessiner une grille sur une image ---
 def draw_grid(image, grid_cols=10, grid_rows=10, line_color=(255, 0, 0), line_width=1):
@@ -45,7 +35,7 @@ if uploaded_files:
     image_index = st.sidebar.slider("Image à afficher", 1, len(images), 1) - 1  # index 0-based
     current_image = images[image_index]
     
-    # Création de l'image avec grille (par exemple, une grille 10x10)
+    # Création de l'image avec grille (ici, une grille 10x10)
     grid_image = draw_grid(current_image, grid_cols=10, grid_rows=10)
     st.sidebar.write(f"Affichage de l'image {image_index+1} sur {len(images)}")
     
