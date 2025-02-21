@@ -1,21 +1,25 @@
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image, ImageDraw
+import base64
+from io import BytesIO
+
+# --- Fonction pour convertir une image PIL en URL base64 ---
+def pil_to_data_url(image, fmt="PNG"):
+    buffered = BytesIO()
+    image.save(buffered, format=fmt)
+    img_bytes = buffered.getvalue()
+    encoded = base64.b64encode(img_bytes).decode("utf-8")
+    return f"data:image/{fmt.lower()};base64,{encoded}"
 
 # --- Fonction pour dessiner une grille sur une image ---
 def draw_grid(image, grid_cols=10, grid_rows=10, line_color=(255, 0, 0), line_width=1):
-    """
-    Dessine une grille sur l'image.
-    La grille divise l'image en grid_cols colonnes et grid_rows lignes.
-    """
     img = image.copy()
     draw = ImageDraw.Draw(img)
     width, height = img.size
-    # Lignes verticales
     for i in range(1, grid_cols):
         x = i * width / grid_cols
         draw.line([(x, 0), (x, height)], fill=line_color, width=line_width)
-    # Lignes horizontales
     for j in range(1, grid_rows):
         y = j * height / grid_rows
         draw.line([(0, y), (width, y)], fill=line_color, width=line_width)
@@ -23,7 +27,6 @@ def draw_grid(image, grid_cols=10, grid_rows=10, line_color=(255, 0, 0), line_wi
 
 # --- Initialisation de l'état de session pour stocker les marqueurs ---
 if 'markers' not in st.session_state:
-    # Dictionnaire : clé = index de l'image, valeur = liste de marqueurs
     st.session_state.markers = {}
 
 st.title("Application de Marquage d'Images")
@@ -37,10 +40,10 @@ if uploaded_files:
         images.append(image)
     
     # 2. Navigation entre images via un slider dans la barre latérale
-    image_index = st.sidebar.slider("Image à afficher", 1, len(images), 1) - 1  # passage en index 0-based
+    image_index = st.sidebar.slider("Image à afficher", 1, len(images), 1) - 1  # index 0-based
     current_image = images[image_index]
     
-    # Création de l'image avec grille (ici, une grille 10x10)
+    # Création de l'image avec grille (par exemple, une grille 10x10)
     grid_image = draw_grid(current_image, grid_cols=10, grid_rows=10)
     st.sidebar.write(f"Affichage de l'image {image_index+1} sur {len(images)}")
     
@@ -48,40 +51,39 @@ if uploaded_files:
     selected_class = st.sidebar.selectbox("Sélectionner la classe", [f"Classe {i}" for i in range(1, 14)])
     selected_gravity = st.sidebar.selectbox("Sélectionner la gravité", [1, 2, 3])
     
-    st.write("**Instructions :** Cliquez sur l'image pour placer un marqueur (point). Puis cliquez sur le bouton **Enregistrer marqueur** pour sauvegarder le marqueur avec la classe et la gravité choisies.")
+    st.write("**Instructions :** Cliquez sur l'image pour placer un marqueur (point). Puis cliquez sur **Enregistrer marqueur** pour sauvegarder le marqueur avec la classe et la gravité choisies.")
     
-    # Canvas interactif pour dessiner le marqueur sur l'image avec grille en fond.
-    # Nous utilisons ici le mode "point" pour simuler un clic unique.
+    # Conversion manuelle de l'image en URL base64
+    bg_url = pil_to_data_url(grid_image)
+    
+    # Canvas interactif pour dessiner le marqueur en mode "point"
     canvas_result = st_canvas(
         fill_color="rgba(0, 0, 255, 0.3)",  # couleur du marqueur
-        stroke_width=10,                   # largeur (taille) du marqueur
+        stroke_width=10,                   # taille du marqueur
         stroke_color="#0000FF",
-        background_image=grid_image,
+        background_image=bg_url,           # utilisation de l'URL convertie
         update_streamlit=True,
         height=grid_image.height,
         width=grid_image.width,
-        drawing_mode="point",              # mode de dessin : placement d'un point
+        drawing_mode="point",              # mode de dessin : point unique
         key="canvas",
     )
     
-    # Bouton pour enregistrer le marqueur après avoir cliqué sur l'image
+    # Bouton pour enregistrer le marqueur après le clic
     if st.button("Enregistrer marqueur"):
         if canvas_result.json_data is not None:
-            shapes = canvas_result.json_data["objects"]
+            shapes = canvas_result.json_data.get("objects", [])
             if shapes:
-                # On récupère le dernier marqueur dessiné
+                # Récupérer le dernier marqueur dessiné
                 marker = shapes[-1]
-                # Les coordonnées locales du marqueur (pixels sur l'image)
                 x = marker["left"]
                 y = marker["top"]
-                # Calcul de la position dans la grille (par exemple, cellule 1-indexée)
                 width, height = current_image.size
                 cell_width = width / 10
                 cell_height = height / 10
                 col = int(x // cell_width) + 1
                 row = int(y // cell_height) + 1
                 
-                # Constitution des informations du marqueur
                 marker_data = {
                     "x": x,
                     "y": y,
@@ -91,7 +93,6 @@ if uploaded_files:
                     "gravite": selected_gravity,
                 }
                 
-                # Sauvegarde du marqueur dans l'état de session pour l'image courante
                 if image_index not in st.session_state.markers:
                     st.session_state.markers[image_index] = []
                 st.session_state.markers[image_index].append(marker_data)
