@@ -100,7 +100,7 @@ def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs):
     """
     Convertit une image JPEG en GeoTIFF géoréférencé en UTM.
     - utm_center : (x, y) du centre en coordonnées UTM
-    - pixel_size : taille d'un pixel en mètres (ici forcée à 0.03 m/pixel)
+    - pixel_size : taille d'un pixel en mètres (par exemple 0.03 m/pixel)
     - utm_crs    : code EPSG (ex: 'EPSG:32632')
     """
     # Correction d'orientation grâce aux métadonnées EXIF
@@ -131,7 +131,7 @@ def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs):
         else:
             dst.write(img_array, 1)
 
-st.title("Conversion JPEG → GeoTIFF sans saisie manuelle")
+st.title("Conversion JPEG → GeoTIFF avec résolution personnalisée")
 
 uploaded_files = st.file_uploader(
     "Téléversez une ou plusieurs images (JPG/JPEG) avec métadonnées EXIF",
@@ -212,9 +212,15 @@ if uploaded_files:
                 "Largeur de capteur)."
             )
         
-        # Forcer la résolution spatiale à 3 cm/pixel (0.03 m/pixel) quel que soit le calcul du GSD
-        pixel_size = 0.03
-        st.info(f"Résolution spatiale appliquée : {pixel_size*100:.0f} cm/pixel")
+        # Permettre à l'utilisateur de choisir la résolution spatiale (en m/pixel)
+        pixel_size = st.number_input(
+            "Choisissez la résolution spatiale (m/pixel) :", 
+            min_value=0.001, 
+            value=0.03, 
+            step=0.001, 
+            format="%.3f"
+        )
+        st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
         
         # On utilise l'image de référence si disponible, sinon la première image exploitable
         final_ref = ref_image_info if ref_image_info else images_info[0]
