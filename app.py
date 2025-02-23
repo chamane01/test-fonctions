@@ -1,5 +1,6 @@
 import streamlit as st
 import folium
+from folium.plugins import Draw  # Import du plugin pour dessiner sur la carte
 from streamlit_folium import st_folium
 import rasterio
 from rasterio.warp import calculate_default_transform, reproject, Resampling
@@ -83,7 +84,7 @@ def normalize_data(data):
 
 # --- Application principale ---
 
-st.title("Affichage de TIFF sur une carte dynamique")
+st.title("Affichage de TIFF sur une carte dynamique avec outils marqueurs")
 
 # Téléversement du fichier TIFF
 uploaded_file = st.file_uploader("Téléversez votre fichier TIFF", type=["tif", "tiff"])
@@ -147,13 +148,35 @@ if uploaded_file is not None:
     # Ajout de l'overlay de l'image
     add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
     
+    # Ajout du plugin de dessin pour les marqueurs
+    draw = Draw(
+        draw_options={
+            'marker': True,
+            'polyline': False,
+            'polygon': False,
+            'rectangle': False,
+            'circle': False,
+            'circlemarker': False,
+        },
+        edit_options={'edit': True}
+    )
+    draw.add_to(m)
+    
     # Ajustement de la vue pour zoomer sur le TIFF
     m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
     
     # Ajout d'un LayerControl pour basculer l'affichage de l'overlay
     folium.LayerControl().add_to(m)
     
-    st_folium(m, width=700, height=500)
+    # Affichage de la carte dans Streamlit et récupération des interactions
+    result = st_folium(m, width=700, height=500)
+
+    # Affichage des coordonnées des marqueurs placés, s'il y en a
+    if result and result.get("all_drawings"):
+        st.write("Coordonnées des marqueurs placés :")
+        for feature in result["all_drawings"]["features"]:
+            if feature["geometry"]["type"] == "Point":
+                st.write(feature["geometry"]["coordinates"])
 
     # Nettoyage des fichiers temporaires
     if os.path.exists(temp_tiff_path):
