@@ -172,11 +172,14 @@ if uploaded_file is not None:
     result = st_folium(m, width=700, height=500)
 
     # Affichage des coordonnées des marqueurs placés, s'il y en a
-    if result and result.get("all_drawings"):
+    features = result.get("all_drawings", {}).get("features", [])
+    if features:
         st.write("Coordonnées des marqueurs placés :")
-        for feature in result["all_drawings"]["features"]:
+        for feature in features:
             if feature["geometry"]["type"] == "Point":
                 st.write(feature["geometry"]["coordinates"])
+    else:
+        st.write("Aucun marqueur n'a été placé.")
 
     # Nettoyage des fichiers temporaires
     if os.path.exists(temp_tiff_path):
