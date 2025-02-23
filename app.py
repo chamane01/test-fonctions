@@ -1,6 +1,21 @@
 import streamlit as st
 import base64
 from io import BytesIO
+
+# Patch pour définir st.image.image_to_url si elle n'existe pas
+if not hasattr(st.image, "image_to_url"):
+    def image_to_url(img):
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        return f"data:image/png;base64,{img_str}"
+    st.image.image_to_url = image_to_url
+
+
+
+import streamlit as st
+import base64
+from io import BytesIO
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
 
