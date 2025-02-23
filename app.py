@@ -192,32 +192,29 @@ if uploaded_files:
     if len(images_info) == 0:
         st.error("Aucune image exploitable (avec coordonnées GPS) n'a été trouvée.")
     else:
-        # Choisir une image de référence possédant les métadonnées nécessaires
-        ref_image_info = None
-        for info in images_info:
-            if (info["altitude"] is not None and 
-                info["focal_length"] is not None and
-                info["sensor_width"] is not None):
-                ref_image_info = info
-                break
+        # Sélection de l'image à convertir via un selecteur
+        selected_filename = st.selectbox(
+            "Sélectionnez l'image à convertir en GeoTIFF",
+            options=[info["filename"] for info in images_info]
+        )
+        selected_image_info = next(info for info in images_info if info["filename"] == selected_filename)
         
-        if ref_image_info:
-            # Calcul du GSD (m/pixel) à partir de l'image de référence
+        # Si l'image sélectionnée possède toutes les métadonnées nécessaires, on calcule le GSD
+        if (selected_image_info["altitude"] is not None and 
+            selected_image_info["focal_length"] is not None and 
+            selected_image_info["sensor_width"] is not None):
             pixel_size_calc = compute_gsd(
-                altitude=ref_image_info["altitude"],
-                focal_length_mm=ref_image_info["focal_length"],
-                sensor_width_mm=ref_image_info["sensor_width"],
-                image_width_px=ref_image_info["img_width"]
+                altitude=selected_image_info["altitude"],
+                focal_length_mm=selected_image_info["focal_length"],
+                sensor_width_mm=selected_image_info["sensor_width"],
+                image_width_px=selected_image_info["img_width"]
             )
             st.success(
-                f"Image de référence : {ref_image_info['filename']} \n\n"
+                f"Image sélectionnée : {selected_image_info['filename']}\n\n"
                 f"GSD calculé = {pixel_size_calc:.4f} m/pixel"
             )
         else:
-            st.warning(
-                "Aucune image ne possède toutes les métadonnées nécessaires (Altitude, Focale, "
-                "Largeur de capteur)."
-            )
+            st.warning("L'image sélectionnée ne possède pas toutes les métadonnées nécessaires pour calculer automatiquement le GSD.")
         
         # Permettre à l'utilisateur de choisir la résolution spatiale (en m/pixel)
         pixel_size = st.number_input(
@@ -246,20 +243,18 @@ if uploaded_files:
         rotation_correction = -flight_angle
         st.info(f"Correction d'orientation appliquée : {rotation_correction:.1f}°")
         
-        # On utilise l'image de référence si disponible, sinon la première image exploitable
-        final_ref = ref_image_info if ref_image_info else images_info[0]
-        
+        # Conversion de l'image sélectionnée en GeoTIFF
         output_path = "output.tif"
         convert_to_tiff(
-            image_file=io.BytesIO(final_ref["data"]),
+            image_file=io.BytesIO(selected_image_info["data"]),
             output_path=output_path,
-            utm_center=final_ref["utm"],
+            utm_center=selected_image_info["utm"],
             pixel_size=pixel_size,
-            utm_crs=final_ref["utm_crs"],
+            utm_crs=selected_image_info["utm_crs"],
             rotation_angle=rotation_correction
         )
         
-        st.success(f"Image {final_ref['filename']} convertie en GeoTIFF.")
+        st.success(f"Image {selected_image_info['filename']} convertie en GeoTIFF.")
         
         # Vérification et affichage des métadonnées du GeoTIFF créé
         with rasterio.open(output_path) as src:
