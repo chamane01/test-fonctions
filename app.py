@@ -12,22 +12,27 @@ st.title("Application de Dessin Basique")
 dot_size = st.sidebar.radio("Taille du point", [5, 10, 20])
 stroke_color = st.sidebar.color_picker("Couleur du pinceau", "#000000")
 
+# Dimensions du canevas
+canvas_width, canvas_height = 600, 400
+
 # Téléversement d'une image comme fond
 uploaded_file = st.sidebar.file_uploader("Téléverser une image de fond", type=["png", "jpg", "jpeg"])
-background_image = None
 
 if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGBA")
-    image = image.resize((600, 400))  # Adapter la taille au canevas
-    background_image = np.array(image)  # Convertir en tableau NumPy
+    image = image.resize((canvas_width, canvas_height))
+    background_image = np.array(image)
+else:
+    # Image blanche par défaut pour éviter le problème de "None"
+    background_image = np.ones((canvas_height, canvas_width, 4), dtype=np.uint8) * 255
 
 # Création du canevas
 canvas_result = st_canvas(
     stroke_width=dot_size,
     stroke_color=stroke_color,
-    background_image=background_image,  # Utilisation directe du tableau NumPy
-    height=400,
-    width=600,
+    background_image=background_image,  # Image toujours définie
+    height=canvas_height,
+    width=canvas_width,
     drawing_mode="point",
     key="canvas",
 )
