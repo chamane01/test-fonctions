@@ -168,18 +168,8 @@ if uploaded_file is not None:
     # Ajout d'un LayerControl pour basculer l'affichage de l'overlay
     folium.LayerControl().add_to(m)
     
-    # Affichage de la carte dans Streamlit et récupération des interactions
-    result = st_folium(m, width=700, height=500)
-
-    # Affichage des coordonnées des marqueurs placés, s'il y en a
-    features = result.get("all_drawings", {}).get("features", [])
-    if features:
-        st.write("Coordonnées des marqueurs placés :")
-        for feature in features:
-            if feature["geometry"]["type"] == "Point":
-                st.write(feature["geometry"]["coordinates"])
-    else:
-        st.write("Aucun marqueur n'a été placé.")
+    # Affichage de la carte dans Streamlit
+    st_folium(m, width=700, height=500)
 
     # Nettoyage des fichiers temporaires
     if os.path.exists(temp_tiff_path):
