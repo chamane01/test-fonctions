@@ -1,150 +1,164 @@
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from folium.plugins import Draw
 import rasterio
-import numpy as np
+from rasterio.warp import calculate_default_transform, reproject, Resampling
 from PIL import Image
-import io, base64
-from pyproj import Transformer  # Pour la conversion en UTM
+import numpy as np
+import base64
+import uuid
+import os
+import matplotlib.pyplot as plt
 
-st.set_page_config(layout="wide")
-st.title("Annotation d'images TIFF sur carte")
+# --- Fonctions utilitaires ---
 
-# Fonction de conversion lat/lon -> UTM
-def latlon_to_utm(lat, lon):
-    zone = int((lon + 180) / 6) + 1
-    if lat >= 0:
-        epsg = 32600 + zone
-        hemisphere = 'N'
-    else:
-        epsg = 32700 + zone
-        hemisphere = 'S'
-    transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
-    utm_easting, utm_northing = transformer.transform(lon, lat)
-    return utm_easting, utm_northing, zone, hemisphere
+def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
+    """
+    Reprojette un fichier TIFF vers le CRS cible et renvoie le chemin du fichier reprojeté.
+    """
+    with rasterio.open(input_tiff) as src:
+        transform, width, height = calculate_default_transform(
+            src.crs, target_crs, src.width, src.height, *src.bounds
+        )
+        kwargs = src.meta.copy()
+        kwargs.update({
+            "crs": target_crs,
+            "transform": transform,
+            "width": width,
+            "height": height,
+        })
+        unique_id = str(uuid.uuid4())[:8]
+        output_tiff = f"reprojected_{unique_id}.tif"
+        with rasterio.open(output_tiff, "w", **kwargs) as dst:
+            for i in range(1, src.count + 1):
+                reproject(
+                    source=rasterio.band(src, i),
+                    destination=rasterio.band(dst, i),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=target_crs,
+                    resampling=Resampling.nearest,
+                )
+    return output_tiff
 
-# 1. Téléversement des fichiers TIFF
-uploaded_files = st.file_uploader("Téléversez vos fichiers TIFF", type=["tiff", "tif"], accept_multiple_files=True)
+def apply_color_gradient(tiff_path, output_png_path):
+    """
+    Applique un gradient de couleur (ici le colormap 'terrain') sur la première bande
+    d'un TIFF (pour un MNS/MNT) et sauvegarde le résultat en PNG.
+    """
+    with rasterio.open(tiff_path) as src:
+        data = src.read(1)
+        cmap = plt.get_cmap("terrain")
+        norm = plt.Normalize(vmin=data.min(), vmax=data.max())
+        colored_image = cmap(norm(data))
+        plt.imsave(output_png_path, colored_image)
+        plt.close()
 
-if uploaded_files:
-    # Initialisation des variables dans session_state
-    if "current_image" not in st.session_state:
-        st.session_state["current_image"] = 0
-    if "markers" not in st.session_state:
-        st.session_state["markers"] = []  # Stockera la liste des marqueurs et leurs informations
-
-    # Navigation entre les images : boutons et slider
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        if st.button("Image précédente"):
-            st.session_state["current_image"] = max(0, st.session_state["current_image"] - 1)
-    with col3:
-        if st.button("Image suivante"):
-            st.session_state["current_image"] = min(len(uploaded_files) - 1, st.session_state["current_image"] + 1)
-
-    num_files = len(uploaded_files)
-    # Utilisation du slider avec la clé "current_image" qui mettra automatiquement à jour st.session_state["current_image"]
-    st.slider("Sélectionnez l'image", min_value=0, max_value=num_files - 1,
-              value=st.session_state["current_image"], key="current_image")
-    st.write(f"Affichage de l'image {st.session_state['current_image'] + 1} sur {num_files}")
-
-    # 2. Affichage de l'image sur une carte
-    current_file = uploaded_files[st.session_state["current_image"]]
-    current_bytes = current_file.read()
-    with rasterio.MemoryFile(current_bytes) as memfile:
-        with memfile.open() as dataset:
-            bounds = dataset.bounds  # (left, bottom, right, top)
-            center = [(bounds.bottom + bounds.top) / 2, (bounds.left + bounds.right) / 2]
-            arr = dataset.read()
-            if arr.shape[0] >= 3:
-                arr = np.stack([arr[0], arr[1], arr[2]], axis=-1)
-            else:
-                arr = arr[0]
-            pil_img = Image.fromarray(arr.astype(np.uint8))
-            buf = io.BytesIO()
-            pil_img.save(buf, format="PNG")
-            img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-            img_url = f"data:image/png;base64,{img_b64}"
-
-    m = folium.Map(location=center, zoom_start=18)
+def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1):
+    """
+    Ajoute une image (PNG) en overlay sur une carte Folium.
+    """
+    with open(image_path, "rb") as f:
+        image_data = f.read()
+    image_base64 = base64.b64encode(image_data).decode("utf-8")
+    img_data_url = f"data:image/png;base64,{image_base64}"
+    
     folium.raster_layers.ImageOverlay(
-        image=img_url,
+        image=img_data_url,
         bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
-        opacity=0.6,
-        interactive=True,
-        cross_origin=False,
-        zindex=1,
-    ).add_to(m)
+        name=layer_name,
+        opacity=opacity,
+    ).add_to(map_object)
 
-    draw = Draw(
-        draw_options={
-            'polyline': False,
-            'polygon': False,
-            'circle': False,
-            'rectangle': False,
-            'circlemarker': False,
-            'marker': True,
-        },
-        edit_options={'edit': False}
-    )
-    draw.add_to(m)
-    st.write("Utilisez l'outil de dessin (icône en haut à gauche de la carte) pour ajouter un marqueur.")
+def normalize_data(data):
+    """
+    Normalise les données sur la plage des percentiles 2 et 98 pour améliorer le contraste.
+    """
+    lower = np.percentile(data, 2)
+    upper = np.percentile(data, 98)
+    norm_data = np.clip(data, lower, upper)
+    norm_data = (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
+    return norm_data
 
-    output = st_folium(m, width=700, height=500, returned_objects=["all_drawings"])
+# --- Application principale ---
 
-    # 3. Attribution d'une classe et d'une gravité après placement du marqueur
-    if output and output.get("all_drawings"):
-        for drawing in output["all_drawings"]:
-            geometry = drawing.get("geometry", {})
-            if geometry.get("type") == "Point":
-                coords = geometry.get("coordinates", [])
-                if coords:
-                    lon, lat = coords
-                    if not any(np.isclose(marker["lat"], lat) and np.isclose(marker["lon"], lon)
-                               for marker in st.session_state["markers"]):
-                        st.write("Nouveau marqueur détecté :")
-                        st.write(f"• Coordonnées : Latitude {lat:.6f}, Longitude {lon:.6f}")
-                        st.write("Attribuez-lui une classe et une gravité :")
-                        with st.form(key=f"marker_form_{lat}_{lon}"):
-                            selected_class = st.selectbox("Sélectionnez la classe", [f"Classe {i+1}" for i in range(13)])
-                            selected_severity = st.radio("Sélectionnez la gravité", [1, 2, 3])
-                            submitted = st.form_submit_button("Enregistrer le marqueur")
-                            if submitted:
-                                st.session_state["markers"].append({
-                                    "lat": lat,
-                                    "lon": lon,
-                                    "class": selected_class,
-                                    "severity": selected_severity,
-                                    "image_index": st.session_state["current_image"],
-                                })
-                                st.success("Marqueur enregistré!")
+st.title("Affichage de TIFF sur une carte dynamique")
 
-    st.subheader("Liste des marqueurs enregistrés")
-    markers_current = [marker for marker in st.session_state["markers"]
-                       if marker["image_index"] == st.session_state["current_image"]]
-    if markers_current:
-        for idx, marker in enumerate(markers_current):
-            st.write(f"Marqueur {idx+1} : {marker}")
+# Téléversement du fichier TIFF
+uploaded_file = st.file_uploader("Téléversez votre fichier TIFF", type=["tif", "tiff"])
+if uploaded_file is not None:
+    # Sauvegarde temporaire du fichier téléversé
+    unique_file_id = str(uuid.uuid4())[:8]
+    temp_tiff_path = f"uploaded_{unique_file_id}.tif"
+    with open(temp_tiff_path, "wb") as f:
+        f.write(uploaded_file.read())
+    st.write("Fichier TIFF uploadé.")
+
+    # Lecture du TIFF pour vérifier le CRS et récupérer ses bornes
+    with rasterio.open(temp_tiff_path) as src:
+        st.write("CRS du TIFF :", src.crs)
+        bounds = src.bounds
+
+    # Reprojection si le CRS n'est pas déjà EPSG:4326
+    if src.crs.to_string() != "EPSG:4326":
+        st.write("Reprojection vers EPSG:4326...")
+        reprojected_path = reproject_tiff(temp_tiff_path, "EPSG:4326")
     else:
-        st.write("Aucun marqueur enregistré pour cette image pour le moment.")
+        reprojected_path = temp_tiff_path
 
-    # 4. Génération et export du rapport
-    if st.session_state["markers"]:
-        st.subheader("Génération du rapport")
-        report_text = "Rapport des marqueurs\n\n"
-        class_counts = {}
-        for marker in st.session_state["markers"]:
-            class_counts[marker["class"]] = class_counts.get(marker["class"], 0) + 1
-        report_text += "Nombre de marqueurs par classe:\n"
-        for cl, count in class_counts.items():
-            report_text += f"{cl} : {count}\n"
-        report_text += "\nPositions en UTM des marqueurs:\n"
-        for marker in st.session_state["markers"]:
-            utm_e, utm_n, zone, hemi = latlon_to_utm(marker["lat"], marker["lon"])
-            report_text += (f"{marker['class']} (Image {marker['image_index']+1}) : "
-                            f"Easting {utm_e:.2f}, Northing {utm_n:.2f} (Zone {zone}{hemi})\n")
-        st.download_button(label="Télécharger le rapport",
-                           data=report_text,
-                           file_name="rapport_marqueurs.txt",
-                           mime="text/plain")
+    # Option : appliquer un gradient de couleur (pour un MNS/MNT)
+    apply_gradient = st.checkbox("Appliquer un gradient de couleur (pour MNS/MNT)", value=False)
+    if apply_gradient:
+        unique_png_id = str(uuid.uuid4())[:8]
+        temp_png_path = f"colored_{unique_png_id}.png"
+        apply_color_gradient(reprojected_path, temp_png_path)
+        display_path = temp_png_path
+    else:
+        # Conversion du TIFF en image (RGB ou niveaux de gris) avec une normalisation améliorée
+        with rasterio.open(reprojected_path) as src:
+            data = src.read()
+            if data.shape[0] >= 3:
+                # Si l'image possède au moins 3 bandes, on crée une image RGB en normalisant chaque canal
+                r = normalize_data(data[0])
+                g = normalize_data(data[1])
+                b = normalize_data(data[2])
+                rgb_norm = np.dstack((r, g, b))
+                image = Image.fromarray(rgb_norm)
+            else:
+                # Sinon, on traite la première bande en niveaux de gris
+                band = data[0]
+                band_norm = normalize_data(band)
+                image = Image.fromarray(band_norm, mode="L")
+        temp_png_path = f"converted_{unique_file_id}.png"
+        image.save(temp_png_path)
+        display_path = temp_png_path
+
+    # Récupération des bornes du TIFF reprojeté
+    with rasterio.open(reprojected_path) as src:
+        bounds = src.bounds
+    st.write("Bornes (EPSG:4326) :", bounds)
+
+    # Création de la carte centrée sur le TIFF
+    center_lat = (bounds.bottom + bounds.top) / 2
+    center_lon = (bounds.left + bounds.right) / 2
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
+
+    # Ajout de l'overlay de l'image
+    add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
+    
+    # Ajustement de la vue pour zoomer sur le TIFF
+    m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
+    
+    # Ajout d'un LayerControl pour basculer l'affichage de l'overlay
+    folium.LayerControl().add_to(m)
+    
+    st_folium(m, width=700, height=500)
+
+    # Nettoyage des fichiers temporaires
+    if os.path.exists(temp_tiff_path):
+        os.remove(temp_tiff_path)
+    if reprojected_path != temp_tiff_path and os.path.exists(reprojected_path):
+        os.remove(reprojected_path)
+    if os.path.exists(temp_png_path):
+        os.remove(temp_png_path)
