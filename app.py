@@ -26,8 +26,10 @@ st.title("Application de Dessin Basique avec Image de Fond")
 uploaded_file = st.file_uploader("Téléversez une image pour le fond", type=["png", "jpg", "jpeg"])
 if uploaded_file:
     bg_image = Image.open(uploaded_file)
-    st.image(bg_image, caption="Image de fond", use_container_width=True)  # Mise à jour ici
-    # Option : Conversion en tableau NumPy et encapsulation
+    st.image(bg_image, caption="Image de fond", use_container_width=True)
+    
+    # Récupération des dimensions réelles de l'image
+    image_width, image_height = bg_image.size
     image_np = np.array(bg_image)
     wrapped_bg_image = AlwaysTrue(image_np)
 else:
@@ -41,10 +43,10 @@ if wrapped_bg_image is None:
 else:
     background_color = None
 
-# Dimensions du canevas en fonction de l'image chargée
+# Si l'image est chargée, ajuster les dimensions du canevas en fonction de l'image
 if wrapped_bg_image is not None:
-    canvas_height = bg_image.height
-    canvas_width = bg_image.width
+    canvas_height = image_height  # Hauteur de l'image de fond
+    canvas_width = image_width    # Largeur de l'image de fond
 else:
     canvas_height = 400
     canvas_width = 600
