@@ -1,77 +1,145 @@
 import streamlit as st
-import rasterio
-from rasterio.warp import transform_bounds
-import numpy as np
-from PIL import Image
 import folium
 from streamlit_folium import st_folium
-import io
+import rasterio
+import rasterio.warp
+from rasterio.warp import transform_bounds, calculate_default_transform, reproject, Resampling
+from rasterio.plot import reshape_as_image
+from PIL import Image
+import numpy as np
 import base64
+import uuid
+import os
+import matplotlib.pyplot as plt
 
-st.title("Affichage d'un TIFF sur une carte dynamique")
+# --- Fonctions utilitaires ---
 
-# Téléversement du fichier TIFF
-uploaded_file = st.file_uploader("Choisissez un fichier TIFF", type=["tif", "tiff"])
+def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
+    """Reprojette un fichier TIFF vers le CRS cible et renvoie le chemin du fichier reprojeté."""
+    with rasterio.open(input_tiff) as src:
+        transform, width, height = calculate_default_transform(
+            src.crs, target_crs, src.width, src.height, *src.bounds
+        )
+        kwargs = src.meta.copy()
+        kwargs.update({
+            "crs": target_crs,
+            "transform": transform,
+            "width": width,
+            "height": height,
+        })
+        unique_id = str(uuid.uuid4())[:8]
+        output_tiff = f"reprojected_{unique_id}.tif"
+        with rasterio.open(output_tiff, "w", **kwargs) as dst:
+            for i in range(1, src.count + 1):
+                reproject(
+                    source=rasterio.band(src, i),
+                    destination=rasterio.band(dst, i),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=target_crs,
+                    resampling=Resampling.nearest,
+                )
+    return output_tiff
 
-if uploaded_file is not None:
-    # Ouverture du TIFF avec rasterio
-    with rasterio.open(uploaded_file) as src:
-        st.write("Système de référence (CRS) du TIFF :", src.crs)
-        st.write("Dimensions :", src.width, "x", src.height)
-        
-        # Récupération et transformation des bornes en WGS84 si nécessaire
-        bounds = src.bounds
-        if src.crs.to_string() != 'EPSG:4326':
-            bounds_wgs84 = transform_bounds(src.crs, 'EPSG:4326',
-                                            bounds.left, bounds.bottom,
-                                            bounds.right, bounds.top)
-        else:
-            bounds_wgs84 = (bounds.left, bounds.bottom, bounds.right, bounds.top)
-        st.write("Bornes (WGS84) :", bounds_wgs84)
-        
-        # Lecture des données du TIFF
-        data = src.read()
-        if data.shape[0] >= 3:
-            # Supposons qu'il s'agisse d'un TIFF RGB
-            rgb = np.dstack((data[0], data[1], data[2]))
-            rgb_norm = (255 * (rgb - rgb.min()) / (rgb.max() - rgb.min())).astype(np.uint8)
-            image = Image.fromarray(rgb_norm)
-        else:
-            # Cas d'une seule bande (niveaux de gris)
-            band = data[0]
-            band_norm = (255 * (band - band.min()) / (band.max() - band.min())).astype(np.uint8)
-            image = Image.fromarray(band_norm, mode="L")
-        
-        # Sauvegarde de l'image en mémoire au format PNG
-        img_buffer = io.BytesIO()
-        image.save(img_buffer, format="PNG")
-        img_buffer.seek(0)
-        
-        # Conversion de l'image en data URL (base64)
-        img_base64 = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
-        img_data_url = f"data:image/png;base64,{img_base64}"
+def apply_color_gradient(tiff_path, output_png_path):
+    """Applique un gradient de couleur sur une image TIFF (par exemple MNS/MNT) et sauvegarde le résultat en PNG."""
+    with rasterio.open(tiff_path) as src:
+        # Lecture de la première bande (pour un MNS/MNT)
+        data = src.read(1)
+        cmap = plt.get_cmap("terrain")
+        norm = plt.Normalize(vmin=data.min(), vmax=data.max())
+        colored_image = cmap(norm(data))
+        plt.imsave(output_png_path, colored_image)
+        plt.close()
+
+def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1):
+    """Ajoute une image (fichier PNG) en overlay sur une carte Folium."""
+    # Lecture de l'image et conversion en data URL (base64)
+    with open(image_path, "rb") as f:
+        image_data = f.read()
+    image_base64 = base64.b64encode(image_data).decode("utf-8")
+    img_data_url = f"data:image/png;base64,{image_base64}"
     
-    # Calcul du centre de la zone pour centrer la carte
-    center_lat = (bounds_wgs84[1] + bounds_wgs84[3]) / 2
-    center_lon = (bounds_wgs84[0] + bounds_wgs84[2]) / 2
-    st.write("Centre de la carte :", center_lat, center_lon)
-    
-    # Création de la carte avec un zoom initial adapté
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
-    
-    # Possibilité de choisir le paramètre 'origin' pour tester l'orientation de l'image
-    origin = st.selectbox("Choisir l'origine de l'image", options=["upper", "lower"], index=0)
-    
-    # Ajout de l'image en overlay sur la carte avec opacité 100%
     folium.raster_layers.ImageOverlay(
         image=img_data_url,
-        bounds=[[bounds_wgs84[1], bounds_wgs84[0]], [bounds_wgs84[3], bounds_wgs84[2]]],
-        opacity=1,  # opacité à 100%
-        origin=origin,
-        interactive=True,
-        cross_origin=False,
-        zindex=1,
-    ).add_to(m)
-    
-    # Affichage de la carte dans Streamlit
+        bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
+        name=layer_name,
+        opacity=opacity,
+    ).add_to(map_object)
+
+# --- Application principale ---
+
+st.title("Affichage de TIFF sur une carte dynamique")
+
+# Téléversement du fichier TIFF
+uploaded_file = st.file_uploader("Téléversez votre fichier TIFF", type=["tif", "tiff"])
+if uploaded_file is not None:
+    # Sauvegarde temporaire du fichier téléversé
+    unique_file_id = str(uuid.uuid4())[:8]
+    temp_tiff_path = f"uploaded_{unique_file_id}.tif"
+    with open(temp_tiff_path, "wb") as f:
+        f.write(uploaded_file.read())
+    st.write("Fichier TIFF uploadé.")
+
+    # Lecture du TIFF pour vérifier le CRS et récupérer ses bornes
+    with rasterio.open(temp_tiff_path) as src:
+        st.write("CRS du TIFF :", src.crs)
+        bounds = src.bounds
+
+    # Reprojection si le CRS n'est pas déjà EPSG:4326
+    if src.crs.to_string() != "EPSG:4326":
+        st.write("Reprojection vers EPSG:4326...")
+        reprojected_path = reproject_tiff(temp_tiff_path, "EPSG:4326")
+    else:
+        reprojected_path = temp_tiff_path
+
+    # Optionnel : appliquer un gradient de couleur pour un rendu "coloré" (utile pour des MNS/MNT)
+    apply_gradient = st.checkbox("Appliquer un gradient de couleur (pour MNS/MNT)", value=False)
+    if apply_gradient:
+        unique_png_id = str(uuid.uuid4())[:8]
+        temp_png_path = f"colored_{unique_png_id}.png"
+        apply_color_gradient(reprojected_path, temp_png_path)
+        display_path = temp_png_path
+    else:
+        # Si pas de gradient, on génère une image classique à partir du TIFF (pour afficher en overlay)
+        # On lit les données et on crée une image avec PIL (selon le nombre de bandes)
+        with rasterio.open(reprojected_path) as src:
+            data = src.read()
+            if data.shape[0] >= 3:
+                # On suppose un TIFF RGB
+                rgb = np.dstack((data[0], data[1], data[2]))
+                rgb_norm = (255 * (rgb - rgb.min()) / (rgb.max() - rgb.min())).astype(np.uint8)
+                image = Image.fromarray(rgb_norm)
+            else:
+                band = data[0]
+                band_norm = (255 * (band - band.min()) / (band.max() - band.min())).astype(np.uint8)
+                image = Image.fromarray(band_norm, mode="L")
+        temp_png_path = f"converted_{unique_file_id}.png"
+        image.save(temp_png_path)
+        display_path = temp_png_path
+
+    # Lecture des bornes du TIFF reprojeté
+    with rasterio.open(reprojected_path) as src:
+        bounds = src.bounds
+    st.write("Bornes (EPSG:4326) :", bounds)
+
+    # Création de la carte centrée sur le TIFF
+    center_lat = (bounds.bottom + bounds.top) / 2
+    center_lon = (bounds.left + bounds.right) / 2
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
+
+    # Ajout de l'overlay de l'image
+    add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
+
+    # Ajout d'un LayerControl pour activer/désactiver l'overlay
+    folium.LayerControl().add_to(m)
     st_folium(m, width=700, height=500)
+
+    # Nettoyage des fichiers temporaires
+    if os.path.exists(temp_tiff_path):
+        os.remove(temp_tiff_path)
+    if reprojected_path != temp_tiff_path and os.path.exists(reprojected_path):
+        os.remove(reprojected_path)
+    if os.path.exists(temp_png_path):
+        os.remove(temp_png_path)
