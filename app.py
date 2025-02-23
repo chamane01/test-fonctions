@@ -1,7 +1,7 @@
 import streamlit as st
 import rasterio
 from rasterio.transform import from_origin
-from PIL import Image
+from PIL import Image, ImageOps
 import exifread
 import numpy as np
 import os
@@ -100,16 +100,18 @@ def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs):
     """
     Convertit une image JPEG en GeoTIFF géoréférencé en UTM.
     - utm_center : (x, y) du centre en coordonnées UTM
-    - pixel_size : taille d'un pixel en mètres
+    - pixel_size : taille d'un pixel en mètres (ici forcée à 0.03 m/pixel)
     - utm_crs    : code EPSG (ex: 'EPSG:32632')
     """
+    # Correction d'orientation grâce aux métadonnées EXIF
     img = Image.open(image_file)
+    img = ImageOps.exif_transpose(img)
     img_array = np.array(img)
     height, width = img_array.shape[:2]
     
     # Coordonnées du coin supérieur gauche (x_min, y_max)
     x_min = utm_center[0] - (width / 2) * pixel_size
-    y_max = utm_center[1] + (height / 2) * pixel_size  # car y décroit vers le bas dans l'image
+    y_max = utm_center[1] + (height / 2) * pixel_size  # y décroit vers le bas dans l'image
     
     transform = from_origin(x_min, y_max, pixel_size, pixel_size)
     
@@ -138,7 +140,6 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
-    # Liste des informations utiles pour chaque image
     images_info = []
     
     for up_file in uploaded_files:
@@ -147,7 +148,7 @@ if uploaded_files:
         
         lat, lon, altitude, focal_length, fp_x_res, fp_unit = extract_exif_info(file_buffer)
         
-        # On doit au moins avoir une position GPS pour géoréférencer
+        # Vérifier la présence de coordonnées GPS
         if lat is None or lon is None:
             st.warning(f"{up_file.name} : pas de coordonnées GPS, l'image sera ignorée.")
             continue
@@ -156,19 +157,16 @@ if uploaded_files:
         img = Image.open(io.BytesIO(file_bytes))
         img_width, img_height = img.size
         
-        # Calculer la largeur du capteur (mm) s’il y a FocalPlaneXResolution
+        # Calcul de la largeur du capteur (mm) si FocalPlaneXResolution disponible
         sensor_width_mm = None
         if fp_x_res and fp_unit:
-            # Selon l'unité
             if fp_unit == 2:   # pouces
                 sensor_width_mm = (img_width / fp_x_res) * 25.4
             elif fp_unit == 3: # cm
                 sensor_width_mm = (img_width / fp_x_res) * 10
             elif fp_unit == 4: # mm
                 sensor_width_mm = (img_width / fp_x_res)
-            # Sinon, on ne sait pas trop, on laisse None
         
-        # Conversion en UTM
         utm_x, utm_y, utm_crs = latlon_to_utm(lat, lon)
         
         images_info.append({
@@ -176,21 +174,18 @@ if uploaded_files:
             "data": file_bytes,
             "lat": lat,
             "lon": lon,
-            "altitude": altitude,        # m
-            "focal_length": focal_length, # mm
-            "sensor_width": sensor_width_mm, # mm
+            "altitude": altitude,        # en m
+            "focal_length": focal_length, # en mm
+            "sensor_width": sensor_width_mm, # en mm
             "utm": (utm_x, utm_y),
             "utm_crs": utm_crs,
             "img_width": img_width,
             "img_height": img_height
         })
     
-    # On ne garde que les images avec GPS
     if len(images_info) == 0:
         st.error("Aucune image exploitable (avec coordonnées GPS) n'a été trouvée.")
     else:
-        # On va essayer de trouver la première image qui possède toutes les métadonnées nécessaires
-        # (altitude, focal_length, sensor_width).
         ref_image_info = None
         for info in images_info:
             if (info["altitude"] is not None and 
@@ -200,8 +195,8 @@ if uploaded_files:
                 break
         
         if ref_image_info:
-            # On calcule le GSD à partir de cette image "complète"
-            pixel_size = compute_gsd(
+            # Calcul du GSD (m/pixel) à partir de l'image de référence
+            pixel_size_calc = compute_gsd(
                 altitude=ref_image_info["altitude"],
                 focal_length_mm=ref_image_info["focal_length"],
                 sensor_width_mm=ref_image_info["sensor_width"],
@@ -209,67 +204,21 @@ if uploaded_files:
             )
             st.success(
                 f"Image de référence : {ref_image_info['filename']} \n\n"
-                f"GSD calculé = {pixel_size:.4f} m/pixel"
+                f"GSD calculé = {pixel_size_calc:.4f} m/pixel"
             )
         else:
-            # Personne n'a toutes les métadonnées
             st.warning(
                 "Aucune image ne possède toutes les métadonnées nécessaires (Altitude, Focale, "
-                "Largeur de capteur). On tente un calcul de secours."
+                "Largeur de capteur)."
             )
-            
-            # Fallback : si on a au moins 2 images, on essaye d'estimer l'échelle
-            if len(images_info) > 1:
-                # On va prendre toutes les images, calculer la distance en UTM
-                # entre la première et la dernière (pour simplifier).
-                
-                # Tri par X UTM (ou Y, c’est arbitraire)
-                images_sorted = sorted(images_info, key=lambda x: x["utm"][0])
-                first_img = images_sorted[0]
-                last_img  = images_sorted[-1]
-                
-                # Distance en UTM (2D)
-                dx = last_img["utm"][0] - first_img["utm"][0]
-                dy = last_img["utm"][1] - first_img["utm"][1]
-                dist_m = math.sqrt(dx*dx + dy*dy)
-                
-                # Nombre d'images dans la série
-                nb_images = len(images_sorted)
-                
-                # Hypothèse : (nb_images - 1) * largeur_image_pixels correspond à dist_m
-                # => GSD = dist_m / [ (nb_images - 1) * largeur_image_pixels ]
-                # On suppose que toutes les images ont la même largeur en pixels
-                # (c’est grossier, mais c’est un fallback)
-                
-                # On prend la largeur de la première image pour référence
-                if nb_images > 1:
-                    ref_width_px = images_sorted[0]["img_width"]
-                    if nb_images == 1:
-                        # (cas impossible car nb_images > 1)
-                        pixel_size = 1.0
-                    else:
-                        pixel_size = dist_m / ((nb_images - 1) * ref_width_px)
-                        
-                    st.info(
-                        "Estimation de l'échelle par la distance UTM entre la première et la dernière image.\n"
-                        f"GSD estimé = {pixel_size:.4f} m/pixel"
-                    )
-                else:
-                    # 1 seule image => impossible d'estimer
-                    pixel_size = 1.0
-            else:
-                # 1 seule image sans métadonnées suffisantes => on fixe un GSD arbitraire
-                pixel_size = 1.0
-                st.info("Une seule image, métadonnées incomplètes : on fixe un GSD = 1.0 m/pixel.")
         
-        # À ce stade, on a un pixel_size défini soit par le calcul principal, soit par le fallback
-        # On va convertir la première image de la liste (ou la ref_image si on veut)
-        # en GeoTIFF comme démonstration.
+        # Forcer la résolution spatiale à 3 cm/pixel (0.03 m/pixel) quel que soit le calcul du GSD
+        pixel_size = 0.03
+        st.info(f"Résolution spatiale appliquée : {pixel_size*100:.0f} cm/pixel")
         
-        # Si on a utilisé ref_image_info, on s'en sert. Sinon, on prend la première
+        # On utilise l'image de référence si disponible, sinon la première image exploitable
         final_ref = ref_image_info if ref_image_info else images_info[0]
         
-        # Sortie en GeoTIFF
         output_path = "output.tif"
         convert_to_tiff(
             image_file=io.BytesIO(final_ref["data"]),
@@ -281,6 +230,12 @@ if uploaded_files:
         
         st.success(f"Image {final_ref['filename']} convertie en GeoTIFF.")
         
+        # Vérification et affichage des métadonnées GPS du GeoTIFF créé
+        with rasterio.open(output_path) as src:
+            st.write("**Méta-données GeoTIFF**")
+            st.write("CRS :", src.crs)
+            st.write("Transform :", src.transform)
+        
         # Proposer le téléchargement
         with open(output_path, "rb") as f:
             st.download_button(
@@ -290,5 +245,4 @@ if uploaded_files:
                 mime="image/tiff"
             )
         
-        # Nettoyage
         os.remove(output_path)
