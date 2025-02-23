@@ -2,9 +2,7 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 import rasterio
-import rasterio.warp
-from rasterio.warp import transform_bounds, calculate_default_transform, reproject, Resampling
-from rasterio.plot import reshape_as_image
+from rasterio.warp import calculate_default_transform, reproject, Resampling
 from PIL import Image
 import numpy as np
 import base64
@@ -15,7 +13,9 @@ import matplotlib.pyplot as plt
 # --- Fonctions utilitaires ---
 
 def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
-    """Reprojette un fichier TIFF vers le CRS cible et renvoie le chemin du fichier reprojeté."""
+    """
+    Reprojette un fichier TIFF vers le CRS cible et renvoie le chemin du fichier reprojeté.
+    """
     with rasterio.open(input_tiff) as src:
         transform, width, height = calculate_default_transform(
             src.crs, target_crs, src.width, src.height, *src.bounds
@@ -43,9 +43,11 @@ def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
     return output_tiff
 
 def apply_color_gradient(tiff_path, output_png_path):
-    """Applique un gradient de couleur sur une image TIFF (par exemple MNS/MNT) et sauvegarde le résultat en PNG."""
+    """
+    Applique un gradient de couleur (ici le colormap 'terrain') sur la première bande
+    d'un TIFF (pour un MNS/MNT) et sauvegarde le résultat en PNG.
+    """
     with rasterio.open(tiff_path) as src:
-        # Lecture de la première bande (pour un MNS/MNT)
         data = src.read(1)
         cmap = plt.get_cmap("terrain")
         norm = plt.Normalize(vmin=data.min(), vmax=data.max())
@@ -54,7 +56,9 @@ def apply_color_gradient(tiff_path, output_png_path):
         plt.close()
 
 def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1):
-    """Ajoute une image (fichier PNG) en overlay sur une carte Folium."""
+    """
+    Ajoute une image (PNG) en overlay sur une carte Folium.
+    """
     with open(image_path, "rb") as f:
         image_data = f.read()
     image_base64 = base64.b64encode(image_data).decode("utf-8")
@@ -66,6 +70,16 @@ def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1):
         name=layer_name,
         opacity=opacity,
     ).add_to(map_object)
+
+def normalize_data(data):
+    """
+    Normalise les données sur la plage des percentiles 2 et 98 pour améliorer le contraste.
+    """
+    lower = np.percentile(data, 2)
+    upper = np.percentile(data, 98)
+    norm_data = np.clip(data, lower, upper)
+    norm_data = (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
+    return norm_data
 
 # --- Application principale ---
 
@@ -93,7 +107,7 @@ if uploaded_file is not None:
     else:
         reprojected_path = temp_tiff_path
 
-    # Optionnel : appliquer un gradient de couleur pour un rendu "coloré" (utile pour des MNS/MNT)
+    # Option : appliquer un gradient de couleur (pour un MNS/MNT)
     apply_gradient = st.checkbox("Appliquer un gradient de couleur (pour MNS/MNT)", value=False)
     if apply_gradient:
         unique_png_id = str(uuid.uuid4())[:8]
@@ -101,28 +115,34 @@ if uploaded_file is not None:
         apply_color_gradient(reprojected_path, temp_png_path)
         display_path = temp_png_path
     else:
-        # Si aucun gradient n'est appliqué, convertir le TIFF en image (RGB ou niveaux de gris)
+        # Conversion du TIFF en image (RGB ou niveaux de gris) avec une normalisation améliorée
         with rasterio.open(reprojected_path) as src:
             data = src.read()
             if data.shape[0] >= 3:
-                rgb = np.dstack((data[0], data[1], data[2]))
-                rgb_norm = (255 * (rgb - rgb.min()) / (rgb.max() - rgb.min())).astype(np.uint8)
+                # Si l'image possède au moins 3 bandes, on crée une image RGB en normalisant chaque canal
+                r = normalize_data(data[0])
+                g = normalize_data(data[1])
+                b = normalize_data(data[2])
+                rgb_norm = np.dstack((r, g, b))
                 image = Image.fromarray(rgb_norm)
             else:
+                # Sinon, on traite la première bande en niveaux de gris
                 band = data[0]
-                band_norm = (255 * (band - band.min()) / (band.max() - band.min())).astype(np.uint8)
+                band_norm = normalize_data(band)
                 image = Image.fromarray(band_norm, mode="L")
         temp_png_path = f"converted_{unique_file_id}.png"
         image.save(temp_png_path)
         display_path = temp_png_path
 
-    # Lecture des bornes du TIFF reprojeté
+    # Récupération des bornes du TIFF reprojeté
     with rasterio.open(reprojected_path) as src:
         bounds = src.bounds
     st.write("Bornes (EPSG:4326) :", bounds)
 
     # Création de la carte centrée sur le TIFF
-    m = folium.Map(location=[(bounds.bottom + bounds.top) / 2, (bounds.left + bounds.right) / 2], zoom_start=10)
+    center_lat = (bounds.bottom + bounds.top) / 2
+    center_lon = (bounds.left + bounds.right) / 2
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
 
     # Ajout de l'overlay de l'image
     add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
