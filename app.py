@@ -138,7 +138,7 @@ if uploaded_file is not None:
         bounds = src.bounds
     st.write("Bornes (EPSG:4326) :", bounds)
 
-    # Création de la carte centrée sur le TIFF
+    # Création de la carte centrée sur le TIFF et ajustement automatique du zoom
     center_lat = (bounds.bottom + bounds.top) / 2
     center_lon = (bounds.left + bounds.right) / 2
     m = folium.Map(location=[center_lat, center_lon])
@@ -167,25 +167,26 @@ if uploaded_file is not None:
     # Affichage de la carte dans Streamlit
     result = st_folium(m, width=700, height=500)
     
-    # Bilan dynamique des marqueurs dessinés et de leur classe
+    # Bilan dynamique des marqueurs dessinés et association de classe
     st.subheader("Bilan des marqueurs dessinés")
     marker_data = []
-    if result is not None and "all_drawings" in result:
-        features = result["all_drawings"].get("features", [])
-        if features:
-            st.markdown("Pour chaque marqueur dessiné, sélectionnez la classe correspondante ci-dessous :")
-            for idx, feature in enumerate(features):
-                if feature["geometry"]["type"] == "Point":
-                    coords = feature["geometry"]["coordinates"]
-                    # Chaque marqueur obtient une sélection de classe via un selectbox
-                    selected_class = st.selectbox(
-                        f"Marqueur {idx+1} (Coordonnées : {coords})",
-                        [f"Classe {i}" for i in range(1, 14)],
-                        key=f"marker_class_{idx}"
-                    )
-                    marker_data.append({"Marqueur": idx+1, "Coordonnées": coords, "Classe": selected_class})
-        else:
-            st.write("Aucun marqueur n'a été dessiné.")
+    features = []
+    if result and isinstance(result, dict):
+        all_drawings = result.get("all_drawings")
+        if all_drawings:
+            features = all_drawings.get("features", [])
+    
+    if features:
+        st.markdown("Pour chaque marqueur dessiné, sélectionnez la classe correspondante ci-dessous :")
+        for idx, feature in enumerate(features):
+            if feature.get("geometry", {}).get("type") == "Point":
+                coords = feature.get("geometry", {}).get("coordinates", "Inconnues")
+                selected_class = st.selectbox(
+                    f"Marqueur {idx+1} (Coordonnées : {coords})",
+                    [f"Classe {i}" for i in range(1, 14)],
+                    key=f"marker_class_{idx}"
+                )
+                marker_data.append({"Marqueur": idx+1, "Coordonnées": coords, "Classe": selected_class})
     else:
         st.write("Aucun marqueur n'a été dessiné.")
     
