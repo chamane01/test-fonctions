@@ -46,7 +46,7 @@ if uploaded_file is not None:
     gps_lat, gps_lon = None, None
     if "GPSInfo" in exif_data:
         gps_info = exif_data["GPSInfo"]
-        # Les clés standards de GPSInfo dans PIL :
+        # Clés standards de GPSInfo dans PIL :
         # 1: GPSLatitudeRef, 2: GPSLatitude, 3: GPSLongitudeRef, 4: GPSLongitude, 6: GPSAltitude
         gps_latitude = gps_info.get(2)
         gps_latitude_ref = gps_info.get(1)
@@ -73,7 +73,7 @@ if uploaded_file is not None:
     gps_altitude = None
     if "GPSInfo" in exif_data:
         gps_info = exif_data["GPSInfo"]
-        alt = gps_info.get(6)  # clé 6 correspond généralement à GPSAltitude
+        alt = gps_info.get(6)  # Clé 6 correspond généralement à GPSAltitude
         if alt:
             if isinstance(alt, tuple) and len(alt) == 2:
                 gps_altitude = alt[0] / alt[1]
@@ -107,7 +107,6 @@ if uploaded_file is not None:
         
         # --- Bouton pour conversion et téléchargement en GeoTIFF ---
         if st.button("Convertir et Télécharger en GeoTIFF"):
-            # Conversion de l'image en tableau numpy
             image_np = np.array(image)
             
             if gps_lat is None or gps_lon is None:
@@ -116,20 +115,27 @@ if uploaded_file is not None:
                 # Conversion des coordonnées GPS en UTM
                 utm_x, utm_y, utm_crs = latlon_to_utm(gps_lat, gps_lon)
                 
-                # On suppose ici que le point GPS correspond au centre de l'image.
-                # Calcul du coin supérieur gauche en UTM à partir du GSD calculé
+                # On suppose que le point GPS correspond au centre de l'image.
                 img_width, img_height = image.size
                 top_left_x = utm_x - (img_width / 2) * gsd
-                top_left_y = utm_y + (img_height / 2) * gsd  # en UTM, Y augmente vers le nord
+                top_left_y = utm_y + (img_height / 2) * gsd  # Y augmente vers le nord en UTM
                 transform = from_origin(top_left_x, top_left_y, gsd, gsd)
                 
+                # Détermination des dimensions et du nombre de bandes
                 height_img, width_img = image_np.shape[:2]
-                count = 3 if image_np.ndim == 3 and image_np.shape[2] == 3 else 1
+                if image_np.ndim == 3:
+                    if image_np.shape[2] in [3, 4]:
+                        count = image_np.shape[2]
+                    else:
+                        st.error("Format d'image non supporté.")
+                        return
+                else:
+                    count = 1
                 
-                # Création du GeoTIFF en mémoire avec MemoryFile
+                # Création du GeoTIFF en mémoire via MemoryFile
                 with MemoryFile() as memfile:
                     with memfile.open(
-                        driver='GTiff',
+                        driver="GTiff",
                         height=height_img,
                         width=width_img,
                         count=count,
@@ -137,8 +143,8 @@ if uploaded_file is not None:
                         crs=utm_crs.to_wkt(),
                         transform=transform
                     ) as dst:
-                        if count == 3:
-                            for i in range(3):
+                        if count > 1:
+                            for i in range(count):
                                 dst.write(image_np[:, :, i], i + 1)
                         else:
                             dst.write(image_np, 1)
