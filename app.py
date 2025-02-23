@@ -3,74 +3,38 @@ from streamlit_drawable_canvas import st_canvas
 from PIL import Image
 import numpy as np
 
-# Wrapper qui encapsule un tableau NumPy et fournit les attributs height et width
-class WrappedImage:
-    def __init__(self, array, height, width):
-        self.array = array
-        self._height = height
-        self._width = width
+# Configuration de la page
+st.set_page_config(page_title="Application de Dessin", layout="wide")
 
-    def __bool__(self):
-        return True
+st.title("Application de Dessin Basique")
 
-    def __getattr__(self, attr):
-        if attr == 'height':
-            return self._height
-        elif attr == 'width':
-            return self._width
-        return getattr(self.array, attr)
+# Paramètres du pinceau pointillé
+dot_size = st.sidebar.radio("Taille du point", [5, 10, 20])
+stroke_color = st.sidebar.color_picker("Couleur du pinceau", "#000000")
 
-    def __array__(self, *args, **kwargs):
-        return np.array(self.array, *args, **kwargs)
+# Téléversement d'une image comme fond
+uploaded_file = st.sidebar.file_uploader("Téléverser une image de fond", type=["png", "jpg", "jpeg"])
+background_image = None
 
-st.title("Application de Marquage d'Images")
+if uploaded_file is not None:
+    image = Image.open(uploaded_file).convert("RGBA")
+    image = image.resize((600, 400))  # Adapter la taille au canevas
+    background_image = np.array(image)  # Convertir en tableau NumPy
 
-# 1. Téléversement des images
-uploaded_files = st.file_uploader("Téléversez vos images", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+# Création du canevas
+canvas_result = st_canvas(
+    stroke_width=dot_size,
+    stroke_color=stroke_color,
+    background_image=background_image,  # Utilisation directe du tableau NumPy
+    height=400,
+    width=600,
+    drawing_mode="point",
+    key="canvas",
+)
 
-if uploaded_files:
-    # Chargement des images via PIL
-    images = [Image.open(file) for file in uploaded_files]
-
-    # Navigation entre les images avec un slider
-    img_index = st.slider("Choisissez une image", 0, len(images) - 1, 0)
-    current_image = images[img_index]
-    st.image(current_image, caption=f"Image {img_index + 1}/{len(images)}", use_column_width=True)
-
-    # 2. Sélection de la classe et de la gravité dans la barre latérale
-    st.sidebar.header("Paramètres du marqueur")
-    classes = [f"Classe {i}" for i in range(1, 14)]  # 13 classes
-    selected_class = st.sidebar.selectbox("Sélectionnez la classe", classes)
-    selected_severity = st.sidebar.selectbox("Sélectionnez la gravité", [1, 2, 3])
-
-    st.write("Cliquez sur l'image pour placer des marqueurs.")
-
-    # Conversion de l'image en tableau NumPy
-    image_np = np.array(current_image)
-    # Encapsulation dans le wrapper pour fournir height et width
-    wrapped_image = WrappedImage(image_np, current_image.height, current_image.width)
-
-    # 3. Création d'un canvas interactif avec l'image en fond
-    canvas_result = st_canvas(
-        fill_color="rgba(255, 165, 0, 0.3)",  # Couleur de remplissage semi-transparente pour les points
-        stroke_width=5,
-        stroke_color="red",
-        background_image=wrapped_image,
-        update_streamlit=True,
-        height=current_image.height,
-        width=current_image.width,
-        drawing_mode="point",  # Mode point pour placer des marqueurs
-        point_display_radius=10,
-        key="canvas",
-    )
-
-    # Récupération et affichage des marqueurs avec leurs coordonnées
-    if canvas_result.json_data is not None:
-        objects = canvas_result.json_data.get("objects", [])
-        if objects:
-            st.subheader("Marqueurs placés")
-            for i, obj in enumerate(objects):
-                # Récupération des coordonnées locales du marqueur
-                x = obj.get("left", 0)
-                y = obj.get("top", 0)
-                st.write(f"Marqueur {i+1} : Coordonnées ({x:.2f}, {y:.2f}) | {selected_class} - Gravité {selected_severity}")
+# Sauvegarde du dessin si l'utilisateur le souhaite
+if canvas_result.image_data is not None:
+    img = Image.fromarray((canvas_result.image_data * 255).astype(np.uint8))
+    if st.sidebar.button("Sauvegarder le dessin"):
+        img.save("dessin.png")
+        st.sidebar.success("Dessin sauvegardé sous 'dessin.png'")
