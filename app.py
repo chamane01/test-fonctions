@@ -94,23 +94,31 @@ def compute_gsd(altitude, focal_length_mm, sensor_width_mm, image_width_px):
     gsd = (altitude * sensor_width_m) / (focal_length_m * image_width_px)
     return gsd
 
-def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs, rotation_angle=0):
+def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs, rotation_angle=0, scaling_factor=1):
     """
     Convertit une image JPEG en GeoTIFF géoréférencé en UTM avec correction d'orientation.
-    La transformation affine est construite de façon à :
-    - Centrer l'image sur son centre (dimensions en pixels)
-    - Appliquer l'échelle (taille d'un pixel)
-    - Appliquer une rotation (pour aligner la trajectoire avec le nord)
-    - Positionner le centre sur les coordonnées UTM calculées
+    Applique également un redimensionnement de l'image selon scaling_factor.
+    La taille effective d'un pixel (résolution spatiale) est ajustée automatiquement.
     """
     img = Image.open(image_file)
     img = ImageOps.exif_transpose(img)
+    
+    # Redimensionnement de l'image selon le facteur choisi
+    orig_width, orig_height = img.size
+    new_width = int(orig_width * scaling_factor)
+    new_height = int(orig_height * scaling_factor)
+    img = img.resize((new_width, new_height), Image.LANCZOS)
+    
     img_array = np.array(img)
     height, width = img_array.shape[:2]
     
+    # Calcul de la nouvelle taille de pixel :
+    # Si l'image est réduite (scaling_factor < 1), la résolution spatiale effective est pixel_size / scaling_factor
+    effective_pixel_size = pixel_size / scaling_factor
+
     center_x, center_y = utm_center
     T1 = Affine.translation(-width/2, -height/2)
-    T2 = Affine.scale(pixel_size, -pixel_size)  # y négatif pour que le haut de l'image corresponde au nord
+    T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)  # y négatif pour que le haut corresponde au nord
     T3 = Affine.rotation(rotation_angle)         # rotation en degrés (sens trigonométrique)
     T4 = Affine.translation(center_x, center_y)
     transform = T4 * T3 * T2 * T1
@@ -183,14 +191,14 @@ if uploaded_files:
     if len(images_info) == 0:
         st.error("Aucune image exploitable (avec coordonnées GPS) n'a été trouvée.")
     else:
-        # Sélection de l'image à convertir via un selecteur
+        # Sélection de l'image à convertir
         selected_filename = st.selectbox(
             "Sélectionnez l'image à convertir en GeoTIFF",
             options=[info["filename"] for info in images_info]
         )
         selected_image_info = next(info for info in images_info if info["filename"] == selected_filename)
         
-        # Calcul de l'angle de trajectoire pour l'image sélectionnée
+        # Calcul de l'angle de trajectoire si plusieurs images sont disponibles
         if len(images_info) >= 2:
             idx = next(i for i, info in enumerate(images_info) if info["filename"] == selected_filename)
             if idx == 0:
@@ -200,7 +208,6 @@ if uploaded_files:
                 dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
                 dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
             else:
-                # Utilisation du segment entre la photo précédente et la photo suivante
                 dx = images_info[idx+1]["utm"][0] - images_info[idx-1]["utm"][0]
                 dy = images_info[idx+1]["utm"][1] - images_info[idx-1]["utm"][1]
             flight_angle = math.degrees(math.atan2(dx, dy))
@@ -209,7 +216,7 @@ if uploaded_files:
             flight_angle = 0
             st.info("Angle de trajectoire non calculable (une seule image) → 0°")
         
-        # Calcul du GSD si l'image sélectionnée possède toutes les métadonnées nécessaires
+        # Calcul du GSD si toutes les métadonnées sont disponibles
         if (selected_image_info["altitude"] is not None and 
             selected_image_info["focal_length"] is not None and 
             selected_image_info["sensor_width"] is not None):
@@ -235,7 +242,18 @@ if uploaded_files:
         )
         st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
         
-        # Pour orienter l'image de façon que le nord soit en haut, on applique une rotation de -flight_angle
+        # Sélecteur du facteur de redimensionnement
+        scale_options = ["/10", "/5", "/2", "0", "*2", "*5", "*10"]
+        selected_scale = st.select_slider("Choisissez le facteur de redimensionnement de l'image", options=scale_options, value="0")
+        mapping = {"/10": 0.1, "/5": 0.2, "/2": 0.5, "0": 1, "*2": 2, "*5": 5, "*10": 10}
+        scaling_factor = mapping[selected_scale]
+        st.info(f"Facteur de redimensionnement sélectionné : {scaling_factor}")
+        
+        # Affichage de la résolution effective après redimensionnement
+        effective_pixel_size = pixel_size / scaling_factor
+        st.info(f"Résolution spatiale effective après redimensionnement : {effective_pixel_size*100:.1f} cm/pixel")
+        
+        # Correction d'orientation
         rotation_correction = -flight_angle
         st.info(f"Correction d'orientation appliquée : {rotation_correction:.1f}°")
         
@@ -246,7 +264,8 @@ if uploaded_files:
             utm_center=selected_image_info["utm"],
             pixel_size=pixel_size,
             utm_crs=selected_image_info["utm_crs"],
-            rotation_angle=rotation_correction
+            rotation_angle=rotation_correction,
+            scaling_factor=scaling_factor
         )
         
         st.success(f"Image {selected_image_info['filename']} convertie en GeoTIFF.")
