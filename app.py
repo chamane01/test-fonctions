@@ -91,40 +91,57 @@ def compute_gsd(altitude, focal_length_mm, sensor_width_mm, image_width_px):
     gsd = (altitude * sensor_width_m) / (focal_length_m * image_width_px)
     return gsd
 
-def convert_to_tiff_axis_aligned(image_file, output_path, utm_center, pixel_size, utm_crs, rotation_angle=0):
+def convert_to_tiff_axis_aligned(image_file, output_path, utm_center, base_pixel_size, utm_crs, rotation_angle=0, target_width=None, target_height=None):
     """
-    Convertit une image JPEG en GeoTIFF orienté avec le nord en haut.
-    La rotation (en degrés) est appliquée sur l'image avec expand=True afin d'obtenir
-    un rendu recadré sans le cadre issu de la position d'affichage d'origine.
+    Convertit une image JPEG en GeoTIFF "axis-aligned" (sans cadre superflu) avec :
+    - Application de la rotation (rotation_angle en degrés, sens anti-horaire) avec expand=True.
+    - Redimensionnement de l'image aux dimensions de sortie choisies (target_width x target_height en pixels).
     
-    La transformation géoréférencée est recalculée pour que le centre de l'image (après rotation)
-    corresponde à la coordonnée UTM fournie.
+    La "ground extent" est déterminée à partir de la taille de l'image tournée et du base_pixel_size (m/pixel),
+    puis la nouvelle taille de pixel (m/pixel) est calculée automatiquement pour conserver cette emprise.
+    
+    Le centre de l'image (après rotation et redimensionnement) est positionné sur utm_center.
     """
-    # Ouvrir et corriger l'orientation EXIF
+    # Ouvrir et corriger l'orientation
     img = Image.open(image_file)
     img = ImageOps.exif_transpose(img)
     
-    # Appliquer la rotation si nécessaire (PIL tourne dans le sens anti-horaire)
+    # Appliquer la rotation si nécessaire (expand=True pour recadrer sans cadre)
     if rotation_angle != 0:
         img_rot = img.rotate(rotation_angle, expand=True)
     else:
         img_rot = img
-        
-    # Nouvelle taille de l'image après rotation
-    new_width, new_height = img_rot.size
-    img_array = np.array(img_rot)
-    
-    # Recalcule de la transformation pour un TIFF axis-aligné
+    rot_width, rot_height = img_rot.size
+
+    # Si aucune dimension de sortie n'est fournie, on garde la taille d'origine après rotation
+    if target_width is None:
+        target_width = rot_width
+    if target_height is None:
+        target_height = rot_height
+
+    # Calcul de l'emprise au sol (en m) de l'image tournée si elle était exportée sans redimensionnement
+    ground_width = rot_width * base_pixel_size
+    ground_height = rot_height * base_pixel_size
+
+    # Nouvelle taille de pixel (m/pixel) après redimensionnement
+    new_pixel_size_x = ground_width / target_width
+    new_pixel_size_y = ground_height / target_height
+
+    # Redimensionner l'image aux dimensions choisies
+    img_resized = img_rot.resize((target_width, target_height), Image.LANCZOS)
+    img_array = np.array(img_resized)
+
+    # Calcul de la nouvelle transformation : le centre reste utm_center
     center_x, center_y = utm_center
-    x_min = center_x - (new_width / 2) * pixel_size
-    y_max = center_y + (new_height / 2) * pixel_size
-    transform = from_origin(x_min, y_max, pixel_size, pixel_size)
-    
+    x_min = center_x - (target_width / 2) * new_pixel_size_x
+    y_max = center_y + (target_height / 2) * new_pixel_size_y
+    transform = from_origin(x_min, y_max, new_pixel_size_x, new_pixel_size_y)
+
     with rasterio.open(
         output_path, 'w',
         driver='GTiff',
-        height=new_height,
-        width=new_width,
+        height=target_height,
+        width=target_width,
         count=3 if len(img_array.shape) == 3 else 1,
         dtype=img_array.dtype,
         crs=utm_crs,
@@ -136,7 +153,7 @@ def convert_to_tiff_axis_aligned(image_file, output_path, utm_center, pixel_size
         else:
             dst.write(img_array, 1)
 
-st.title("Conversion JPEG → GeoTIFF sans cadre, avec sélection et résolution ajustable")
+st.title("Conversion JPEG → GeoTIFF sans cadre, dimensions personnalisables")
 
 uploaded_files = st.file_uploader(
     "Téléversez une ou plusieurs images (JPG/JPEG) avec métadonnées EXIF",
@@ -190,37 +207,27 @@ if uploaded_files:
     if len(images_info) == 0:
         st.error("Aucune image exploitable (avec coordonnées GPS) n'a été trouvée.")
     else:
-        # Sélecteur pour choisir l'image à exporter
+        # Sélection de l'image à exporter
         filenames = [info["filename"] for info in images_info]
         selected_filename = st.selectbox("Sélectionnez l'image à exporter en GeoTIFF", filenames)
         selected_image = next(item for item in images_info if item["filename"] == selected_filename)
         
-        # Affichage d'une information sur le GSD calculé (si possible)
+        # Détermination du GSD (m/pixel) à partir des métadonnées si disponibles, sinon valeur par défaut
         if (selected_image["altitude"] is not None and 
             selected_image["focal_length"] is not None and 
             selected_image["sensor_width"] is not None):
-            pixel_size_calc = compute_gsd(
+            base_pixel_size = compute_gsd(
                 altitude=selected_image["altitude"],
                 focal_length_mm=selected_image["focal_length"],
                 sensor_width_mm=selected_image["sensor_width"],
                 image_width_px=selected_image["img_width"]
             )
-            st.success(f"Image de référence : {selected_image['filename']}  |  GSD calculé = {pixel_size_calc:.4f} m/pixel")
+            st.success(f"GSD calculé = {base_pixel_size:.4f} m/pixel")
         else:
-            st.warning("Les métadonnées nécessaires au calcul du GSD ne sont pas complètes pour cette image.")
+            base_pixel_size = 0.03
+            st.warning("Utilisation d'une résolution par défaut de 0.03 m/pixel (certaines métadonnées sont manquantes).")
         
-        # Curseur pour ajuster la résolution d'export (en m/pixel)
-        pixel_size = st.slider(
-            "Ajustez la résolution spatiale (m/pixel) :",
-            min_value=0.001,
-            max_value=0.1,
-            value=0.03,
-            step=0.001,
-            format="%.3f"
-        )
-        st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
-        
-        # Calcul de l'angle de trajectoire (si plusieurs images sont disponibles)
+        # Calcul de l'angle de trajectoire si plusieurs images sont disponibles
         if len(images_info) >= 2:
             first_img = images_info[0]
             last_img = images_info[-1]
@@ -232,30 +239,45 @@ if uploaded_files:
             flight_angle = 0
             st.info("Angle de trajectoire non calculable (une seule image) → 0°")
         
-        # Correction pour que le nord soit en haut (on applique -flight_angle)
+        # Pour que le nord soit en haut, on applique une rotation de -flight_angle
         rotation_correction = -flight_angle
         st.info(f"Correction d'orientation appliquée : {rotation_correction:.1f}°")
         
-        # Export du TIFF à partir de l'image sélectionnée et de la résolution choisie
+        # Pour définir des dimensions de sortie en pixels, on calcule d'abord la taille de l'image après rotation
+        img_temp = Image.open(io.BytesIO(selected_image["data"]))
+        img_temp = ImageOps.exif_transpose(img_temp)
+        if rotation_correction != 0:
+            img_rot_temp = img_temp.rotate(rotation_correction, expand=True)
+        else:
+            img_rot_temp = img_temp
+        default_width, default_height = img_rot_temp.size
+        
+        target_width = st.number_input("Largeur de sortie (pixels) :", min_value=100, value=default_width, step=10)
+        target_height = st.number_input("Hauteur de sortie (pixels) :", min_value=100, value=default_height, step=10)
+        
+        st.info(f"Dimensions de sortie choisies : {target_width} x {target_height} pixels")
+        
         output_path = "output.tif"
         convert_to_tiff_axis_aligned(
             image_file=io.BytesIO(selected_image["data"]),
             output_path=output_path,
             utm_center=selected_image["utm"],
-            pixel_size=pixel_size,
+            base_pixel_size=base_pixel_size,
             utm_crs=selected_image["utm_crs"],
-            rotation_angle=rotation_correction
+            rotation_angle=rotation_correction,
+            target_width=target_width,
+            target_height=target_height
         )
         
         st.success(f"Image {selected_image['filename']} convertie en GeoTIFF.")
         
-        # Affichage des métadonnées du GeoTIFF créé
+        # Affichage des métadonnées GeoTIFF
         with rasterio.open(output_path) as src:
             st.write("**Méta-données GeoTIFF**")
             st.write("CRS :", src.crs)
             st.write("Transform :", src.transform)
         
-        # Bouton de téléchargement du GeoTIFF
+        # Bouton de téléchargement
         with open(output_path, "rb") as f:
             st.download_button(
                 label="Télécharger le GeoTIFF",
