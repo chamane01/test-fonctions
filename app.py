@@ -1,7 +1,6 @@
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
-import numpy as np
 
 st.title("Annotation d'images sur une carte")
 st.write("Téléversez des images, naviguez entre elles et ajoutez des marqueurs avec attribution de classe et gravité.")
@@ -13,36 +12,33 @@ if uploaded_files:
     # Charger toutes les images téléversées
     images = [Image.open(file) for file in uploaded_files]
     
-    # Sélection de l'image avec un slider
+    # 2. Sélection de l'image à afficher (avec slider ou flèches)
     image_index = st.slider("Choisissez l'image", 1, len(images), 1) - 1
     current_image = images[image_index]
     st.write(f"Affichage de l'image {image_index+1} sur {len(images)}")
-    
-    # Conversion de l'image PIL en tableau NumPy pour éviter l'appel à st_image.image_to_url
-    current_image_np = np.array(current_image)
     
     # 3. Choix de la classe et de la gravité dans la barre latérale
     st.sidebar.header("Attribution de classe et gravité")
     classe = st.sidebar.selectbox("Classe", [f"Classe {i}" for i in range(1, 14)])
     gravite = st.sidebar.selectbox("Gravité", [1, 2, 3])
     
-    # Initialisation des variables de session pour stocker les marqueurs et la clé du canvas
+    # Initialiser les variables de session pour stocker les marqueurs et la clé du canvas
     if "markers" not in st.session_state:
         st.session_state.markers = {}  # Dictionnaire pour sauvegarder les marqueurs par image
     if "canvas_key" not in st.session_state:
         st.session_state.canvas_key = 0
 
     st.write("Cliquez sur l'image pour ajouter un marqueur (un seul marqueur par action).")
-    
-    # Affichage du canvas avec l'image convertie en tableau NumPy
+
+    # Affichage du canvas avec l'image en fond
     canvas_result = st_canvas(
         fill_color="rgba(255, 0, 0, 0.3)",  # couleur de remplissage du marqueur
         stroke_width=5,
         stroke_color="#ff0000",
-        background_image=current_image_np,
+        background_image=current_image,
         update_streamlit=True,
-        height=current_image_np.shape[0],
-        width=current_image_np.shape[1],
+        height=current_image.height,
+        width=current_image.width,
         drawing_mode="point",  # mode « point » pour ajouter un marqueur
         key=f"canvas_{st.session_state.canvas_key}"
     )
@@ -61,8 +57,8 @@ if uploaded_files:
                 if image_key not in st.session_state.markers:
                     st.session_state.markers[image_key] = []
                 st.session_state.markers[image_key].append(marker_data)
-                st.success("Marqueur enregistré !")
-                # Réinitialisation du canvas pour permettre l'ajout d'un nouveau marqueur
+                st.success("Marqueur enregistré !")
+                # Incrémente la clé pour réinitialiser le canvas (efface le marqueur actuel)
                 st.session_state.canvas_key += 1
             else:
                 st.warning("Aucun marqueur détecté. Veuillez cliquer sur l'image pour ajouter un marqueur.")
