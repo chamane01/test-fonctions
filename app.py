@@ -3,7 +3,7 @@ import folium
 from folium.plugins import Draw  # Plugin pour dessiner sur la carte
 from streamlit_folium import st_folium
 import rasterio
-from rasterio.warp import calculate_default_transform, reproject, Resampling
+from rasterio.warp import calculate_default_transform, reproject, Resampling, transform
 from PIL import Image
 import numpy as np
 import base64
@@ -18,13 +18,13 @@ def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
     Reprojette un fichier TIFF vers le CRS cible et renvoie le chemin du fichier reprojeté.
     """
     with rasterio.open(input_tiff) as src:
-        transform, width, height = calculate_default_transform(
+        transform_, width, height = calculate_default_transform(
             src.crs, target_crs, src.width, src.height, *src.bounds
         )
         kwargs = src.meta.copy()
         kwargs.update({
             "crs": target_crs,
-            "transform": transform,
+            "transform": transform_,
             "width": width,
             "height": height,
         })
@@ -37,7 +37,7 @@ def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
                     destination=rasterio.band(dst, i),
                     src_transform=src.transform,
                     src_crs=src.crs,
-                    dst_transform=transform,
+                    dst_transform=transform_,
                     dst_crs=target_crs,
                     resampling=Resampling.nearest,
                 )
@@ -84,7 +84,7 @@ def normalize_data(data):
 
 # --- Application principale ---
 
-st.title("Affichage de TIFF sur une carte dynamique avec classification des marqueurs")
+st.title("Affichage de TIFF avec classification des marqueurs")
 
 # Téléversement du fichier TIFF
 uploaded_file = st.file_uploader("Téléversez votre fichier TIFF", type=["tif", "tiff"])
@@ -138,9 +138,13 @@ if uploaded_file is not None:
         bounds = src.bounds
     st.write("Bornes (EPSG:4326) :", bounds)
 
-    # Création de la carte centrée sur le TIFF avec ajustement automatique du zoom
+    # Calcul du centre du TIFF et détermination de la zone UTM
     center_lat = (bounds.bottom + bounds.top) / 2
     center_lon = (bounds.left + bounds.right) / 2
+    utm_zone = int((center_lon + 180) / 6) + 1
+    utm_crs = f"EPSG:326{utm_zone:02d}"  # Pour l'hémisphère nord
+
+    # Création de la carte centrée sur le TIFF avec ajustement automatique du zoom
     m = folium.Map(location=[center_lat, center_lon])
     
     # Ajout de l'overlay de l'image
@@ -164,7 +168,7 @@ if uploaded_file is not None:
     m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
     folium.LayerControl().add_to(m)
     
-    # Utilisation d'une key pour forcer la mise à jour du composant
+    # Utilisation d'une key pour forcer la mise à jour
     result = st_folium(m, width=700, height=500, key="folium_map")
     
     # Bilan dynamique des marqueurs dessinés et intégration du système de classification
@@ -173,25 +177,39 @@ if uploaded_file is not None:
     features = []
     all_drawings = result.get("all_drawings")
     if all_drawings:
-        # Si all_drawings est un dict contenant une clé "features"
         if isinstance(all_drawings, dict) and "features" in all_drawings:
             features = all_drawings.get("features", [])
-        # Sinon, s'il s'agit d'une liste, on l'utilise directement
         elif isinstance(all_drawings, list):
             features = all_drawings
 
     if features:
-        st.markdown("Pour chaque marqueur dessiné, associez une classe ci-dessous :")
+        st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité ci-dessous :")
         for idx, feature in enumerate(features):
             if feature.get("geometry", {}).get("type") == "Point":
-                coords = feature.get("geometry", {}).get("coordinates", "Inconnues")
-                # Chaque marqueur bénéficie d'un selectbox pour sélectionner sa classe
+                coords = feature.get("geometry", {}).get("coordinates")
+                if coords and isinstance(coords, list) and len(coords) >= 2:
+                    lon, lat = coords
+                    # Conversion des coordonnées EPSG:4326 en UTM
+                    utm_x, utm_y = transform("EPSG:4326", utm_crs, [lon], [lat])
+                    utm_coords = (round(utm_x[0], 2), round(utm_y[0], 2))
+                else:
+                    utm_coords = "Inconnues"
                 selected_class = st.selectbox(
-                    f"Marqueur {idx+1} (Coordonnées : {coords})",
+                    f"Marqueur {idx+1} (Coordonnées UTM : {utm_coords}) - Classe",
                     [f"Classe {i}" for i in range(1, 14)],
                     key=f"marker_class_{idx}"
                 )
-                marker_data.append({"Marqueur": idx+1, "Coordonnées": coords, "Classe": selected_class})
+                selected_gravity = st.selectbox(
+                    f"Marqueur {idx+1} (Coordonnées UTM : {utm_coords}) - Gravité (1,2,3)",
+                    [1, 2, 3],
+                    key=f"marker_gravity_{idx}"
+                )
+                marker_data.append({
+                    "Marqueur": idx+1,
+                    "Coordonnées UTM": utm_coords,
+                    "Classe": selected_class,
+                    "Gravité": selected_gravity
+                })
     else:
         st.write("Aucun marqueur n'a été détecté.")
 
