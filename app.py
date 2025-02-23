@@ -46,17 +46,27 @@ if uploaded_file is not None:
                 else:
                     gps_altitude = float(alt_val)
 
+    # Fonction modifiée pour convertir une valeur GPS en degrés décimaux
+    def convert_to_degrees(value):
+        # Vérifie si la valeur est un tuple de 3 éléments avec des sous-tuples
+        if isinstance(value, tuple) and len(value) == 3 and isinstance(value[0], tuple):
+            d = value[0][0] / value[0][1]
+            m = value[1][0] / value[1][1]
+            s = value[2][0] / value[2][1]
+            return d + (m / 60.0) + (s / 3600.0)
+        else:
+            # Sinon, tente de convertir directement en float
+            try:
+                return float(value)
+            except Exception as e:
+                st.error("Erreur lors de la conversion des coordonnées GPS: " + str(e))
+                return None
+
     # Extraction des coordonnées GPS (latitude et longitude)
     gps_lat = None
     gps_lon = None
     if 'GPSInfo' in exif_data:
         gps_info = exif_data['GPSInfo']
-        # Fonction pour convertir les coordonnées GPS en degrés décimaux
-        def convert_to_degrees(value):
-            d = value[0][0] / value[0][1]
-            m = value[1][0] / value[1][1]
-            s = value[2][0] / value[2][1]
-            return d + (m / 60.0) + (s / 3600.0)
         if 2 in gps_info and 4 in gps_info:
             gps_lat = convert_to_degrees(gps_info[2])
             gps_lon = convert_to_degrees(gps_info[4])
