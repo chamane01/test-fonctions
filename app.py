@@ -131,7 +131,7 @@ def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs, ro
         else:
             dst.write(img_array, 1)
 
-st.title("Conversion JPEG → GeoTIFF avec orientation corrigée")
+st.title("Conversion JPEG → GeoTIFF avec orientation et position ajustées")
 
 uploaded_files = st.file_uploader(
     "Téléversez une ou plusieurs images (JPG/JPEG) avec métadonnées EXIF",
@@ -209,7 +209,35 @@ if uploaded_files:
             flight_angle = 0
             st.info("Angle de trajectoire non calculable (une seule image) → 0°")
         
-        # Calcul du GSD si l'image sélectionnée possède toutes les métadonnées nécessaires
+        # Ajustement de la position (centre) du TIFF à partir des positions GPS voisines
+        if len(images_info) >= 2:
+            if idx == 0:
+                # Première image : moyenne de la position avec la suivante
+                adjusted_center = (
+                    (images_info[0]["utm"][0] + images_info[1]["utm"][0]) / 2,
+                    (images_info[0]["utm"][1] + images_info[1]["utm"][1]) / 2
+                )
+            elif idx == len(images_info) - 1:
+                # Dernière image : moyenne avec la précédente
+                adjusted_center = (
+                    (images_info[-2]["utm"][0] + images_info[-1]["utm"][0]) / 2,
+                    (images_info[-2]["utm"][1] + images_info[-1]["utm"][1]) / 2
+                )
+            else:
+                # Image intermédiaire : projection de sa position sur la ligne reliant ses voisines
+                P1 = images_info[idx-1]["utm"]
+                P2 = images_info[idx+1]["utm"]
+                P = selected_image_info["utm"]
+                v = (P2[0] - P1[0], P2[1] - P1[1])
+                w = (P[0] - P1[0], P[1] - P1[1])
+                t = (w[0]*v[0] + w[1]*v[1]) / (v[0]**2 + v[1]**2)
+                proj = (P1[0] + t*v[0], P1[1] + t*v[1])
+                adjusted_center = proj
+            st.info(f"Position ajustée du TIFF : {adjusted_center}")
+        else:
+            adjusted_center = selected_image_info["utm"]
+        
+        # Calcul du GSD si les métadonnées nécessaires sont disponibles
         if (selected_image_info["altitude"] is not None and 
             selected_image_info["focal_length"] is not None and 
             selected_image_info["sensor_width"] is not None):
@@ -235,7 +263,7 @@ if uploaded_files:
         )
         st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
         
-        # Pour orienter l'image de façon que le nord soit en haut, on applique une rotation de -flight_angle
+        # Pour que le nord soit en haut, on applique une rotation de -flight_angle
         rotation_correction = -flight_angle
         st.info(f"Correction d'orientation appliquée : {rotation_correction:.1f}°")
         
@@ -243,7 +271,7 @@ if uploaded_files:
         convert_to_tiff(
             image_file=io.BytesIO(selected_image_info["data"]),
             output_path=output_path,
-            utm_center=selected_image_info["utm"],
+            utm_center=adjusted_center,
             pixel_size=pixel_size,
             utm_crs=selected_image_info["utm_crs"],
             rotation_angle=rotation_correction
