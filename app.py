@@ -173,7 +173,7 @@ if uploaded_file is not None:
     features = []
     if result and isinstance(result, dict):
         all_drawings = result.get("all_drawings")
-        if all_drawings:
+        if isinstance(all_drawings, dict):
             features = all_drawings.get("features", [])
     
     if features:
