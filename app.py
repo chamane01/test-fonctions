@@ -11,14 +11,22 @@ st.title("Application de Dessin Basique")
 # Sélection de la taille des points
 point_size = st.sidebar.radio("Taille des points", [5, 10, 20])
 stroke_color = st.sidebar.color_picker("Couleur du pinceau", "#000000")
-background_color = st.sidebar.color_picker("Couleur de fond", "#FFFFFF")
+
+# Téléversement de l'image de fond
+uploaded_file = st.sidebar.file_uploader("Téléverser une image de fond", type=["png", "jpg", "jpeg"])
+if uploaded_file is not None:
+    background_image = Image.open(uploaded_file)
+    background_image = background_image.resize((600, 400))
+else:
+    background_image = None
 
 # Création du canevas
 canvas_result = st_canvas(
     fill_color=stroke_color,  # La couleur du point
     stroke_width=point_size,  # Taille du point
     stroke_color=stroke_color,
-    background_color=background_color,
+    background_image=background_image,  # Image de fond
+    background_color=None if background_image else "#FFFFFF",
     height=400,
     width=600,
     drawing_mode="freedraw",  # Mode dessin libre pour placer les points
