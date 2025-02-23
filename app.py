@@ -171,7 +171,7 @@ if uploaded_file is not None:
     # Utilisation d'une key pour forcer la mise à jour
     result = st_folium(m, width=700, height=500, key="folium_map")
     
-    # Bilan dynamique des marqueurs dessinés et intégration du système de classification
+    # Bilan dynamique des marqueurs dessinés avec classification et gravité
     st.subheader("Bilan des marqueurs dessinés")
     marker_data = []
     features = []
@@ -194,16 +194,20 @@ if uploaded_file is not None:
                     utm_coords = (round(utm_x[0], 2), round(utm_y[0], 2))
                 else:
                     utm_coords = "Inconnues"
-                selected_class = st.selectbox(
-                    f"Marqueur {idx+1} (Coordonnées UTM : {utm_coords}) - Classe",
-                    [f"Classe {i}" for i in range(1, 14)],
-                    key=f"marker_class_{idx}"
-                )
-                selected_gravity = st.selectbox(
-                    f"Marqueur {idx+1} (Coordonnées UTM : {utm_coords}) - Gravité (1,2,3)",
-                    [1, 2, 3],
-                    key=f"marker_gravity_{idx}"
-                )
+                st.markdown(f"**Marqueur {idx+1} (Coordonnées UTM : {utm_coords})**")
+                col1, col2 = st.columns(2)
+                with col1:
+                    selected_class = st.selectbox(
+                        "Classe",
+                        [f"Classe {i}" for i in range(1, 14)],
+                        key=f"marker_class_{idx}"
+                    )
+                with col2:
+                    selected_gravity = st.selectbox(
+                        "Gravité",
+                        [1, 2, 3],
+                        key=f"marker_gravity_{idx}"
+                    )
                 marker_data.append({
                     "Marqueur": idx+1,
                     "Coordonnées UTM": utm_coords,
