@@ -86,11 +86,6 @@ def normalize_data(data):
 
 st.title("Affichage de TIFF sur une carte dynamique avec outils marqueurs")
 
-# Widgets pour contrôler le zoom et la classe des marqueurs
-selected_zoom = st.slider("Niveau de zoom personnalisé", min_value=1, max_value=18, value=10)
-auto_zoom = st.checkbox("Ajuster automatiquement le zoom sur le TIFF", value=True)
-selected_class = st.selectbox("Sélectionnez la classe pour les nouveaux marqueurs", [f"Classe {i}" for i in range(1, 14)])
-
 # Téléversement du fichier TIFF
 uploaded_file = st.file_uploader("Téléversez votre fichier TIFF", type=["tif", "tiff"])
 if uploaded_file is not None:
@@ -143,20 +138,15 @@ if uploaded_file is not None:
         bounds = src.bounds
     st.write("Bornes (EPSG:4326) :", bounds)
 
-    # Calcul du centre du TIFF
+    # Création de la carte centrée sur le TIFF
     center_lat = (bounds.bottom + bounds.top) / 2
     center_lon = (bounds.left + bounds.right) / 2
-
-    # Création de la carte : si l'ajustement automatique est activé, le zoom sera défini par fit_bounds sinon par le slider
-    if auto_zoom:
-        m = folium.Map(location=[center_lat, center_lon])
-    else:
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=selected_zoom)
-
+    m = folium.Map(location=[center_lat, center_lon])
+    
     # Ajout de l'overlay de l'image
     add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
     
-    # Ajout du plugin de dessin pour les marqueurs (seul l'outil 'marker' est activé)
+    # Ajout du plugin de dessin pour les marqueurs
     draw = Draw(
         draw_options={
             'marker': True,
@@ -170,34 +160,39 @@ if uploaded_file is not None:
     )
     draw.add_to(m)
     
-    # Si le zoom automatique est activé, ajuster la vue pour couvrir entièrement le TIFF
-    if auto_zoom:
-        m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
-    
-    # Ajout d'un LayerControl pour gérer les couches
+    # Ajustement automatique de la vue pour couvrir entièrement le TIFF
+    m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
     folium.LayerControl().add_to(m)
     
-    # Injection d'un script JavaScript personnalisé pour associer le popup de chaque nouveau marqueur à la classe sélectionnée
-    map_var = m.get_name()
-    script = f"""
-    <script>
-        var drawnItems = new L.FeatureGroup();
-        {map_var}.addLayer(drawnItems);
-        {map_var}.on('draw:created', function (e) {{
-            var type = e.layerType,
-                layer = e.layer;
-            if (type === 'marker') {{
-                layer.bindPopup("Classe: {selected_class}").openPopup();
-            }}
-            drawnItems.addLayer(layer);
-        }});
-    </script>
-    """
-    m.get_root().html.add_child(folium.Element(script))
-    
     # Affichage de la carte dans Streamlit
-    st_folium(m, width=700, height=500)
-
+    result = st_folium(m, width=700, height=500)
+    
+    # Bilan dynamique des marqueurs dessinés et de leur classe
+    st.subheader("Bilan des marqueurs dessinés")
+    marker_data = []
+    if result is not None and "all_drawings" in result:
+        features = result["all_drawings"].get("features", [])
+        if features:
+            st.markdown("Pour chaque marqueur dessiné, sélectionnez la classe correspondante ci-dessous :")
+            for idx, feature in enumerate(features):
+                if feature["geometry"]["type"] == "Point":
+                    coords = feature["geometry"]["coordinates"]
+                    # Chaque marqueur obtient une sélection de classe via un selectbox
+                    selected_class = st.selectbox(
+                        f"Marqueur {idx+1} (Coordonnées : {coords})",
+                        [f"Classe {i}" for i in range(1, 14)],
+                        key=f"marker_class_{idx}"
+                    )
+                    marker_data.append({"Marqueur": idx+1, "Coordonnées": coords, "Classe": selected_class})
+        else:
+            st.write("Aucun marqueur n'a été dessiné.")
+    else:
+        st.write("Aucun marqueur n'a été dessiné.")
+    
+    if marker_data:
+        st.markdown("### Récapitulatif des marqueurs")
+        st.table(marker_data)
+    
     # Nettoyage des fichiers temporaires
     if os.path.exists(temp_tiff_path):
         os.remove(temp_tiff_path)
