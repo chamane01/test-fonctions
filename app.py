@@ -6,15 +6,34 @@ from rasterio.transform import from_origin
 from pyproj import CRS, Transformer
 import os
 
-st.title("Calcul de l'Empreinte au Sol d'une Photo Aérienne")
+st.title("Calcul de l'Empreinte au Sol et Conversion en GeoTIFF")
 
-# Téléversement de l'image
+# --- Fonction pour convertir une valeur GPS en degrés décimaux ---
+def convert_to_degrees(value):
+    # Si l'élément est déjà un float, le renvoyer directement, sinon on suppose qu'il s'agit d'un tuple (num, den)
+    d = float(value[0]) if not isinstance(value[0], tuple) else float(value[0][0]) / float(value[0][1])
+    m = float(value[1]) if not isinstance(value[1], tuple) else float(value[1][0]) / float(value[1][1])
+    s = float(value[2]) if not isinstance(value[2], tuple) else float(value[2][0]) / float(value[2][1])
+    return d + m / 60 + s / 3600
+
+# --- Fonction de conversion de lat/lon en UTM ---
+def latlon_to_utm(lat, lon):
+    zone = int((lon + 180) / 6) + 1
+    if lat >= 0:
+        crs_utm = CRS.from_epsg(32600 + zone)
+    else:
+        crs_utm = CRS.from_epsg(32700 + zone)
+    transformer = Transformer.from_crs(CRS.from_epsg(4326), crs_utm, always_xy=True)
+    utm_x, utm_y = transformer.transform(lon, lat)
+    return utm_x, utm_y, crs_utm
+
+# --- Téléversement de l'image ---
 uploaded_file = st.file_uploader("Téléverser une image", type=["jpg", "jpeg", "png"])
 if uploaded_file is not None:
     image = Image.open(uploaded_file)
     st.image(image, caption="Image téléchargée", use_column_width=True)
     
-    # Extraction des métadonnées EXIF
+    # --- Extraction des métadonnées EXIF avec PIL ---
     exif_data = {}
     if hasattr(image, '_getexif'):
         exif_raw = image._getexif()
@@ -23,35 +42,25 @@ if uploaded_file is not None:
                 tag_name = ExifTags.TAGS.get(tag, tag)
                 exif_data[tag_name] = value
 
-    # Extraction des coordonnées GPS (latitude et longitude) depuis EXIF
+    # --- Extraction des coordonnées GPS ---
     gps_lat, gps_lon = None, None
     if "GPSInfo" in exif_data:
         gps_info = exif_data["GPSInfo"]
-        gps_latitude = gps_longitude = gps_latitude_ref = gps_longitude_ref = None
-        for key in gps_info.keys():
-            decode = ExifTags.GPSTAGS.get(key, key)
-            if decode == "GPSLatitude":
-                gps_latitude = gps_info[key]
-            elif decode == "GPSLatitudeRef":
-                gps_latitude_ref = gps_info[key]
-            elif decode == "GPSLongitude":
-                gps_longitude = gps_info[key]
-            elif decode == "GPSLongitudeRef":
-                gps_longitude_ref = gps_info[key]
+        # Les clés standards de GPSInfo dans PIL :
+        # 1: GPSLatitudeRef, 2: GPSLatitude, 3: GPSLongitudeRef, 4: GPSLongitude, 6: GPSAltitude
+        gps_latitude = gps_info.get(2)
+        gps_latitude_ref = gps_info.get(1)
+        gps_longitude = gps_info.get(4)
+        gps_longitude_ref = gps_info.get(3)
         if gps_latitude and gps_latitude_ref and gps_longitude and gps_longitude_ref:
-            def convert_to_degrees(value):
-                d = float(value[0][0]) / float(value[0][1])
-                m = float(value[1][0]) / float(value[1][1])
-                s = float(value[2][0]) / float(value[2][1])
-                return d + m/60 + s/3600
             gps_lat = convert_to_degrees(gps_latitude)
-            if gps_latitude_ref != "N":
+            if gps_latitude_ref != 'N':
                 gps_lat = -gps_lat
             gps_lon = convert_to_degrees(gps_longitude)
-            if gps_longitude_ref != "E":
+            if gps_longitude_ref != 'E':
                 gps_lon = -gps_lon
 
-    # Récupération de la longueur focale depuis les métadonnées
+    # --- Récupération de la longueur focale depuis EXIF ---
     focal_length_exif = None
     if 'FocalLength' in exif_data:
         focal = exif_data['FocalLength']
@@ -60,36 +69,34 @@ if uploaded_file is not None:
         else:
             focal_length_exif = float(focal)
 
-    # Récupération de l'altitude GPS depuis les métadonnées
+    # --- Récupération de l'altitude GPS depuis EXIF ---
     gps_altitude = None
-    if 'GPSInfo' in exif_data:
-        gps_info = exif_data['GPSInfo']
-        for key in gps_info:
-            tag = ExifTags.GPSTAGS.get(key, key)
-            if tag == 'GPSAltitude':
-                alt_val = gps_info[key]
-                if isinstance(alt_val, tuple) and len(alt_val) == 2:
-                    gps_altitude = alt_val[0] / alt_val[1]
-                else:
-                    gps_altitude = float(alt_val)
+    if "GPSInfo" in exif_data:
+        gps_info = exif_data["GPSInfo"]
+        alt = gps_info.get(6)  # clé 6 correspond généralement à GPSAltitude
+        if alt:
+            if isinstance(alt, tuple) and len(alt) == 2:
+                gps_altitude = alt[0] / alt[1]
+            else:
+                gps_altitude = float(alt)
 
     st.subheader("Métadonnées extraites")
     st.write("Longueur focale (EXIF) :", focal_length_exif if focal_length_exif is not None else "Non disponible")
     st.write("Altitude GPS (EXIF) :", gps_altitude if gps_altitude is not None else "Non disponible")
-    st.write("Coordonnées GPS :", f"Lat: {gps_lat}, Lon: {gps_lon}" if gps_lat and gps_lon else "Non disponibles")
-    st.write("Dimensions de l'image (pixels) :", image.size)  # (largeur, hauteur)
+    st.write("Coordonnées GPS :", f"Lat: {gps_lat}, Lon: {gps_lon}" if (gps_lat is not None and gps_lon is not None) else "Non disponibles")
+    st.write("Dimensions de l'image (pixels) :", image.size)
 
     st.subheader("Entrer ou vérifier les paramètres nécessaires")
-    # Saisie ou vérification des paramètres avec valeurs par défaut préremplies
+    # Paramètres utilisateur avec valeurs par défaut préremplies si disponibles
     hauteur = st.number_input("Hauteur de vol (m)", value=(gps_altitude if gps_altitude is not None else 100.0))
     focale = st.number_input("Longueur focale (mm)", value=(focal_length_exif if focal_length_exif is not None else 50.0))
     largeur_capteur = st.number_input("Largeur du capteur (mm)", value=36.0)
     
-    # Calcul de l'empreinte au sol et de la résolution au sol (GSD)
+    # --- Calcul de l'empreinte au sol et du GSD ---
     if st.button("Calculer"):
-        # Empreinte au sol (en m)
+        # Empreinte au sol en m
         empreinte_sol = (hauteur * largeur_capteur) / focale  
-        # Nombre de pixels en largeur
+        # Nombre de pixels en largeur de l'image
         resolution_pixels = image.width  
         # Ground Sampling Distance (m/pixel)
         gsd = empreinte_sol / resolution_pixels  
@@ -98,38 +105,24 @@ if uploaded_file is not None:
         st.write(f"**Empreinte au sol :** {empreinte_sol:.2f} m")
         st.write(f"**Résolution au sol (GSD) :** {gsd*100:.2f} cm/pixel")
         
-        # Bouton de conversion et téléchargement en GeoTIFF
+        # --- Bouton pour conversion et téléchargement en GeoTIFF ---
         if st.button("Convertir et Télécharger en GeoTIFF"):
             # Conversion de l'image en tableau numpy
             image_np = np.array(image)
             
-            # Vérifier la présence des coordonnées GPS
             if gps_lat is None or gps_lon is None:
                 st.error("Les coordonnées GPS ne sont pas disponibles pour géoréférencer l'image.")
             else:
-                # Fonction de conversion de lat/lon en coordonnées UTM
-                def latlon_to_utm(lat, lon):
-                    zone = int((lon + 180) / 6) + 1
-                    if lat >= 0:
-                        crs_utm = CRS.from_epsg(32600 + zone)
-                    else:
-                        crs_utm = CRS.from_epsg(32700 + zone)
-                    transformer = Transformer.from_crs(CRS.from_epsg(4326), crs_utm, always_xy=True)
-                    utm_x, utm_y = transformer.transform(lon, lat)
-                    return utm_x, utm_y, crs_utm
-                
+                # Conversion des coordonnées GPS en UTM
                 utm_x, utm_y, utm_crs = latlon_to_utm(gps_lat, gps_lon)
                 
-                # Supposons ici que le point GPS correspond au centre de l'image.
-                # On calcule ainsi le coin supérieur gauche en UTM.
+                # On suppose ici que le point GPS correspond au centre de l'image.
+                # Calcul du coin supérieur gauche en UTM à partir du GSD calculé
                 img_width, img_height = image.size
                 top_left_x = utm_x - (img_width / 2) * gsd
-                top_left_y = utm_y + (img_height / 2) * gsd  # En UTM, Y augmente vers le nord
-                
-                # Définition de la géotransformation (top left, taille d'un pixel)
+                top_left_y = utm_y + (img_height / 2) * gsd  # en UTM, Y augmente vers le nord
                 transform = from_origin(top_left_x, top_left_y, gsd, gsd)
                 
-                # Sauvegarde temporaire en GeoTIFF
                 output_path = "output_georef.tif"
                 height_img, width_img = image_np.shape[:2]
                 count = 3 if image_np.ndim == 3 and image_np.shape[2] == 3 else 1
