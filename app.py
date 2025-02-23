@@ -55,7 +55,6 @@ def apply_color_gradient(tiff_path, output_png_path):
 
 def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1):
     """Ajoute une image (fichier PNG) en overlay sur une carte Folium."""
-    # Lecture de l'image et conversion en data URL (base64)
     with open(image_path, "rb") as f:
         image_data = f.read()
     image_base64 = base64.b64encode(image_data).decode("utf-8")
@@ -102,12 +101,10 @@ if uploaded_file is not None:
         apply_color_gradient(reprojected_path, temp_png_path)
         display_path = temp_png_path
     else:
-        # Si pas de gradient, on génère une image classique à partir du TIFF (pour afficher en overlay)
-        # On lit les données et on crée une image avec PIL (selon le nombre de bandes)
+        # Si aucun gradient n'est appliqué, convertir le TIFF en image (RGB ou niveaux de gris)
         with rasterio.open(reprojected_path) as src:
             data = src.read()
             if data.shape[0] >= 3:
-                # On suppose un TIFF RGB
                 rgb = np.dstack((data[0], data[1], data[2]))
                 rgb_norm = (255 * (rgb - rgb.min()) / (rgb.max() - rgb.min())).astype(np.uint8)
                 image = Image.fromarray(rgb_norm)
@@ -125,15 +122,17 @@ if uploaded_file is not None:
     st.write("Bornes (EPSG:4326) :", bounds)
 
     # Création de la carte centrée sur le TIFF
-    center_lat = (bounds.bottom + bounds.top) / 2
-    center_lon = (bounds.left + bounds.right) / 2
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
+    m = folium.Map(location=[(bounds.bottom + bounds.top) / 2, (bounds.left + bounds.right) / 2], zoom_start=10)
 
     # Ajout de l'overlay de l'image
     add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
-
-    # Ajout d'un LayerControl pour activer/désactiver l'overlay
+    
+    # Ajustement de la vue pour zoomer sur le TIFF
+    m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
+    
+    # Ajout d'un LayerControl pour basculer l'affichage de l'overlay
     folium.LayerControl().add_to(m)
+    
     st_folium(m, width=700, height=500)
 
     # Nettoyage des fichiers temporaires
