@@ -1,6 +1,6 @@
 import streamlit as st
 import folium
-from folium.plugins import Draw  # Import du plugin pour dessiner sur la carte
+from folium.plugins import Draw  # Plugin pour dessiner sur la carte
 from streamlit_folium import st_folium
 import rasterio
 from rasterio.warp import calculate_default_transform, reproject, Resampling
@@ -45,7 +45,7 @@ def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
 
 def apply_color_gradient(tiff_path, output_png_path):
     """
-    Applique un gradient de couleur (ici le colormap 'terrain') sur la première bande
+    Applique un gradient de couleur (colormap 'terrain') sur la première bande
     d'un TIFF (pour un MNS/MNT) et sauvegarde le résultat en PNG.
     """
     with rasterio.open(tiff_path) as src:
@@ -86,6 +86,11 @@ def normalize_data(data):
 
 st.title("Affichage de TIFF sur une carte dynamique avec outils marqueurs")
 
+# Widgets pour contrôler le zoom et la classe des marqueurs
+selected_zoom = st.slider("Niveau de zoom personnalisé", min_value=1, max_value=18, value=10)
+auto_zoom = st.checkbox("Ajuster automatiquement le zoom sur le TIFF", value=True)
+selected_class = st.selectbox("Sélectionnez la classe pour les nouveaux marqueurs", [f"Classe {i}" for i in range(1, 14)])
+
 # Téléversement du fichier TIFF
 uploaded_file = st.file_uploader("Téléversez votre fichier TIFF", type=["tif", "tiff"])
 if uploaded_file is not None:
@@ -116,18 +121,16 @@ if uploaded_file is not None:
         apply_color_gradient(reprojected_path, temp_png_path)
         display_path = temp_png_path
     else:
-        # Conversion du TIFF en image (RGB ou niveaux de gris) avec une normalisation améliorée
+        # Conversion du TIFF en image (RGB ou niveaux de gris) avec normalisation
         with rasterio.open(reprojected_path) as src:
             data = src.read()
             if data.shape[0] >= 3:
-                # Si l'image possède au moins 3 bandes, on crée une image RGB en normalisant chaque canal
                 r = normalize_data(data[0])
                 g = normalize_data(data[1])
                 b = normalize_data(data[2])
                 rgb_norm = np.dstack((r, g, b))
                 image = Image.fromarray(rgb_norm)
             else:
-                # Sinon, on traite la première bande en niveaux de gris
                 band = data[0]
                 band_norm = normalize_data(band)
                 image = Image.fromarray(band_norm, mode="L")
@@ -140,15 +143,20 @@ if uploaded_file is not None:
         bounds = src.bounds
     st.write("Bornes (EPSG:4326) :", bounds)
 
-    # Création de la carte centrée sur le TIFF
+    # Calcul du centre du TIFF
     center_lat = (bounds.bottom + bounds.top) / 2
     center_lon = (bounds.left + bounds.right) / 2
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
+
+    # Création de la carte : si l'ajustement automatique est activé, le zoom sera défini par fit_bounds sinon par le slider
+    if auto_zoom:
+        m = folium.Map(location=[center_lat, center_lon])
+    else:
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=selected_zoom)
 
     # Ajout de l'overlay de l'image
     add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
     
-    # Ajout du plugin de dessin pour les marqueurs
+    # Ajout du plugin de dessin pour les marqueurs (seul l'outil 'marker' est activé)
     draw = Draw(
         draw_options={
             'marker': True,
@@ -162,11 +170,30 @@ if uploaded_file is not None:
     )
     draw.add_to(m)
     
-    # Ajustement de la vue pour zoomer sur le TIFF
-    m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
+    # Si le zoom automatique est activé, ajuster la vue pour couvrir entièrement le TIFF
+    if auto_zoom:
+        m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
     
-    # Ajout d'un LayerControl pour basculer l'affichage de l'overlay
+    # Ajout d'un LayerControl pour gérer les couches
     folium.LayerControl().add_to(m)
+    
+    # Injection d'un script JavaScript personnalisé pour associer le popup de chaque nouveau marqueur à la classe sélectionnée
+    map_var = m.get_name()
+    script = f"""
+    <script>
+        var drawnItems = new L.FeatureGroup();
+        {map_var}.addLayer(drawnItems);
+        {map_var}.on('draw:created', function (e) {{
+            var type = e.layerType,
+                layer = e.layer;
+            if (type === 'marker') {{
+                layer.bindPopup("Classe: {selected_class}").openPopup();
+            }}
+            drawnItems.addLayer(layer);
+        }});
+    </script>
+    """
+    m.get_root().html.add_child(folium.Element(script))
     
     # Affichage de la carte dans Streamlit
     st_folium(m, width=700, height=500)
