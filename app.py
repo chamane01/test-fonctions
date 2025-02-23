@@ -1,6 +1,7 @@
 import streamlit as st
 import rasterio
 from rasterio.transform import from_origin
+from rasterio.io import MemoryFile
 from PIL import Image, ImageOps
 import exifread
 import numpy as np
@@ -9,6 +10,7 @@ from pyproj import Transformer
 import io
 import math
 from affine import Affine
+import zipfile
 
 def extract_exif_info(image_file):
     """
@@ -97,8 +99,8 @@ def compute_gsd(altitude, focal_length_mm, sensor_width_mm, image_width_px):
 def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs, rotation_angle=0, scaling_factor=1):
     """
     Convertit une image JPEG en GeoTIFF géoréférencé en UTM avec correction d'orientation.
-    Applique également un redimensionnement de l'image selon scaling_factor.
-    La taille effective d'un pixel (résolution spatiale) est ajustée automatiquement.
+    Applique un redimensionnement selon scaling_factor et ajuste automatiquement la taille effective d'un pixel.
+    Le résultat est écrit dans un fichier sur disque.
     """
     img = Image.open(image_file)
     img = ImageOps.exif_transpose(img)
@@ -113,13 +115,12 @@ def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs, ro
     height, width = img_array.shape[:2]
     
     # Calcul de la nouvelle taille de pixel :
-    # Si l'image est redimensionnée, la résolution spatiale effective est pixel_size / scaling_factor
     effective_pixel_size = pixel_size / scaling_factor
 
     center_x, center_y = utm_center
     T1 = Affine.translation(-width/2, -height/2)
-    T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)  # y négatif pour que le haut corresponde au nord
-    T3 = Affine.rotation(rotation_angle)         # rotation en degrés (sens trigonométrique)
+    T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)  # inversion en y pour que le haut corresponde au nord
+    T3 = Affine.rotation(rotation_angle)
     T4 = Affine.translation(center_x, center_y)
     transform = T4 * T3 * T2 * T1
 
@@ -138,6 +139,50 @@ def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs, ro
                 dst.write(img_array[:, :, i], i + 1)
         else:
             dst.write(img_array, 1)
+
+def convert_to_tiff_in_memory(image_file, pixel_size, utm_center, utm_crs, rotation_angle=0, scaling_factor=1):
+    """
+    Convertit une image JPEG en GeoTIFF en mémoire (sous forme de bytes).
+    Applique un redimensionnement et ajuste la taille effective d'un pixel.
+    Retourne le contenu du fichier GeoTIFF sous forme d'octets.
+    """
+    img = Image.open(image_file)
+    img = ImageOps.exif_transpose(img)
+    
+    # Redimensionnement de l'image selon le facteur choisi
+    orig_width, orig_height = img.size
+    new_width = int(orig_width * scaling_factor)
+    new_height = int(orig_height * scaling_factor)
+    img = img.resize((new_width, new_height), Image.LANCZOS)
+    
+    img_array = np.array(img)
+    height, width = img_array.shape[:2]
+    
+    effective_pixel_size = pixel_size / scaling_factor
+
+    center_x, center_y = utm_center
+    T1 = Affine.translation(-width/2, -height/2)
+    T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
+    T3 = Affine.rotation(rotation_angle)
+    T4 = Affine.translation(center_x, center_y)
+    transform = T4 * T3 * T2 * T1
+
+    memfile = MemoryFile()
+    with memfile.open(
+        driver='GTiff',
+        height=height,
+        width=width,
+        count=3 if len(img_array.shape) == 3 else 1,
+        dtype=img_array.dtype,
+        crs=utm_crs,
+        transform=transform
+    ) as dst:
+        if len(img_array.shape) == 3:
+            for i in range(3):
+                dst.write(img_array[:, :, i], i + 1)
+        else:
+            dst.write(img_array, 1)
+    return memfile.read()
 
 st.title("Conversion JPEG → GeoTIFF avec orientation corrigée")
 
@@ -191,14 +236,13 @@ if uploaded_files:
     if len(images_info) == 0:
         st.error("Aucune image exploitable (avec coordonnées GPS) n'a été trouvée.")
     else:
-        # Sélection de l'image à convertir
+        # Section de conversion d'une image sélectionnée
         selected_filename = st.selectbox(
             "Sélectionnez l'image à convertir en GeoTIFF",
             options=[info["filename"] for info in images_info]
         )
         selected_image_info = next(info for info in images_info if info["filename"] == selected_filename)
         
-        # Calcul de l'angle de trajectoire si plusieurs images sont disponibles
         if len(images_info) >= 2:
             idx = next(i for i, info in enumerate(images_info) if info["filename"] == selected_filename)
             if idx == 0:
@@ -216,7 +260,6 @@ if uploaded_files:
             flight_angle = 0
             st.info("Angle de trajectoire non calculable (une seule image) → 0°")
         
-        # Calcul du GSD si toutes les métadonnées sont disponibles
         if (selected_image_info["altitude"] is not None and 
             selected_image_info["focal_length"] is not None and 
             selected_image_info["sensor_width"] is not None):
@@ -261,14 +304,13 @@ if uploaded_files:
         scaling_factor = mapping[selected_scale]
         st.info(f"Facteur de redimensionnement sélectionné : {scaling_factor}")
         
-        # Affichage de la résolution effective après redimensionnement
         effective_pixel_size = pixel_size / scaling_factor
         st.info(f"Résolution spatiale effective après redimensionnement : {effective_pixel_size*100:.1f} cm/pixel")
         
-        # Correction d'orientation
         rotation_correction = -flight_angle
         st.info(f"Correction d'orientation appliquée : {rotation_correction:.1f}°")
         
+        # Conversion et téléchargement d'une image sélectionnée
         output_path = "output.tif"
         convert_to_tiff(
             image_file=io.BytesIO(selected_image_info["data"]),
@@ -296,3 +338,42 @@ if uploaded_files:
             )
         
         os.remove(output_path)
+        
+        # Section pour convertir et télécharger toutes les images en une seule archive ZIP
+        if st.button("Convertir et télécharger **toutes** les images en GeoTIFF"):
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for i, info in enumerate(images_info):
+                    # Calcul de l'angle de trajectoire pour chaque image
+                    if len(images_info) >= 2:
+                        if i == 0:
+                            dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
+                            dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
+                        elif i == len(images_info) - 1:
+                            dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
+                            dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
+                        else:
+                            dx = images_info[i+1]["utm"][0] - images_info[i-1]["utm"][0]
+                            dy = images_info[i+1]["utm"][1] - images_info[i-1]["utm"][1]
+                        flight_angle_i = math.degrees(math.atan2(dx, dy))
+                    else:
+                        flight_angle_i = 0
+                    # Conversion de l'image en GeoTIFF en mémoire
+                    tiff_bytes = convert_to_tiff_in_memory(
+                        image_file=io.BytesIO(info["data"]),
+                        pixel_size=pixel_size,
+                        utm_center=info["utm"],
+                        utm_crs=info["utm_crs"],
+                        rotation_angle=-flight_angle_i,
+                        scaling_factor=scaling_factor
+                    )
+                    # Création d'un nom de fichier de sortie
+                    output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
+                    zip_file.writestr(output_filename, tiff_bytes)
+            zip_buffer.seek(0)
+            st.download_button(
+                label="Télécharger toutes les images GeoTIFF (ZIP)",
+                data=zip_buffer,
+                file_name="images_geotiff.zip",
+                mime="application/zip"
+            )
