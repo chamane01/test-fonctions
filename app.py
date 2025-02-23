@@ -404,7 +404,7 @@ if uploaded_files:
                         else:
                             exif_dict = {"0th":{}, "Exif":{}, "GPS":{}, "1st":{}, "thumbnail":None}
                         user_comment = metadata_str
-                        exif_dict["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.UserComment.dump(user_comment, encoding="unicode")
+                        exif_dict["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.dump(user_comment, encoding="unicode")
                         exif_bytes = piexif.dump(exif_dict)
                     except ImportError:
                         st.error("La librairie piexif est requise pour ajouter des métadonnées JPEG. Veuillez l'installer.")
