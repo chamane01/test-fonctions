@@ -16,3 +16,4 @@ fpdf
 streamlit_image_coordinates
 matplotlib.colors
 scikit-learn
+piexif
