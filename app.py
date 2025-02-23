@@ -1,78 +1,132 @@
 import streamlit as st
-from streamlit_drawable_canvas import st_canvas
-from PIL import Image
+import folium
+from streamlit_folium import st_folium
+from folium.plugins import Draw
+import rasterio
 import numpy as np
+from PIL import Image
+import io, base64
 
-# Wrapper permettant de renvoyer les attributs et méthodes du PIL Image
-class AlwaysTrue:
-    def __init__(self, pil_img):
-        self.pil_img = pil_img
-    def __bool__(self):
-        return True
-    def __getattr__(self, attr):
-        return getattr(self.pil_img, attr)
-    def __array__(self, *args, **kwargs):
-        return np.array(self.pil_img, *args, **kwargs)
+st.set_page_config(layout="wide")
+st.title("Annotation d'images TIFF sur carte")
 
-st.set_page_config(page_title="Dessin sur TIFF", layout="wide")
-st.title("Application de Dessin sur TIFF")
+# 1. Téléversement des fichiers TIFF
+uploaded_files = st.file_uploader("Téléversez vos fichiers TIFF", type=["tiff", "tif"], accept_multiple_files=True)
 
-# Téléversement du fichier TIFF
-uploaded_file = st.file_uploader("Téléversez un fichier TIFF", type=["tiff", "tif"])
-if uploaded_file:
-    tiff_image = Image.open(uploaded_file)
-    # Si le TIFF est multi-pages, on se place sur la première
-    try:
-        tiff_image.seek(0)
-    except EOFError:
-        pass
+if uploaded_files:
+    # Initialisation des variables en session_state
+    if "current_image" not in st.session_state:
+        st.session_state.current_image = 0
+    if "markers" not in st.session_state:
+        st.session_state.markers = []  # Stockera la liste des marqueurs avec leurs infos
 
-    # Affichage du TIFF avec la largeur du conteneur
-    st.image(tiff_image, caption="TIFF téléversé", use_container_width=True)
+    # Navigation entre les images : boutons et slider
+    col1, col2, col3 = st.columns([1,2,1])
+    with col1:
+        if st.button("Image précédente"):
+            st.session_state.current_image = max(0, st.session_state.current_image - 1)
+    with col3:
+        if st.button("Image suivante"):
+            st.session_state.current_image = min(len(uploaded_files)-1, st.session_state.current_image + 1)
+    
+    st.session_state.current_image = st.slider("Sélectionnez l'image", 0, len(uploaded_files)-1, st.session_state.current_image)
+    st.write(f"Affichage de l'image {st.session_state.current_image + 1} sur {len(uploaded_files)}")
+    
+    # 2. Affichage de l'image sur une carte
+    current_file = uploaded_files[st.session_state.current_image]
+    # Lecture du fichier TIFF depuis la mémoire
+    current_bytes = current_file.read()
+    with rasterio.MemoryFile(current_bytes) as memfile:
+        with memfile.open() as dataset:
+            # Récupération des métadonnées : bounds (on suppose ici que l'image est en coordonnées géographiques)
+            bounds = dataset.bounds  # left, bottom, right, top
+            center = [(bounds.bottom + bounds.top) / 2, (bounds.left + bounds.right) / 2]
+            
+            # Lecture de l'image en tableau numpy
+            arr = dataset.read()
+            # Si l'image possède 3 canaux ou plus, on prend les 3 premiers pour RGB
+            if arr.shape[0] >= 3:
+                arr = np.stack([arr[0], arr[1], arr[2]], axis=-1)
+            else:
+                # Pour un canal unique, on affiche en niveau de gris
+                arr = arr[0]
+            
+            # Conversion du tableau en image PIL et en PNG encodé en base64
+            pil_img = Image.fromarray(arr.astype(np.uint8))
+            buf = io.BytesIO()
+            pil_img.save(buf, format="PNG")
+            img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            img_url = f"data:image/png;base64,{img_b64}"
 
-    # Récupération des dimensions réelles du TIFF
-    image_width, image_height = tiff_image.size
-
-    # Définir des dimensions maximales pour le canevas (exemple : 800x600)
-    max_canvas_width = 800
-    max_canvas_height = 600
-
-    # Calcul du ratio pour réduire l'image si elle est trop grande
-    ratio = min(max_canvas_width / image_width, max_canvas_height / image_height, 1)
-    canvas_width = int(image_width * ratio)
-    canvas_height = int(image_height * ratio)
-
-    # Création du wrapper autour du PIL Image pour le fond du canevas
-    wrapped_tiff = AlwaysTrue(tiff_image)
-else:
-    wrapped_tiff = None
-    canvas_width = 600
-    canvas_height = 400
-
-# Paramètres du dessin dans la barre latérale
-point_size = st.sidebar.radio("Taille des points", [5, 10, 20])
-stroke_color = st.sidebar.color_picker("Couleur du pinceau", "#000000")
-if wrapped_tiff is None:
-    background_color = st.sidebar.color_picker("Couleur de fond", "#FFFFFF")
-else:
-    background_color = None
-
-# Création du canevas avec l'image TIFF en fond (si téléversée)
-canvas_result = st_canvas(
-    fill_color=stroke_color,             # Couleur de remplissage pour le dessin
-    stroke_width=point_size,              # Taille du pinceau
-    stroke_color=stroke_color,
-    background_color=background_color,    # Utilisé uniquement si aucun TIFF n'est téléversé
-    background_image=wrapped_tiff,        # TIFF téléversé
-    height=canvas_height,
-    width=canvas_width,
-    drawing_mode="freedraw",              # Mode dessin libre
-    key="canvas",
-)
-
-# Sauvegarde du dessin réalisé sur le canevas
-if canvas_result.image_data is not None:
-    img = Image.fromarray((canvas_result.image_data * 255).astype(np.uint8))
-    if st.sidebar.button("Sauvegarder le dessin"):
-        img.save("dessin_tiff.png")
-        st.sidebar.success("Dessin sauvegardé sous 'dessin_tiff.png'")
+    # Création de la carte Folium centrée sur l'image
+    m = folium.Map(location=center, zoom_start=18)
+    
+    # Ajout de l'image en overlay (semi-transparent)
+    folium.raster_layers.ImageOverlay(
+        image=img_url,
+        bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
+        opacity=0.6,
+        interactive=True,
+        cross_origin=False,
+        zindex=1,
+    ).add_to(m)
+    
+    # Ajout de l'outil de dessin pour placer des marqueurs (points uniquement)
+    draw = Draw(
+        draw_options={
+            'polyline': False,
+            'polygon': False,
+            'circle': False,
+            'rectangle': False,
+            'circlemarker': False,
+            'marker': True,
+        },
+        edit_options={'edit': False}
+    )
+    draw.add_to(m)
+    
+    st.write("Utilisez l'outil de dessin (icône en haut à gauche de la carte) pour ajouter un marqueur.")
+    
+    # Affichage de la carte interactive et récupération des dessins
+    output = st_folium(m, width=700, height=500, returned_objects=["all_drawings"])
+    
+    # 3. Attribution d'une classe et d'une gravité après placement du marqueur
+    if output and output.get("all_drawings"):
+        # Chaque dessin ajouté est dans output["all_drawings"]
+        for drawing in output["all_drawings"]:
+            # On s'intéresse aux marqueurs (type "Point")
+            geometry = drawing.get("geometry", {})
+            if geometry.get("type") == "Point":
+                # Récupération des coordonnées [lon, lat]
+                coords = geometry.get("coordinates", [])
+                if coords:
+                    lon, lat = coords
+                    # Vérification pour éviter les doublons (si déjà enregistré)
+                    if not any(np.isclose(marker["lat"], lat) and np.isclose(marker["lon"], lon)
+                               for marker in st.session_state.markers):
+                        st.write("Nouveau marqueur détecté :")
+                        st.write(f"• Coordonnées : Latitude {lat:.6f}, Longitude {lon:.6f}")
+                        st.write("Attribuez-lui une classe et une gravité :")
+                        # Formulaire pour sélectionner la classe et la gravité
+                        with st.form(key=f"marker_form_{lat}_{lon}"):
+                            selected_class = st.selectbox("Sélectionnez la classe", [f"Classe {i+1}" for i in range(13)])
+                            selected_severity = st.radio("Sélectionnez la gravité", [1, 2, 3])
+                            submitted = st.form_submit_button("Enregistrer le marqueur")
+                            if submitted:
+                                st.session_state.markers.append({
+                                    "lat": lat,
+                                    "lon": lon,
+                                    "class": selected_class,
+                                    "severity": selected_severity,
+                                    "image_index": st.session_state.current_image,
+                                })
+                                st.success("Marqueur enregistré!")
+    
+    # Affichage de la liste des marqueurs enregistrés pour l'image courante
+    st.subheader("Liste des marqueurs enregistrés")
+    if st.session_state.markers:
+        for idx, marker in enumerate(st.session_state.markers):
+            if marker["image_index"] == st.session_state.current_image:
+                st.write(f"Marqueur {idx+1} : {marker}")
+    else:
+        st.write("Aucun marqueur enregistré pour cette image pour le moment.")
