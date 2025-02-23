@@ -15,15 +15,17 @@ stroke_color = st.sidebar.color_picker("Couleur du pinceau", "#000000")
 # Téléversement d'une image comme fond
 uploaded_file = st.sidebar.file_uploader("Téléverser une image de fond", type=["png", "jpg", "jpeg"])
 background_image = None
+
 if uploaded_file is not None:
-    background_image = Image.open(uploaded_file)
-    background_image = background_image.resize((600, 400))
+    image = Image.open(uploaded_file).convert("RGBA")
+    image = image.resize((600, 400))  # Adapter la taille au canevas
+    background_image = np.array(image)  # Convertir en tableau NumPy
 
 # Création du canevas
 canvas_result = st_canvas(
     stroke_width=dot_size,
     stroke_color=stroke_color,
-    background_image=background_image,
+    background_image=background_image,  # Utilisation directe du tableau NumPy
     height=400,
     width=600,
     drawing_mode="point",
