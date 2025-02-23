@@ -113,13 +113,13 @@ def convert_to_tiff_axis_aligned(image_file, output_path, utm_center, base_pixel
         img_rot = img
     rot_width, rot_height = img_rot.size
 
-    # Si aucune dimension de sortie n'est fournie, on garde la taille d'origine après rotation
+    # Si aucune dimension de sortie n'est fournie, on garde la taille après rotation
     if target_width is None:
         target_width = rot_width
     if target_height is None:
         target_height = rot_height
 
-    # Calcul de l'emprise au sol (en m) de l'image tournée si elle était exportée sans redimensionnement
+    # Calcul de l'emprise au sol (en m) de l'image tournée sans redimensionnement
     ground_width = rot_width * base_pixel_size
     ground_height = rot_height * base_pixel_size
 
@@ -127,7 +127,7 @@ def convert_to_tiff_axis_aligned(image_file, output_path, utm_center, base_pixel
     new_pixel_size_x = ground_width / target_width
     new_pixel_size_y = ground_height / target_height
 
-    # Redimensionner l'image aux dimensions choisies
+    # Redimensionnement de l'image aux dimensions choisies
     img_resized = img_rot.resize((target_width, target_height), Image.LANCZOS)
     img_array = np.array(img_resized)
 
@@ -243,7 +243,7 @@ if uploaded_files:
         rotation_correction = -flight_angle
         st.info(f"Correction d'orientation appliquée : {rotation_correction:.1f}°")
         
-        # Pour définir des dimensions de sortie en pixels, on calcule d'abord la taille de l'image après rotation
+        # Calcul de la taille de l'image après rotation afin de déterminer le ratio d'aspect
         img_temp = Image.open(io.BytesIO(selected_image["data"]))
         img_temp = ImageOps.exif_transpose(img_temp)
         if rotation_correction != 0:
@@ -252,10 +252,10 @@ if uploaded_files:
             img_rot_temp = img_temp
         default_width, default_height = img_rot_temp.size
         
+        # L'utilisateur choisit la largeur de sortie (la hauteur est calculée automatiquement pour conserver le ratio)
         target_width = st.number_input("Largeur de sortie (pixels) :", min_value=100, value=default_width, step=10)
-        target_height = st.number_input("Hauteur de sortie (pixels) :", min_value=100, value=default_height, step=10)
-        
-        st.info(f"Dimensions de sortie choisies : {target_width} x {target_height} pixels")
+        target_height = int(default_height * (target_width / default_width))
+        st.info(f"Dimensions de sortie : {target_width} x {target_height} pixels")
         
         output_path = "output.tif"
         convert_to_tiff_axis_aligned(
