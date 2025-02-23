@@ -220,4 +220,48 @@ if uploaded_files:
                 image_width_px=selected_image_info["img_width"]
             )
             st.success(
-                f"Image sélectionnée : {selected_ima
+                f"Image sélectionnée : {selected_image_info['filename']}\n\n"
+                f"GSD calculé = {pixel_size_calc:.4f} m/pixel"
+            )
+        else:
+            st.warning("L'image sélectionnée ne possède pas toutes les métadonnées nécessaires pour calculer automatiquement le GSD.")
+        
+        pixel_size = st.number_input(
+            "Choisissez la résolution spatiale (m/pixel) :", 
+            min_value=0.001, 
+            value=0.03, 
+            step=0.001, 
+            format="%.3f"
+        )
+        st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
+        
+        # Pour orienter l'image de façon que le nord soit en haut, on applique une rotation de -flight_angle
+        rotation_correction = -flight_angle
+        st.info(f"Correction d'orientation appliquée : {rotation_correction:.1f}°")
+        
+        output_path = "output.tif"
+        convert_to_tiff(
+            image_file=io.BytesIO(selected_image_info["data"]),
+            output_path=output_path,
+            utm_center=selected_image_info["utm"],
+            pixel_size=pixel_size,
+            utm_crs=selected_image_info["utm_crs"],
+            rotation_angle=rotation_correction
+        )
+        
+        st.success(f"Image {selected_image_info['filename']} convertie en GeoTIFF.")
+        
+        with rasterio.open(output_path) as src:
+            st.write("**Méta-données GeoTIFF**")
+            st.write("CRS :", src.crs)
+            st.write("Transform :", src.transform)
+        
+        with open(output_path, "rb") as f:
+            st.download_button(
+                label="Télécharger le GeoTIFF",
+                data=f,
+                file_name="image_geotiff.tif",
+                mime="image/tiff"
+            )
+        
+        os.remove(output_path)
