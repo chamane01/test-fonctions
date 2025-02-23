@@ -128,7 +128,7 @@ if uploaded_file is not None:
                         count = image_np.shape[2]
                     else:
                         st.error("Format d'image non supporté.")
-                        return
+                        st.stop()
                 else:
                     count = 1
                 
