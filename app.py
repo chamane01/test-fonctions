@@ -84,7 +84,7 @@ def normalize_data(data):
 
 # --- Application principale ---
 
-st.title("Affichage de TIFF sur une carte dynamique avec outils marqueurs")
+st.title("Affichage de TIFF sur une carte dynamique avec classification des marqueurs")
 
 # Téléversement du fichier TIFF
 uploaded_file = st.file_uploader("Téléversez votre fichier TIFF", type=["tif", "tiff"])
@@ -101,7 +101,7 @@ if uploaded_file is not None:
         st.write("CRS du TIFF :", src.crs)
         bounds = src.bounds
 
-    # Reprojection si le CRS n'est pas déjà EPSG:4326
+    # Reprojection si nécessaire
     if src.crs.to_string() != "EPSG:4326":
         st.write("Reprojection vers EPSG:4326...")
         reprojected_path = reproject_tiff(temp_tiff_path, "EPSG:4326")
@@ -138,7 +138,7 @@ if uploaded_file is not None:
         bounds = src.bounds
     st.write("Bornes (EPSG:4326) :", bounds)
 
-    # Création de la carte centrée sur le TIFF et ajustement automatique du zoom
+    # Création de la carte centrée sur le TIFF avec ajustement automatique du zoom
     center_lat = (bounds.bottom + bounds.top) / 2
     center_lon = (bounds.left + bounds.right) / 2
     m = folium.Map(location=[center_lat, center_lon])
@@ -160,27 +160,32 @@ if uploaded_file is not None:
     )
     draw.add_to(m)
     
-    # Ajustement automatique de la vue pour couvrir entièrement le TIFF
+    # Ajustement automatique de la vue pour couvrir le TIFF
     m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
     folium.LayerControl().add_to(m)
     
-    # Affichage de la carte dans Streamlit
-    result = st_folium(m, width=700, height=500)
+    # Utilisation d'une key pour forcer la mise à jour du composant
+    result = st_folium(m, width=700, height=500, key="folium_map")
     
-    # Bilan dynamique des marqueurs dessinés et association de classe
+    # Bilan dynamique des marqueurs dessinés et intégration du système de classification
     st.subheader("Bilan des marqueurs dessinés")
     marker_data = []
     features = []
-    if result and isinstance(result, dict):
-        all_drawings = result.get("all_drawings")
-        if isinstance(all_drawings, dict):
+    all_drawings = result.get("all_drawings")
+    if all_drawings:
+        # Si all_drawings est un dict contenant une clé "features"
+        if isinstance(all_drawings, dict) and "features" in all_drawings:
             features = all_drawings.get("features", [])
-    
+        # Sinon, s'il s'agit d'une liste, on l'utilise directement
+        elif isinstance(all_drawings, list):
+            features = all_drawings
+
     if features:
-        st.markdown("Pour chaque marqueur dessiné, sélectionnez la classe correspondante ci-dessous :")
+        st.markdown("Pour chaque marqueur dessiné, associez une classe ci-dessous :")
         for idx, feature in enumerate(features):
             if feature.get("geometry", {}).get("type") == "Point":
                 coords = feature.get("geometry", {}).get("coordinates", "Inconnues")
+                # Chaque marqueur bénéficie d'un selectbox pour sélectionner sa classe
                 selected_class = st.selectbox(
                     f"Marqueur {idx+1} (Coordonnées : {coords})",
                     [f"Classe {i}" for i in range(1, 14)],
@@ -188,8 +193,8 @@ if uploaded_file is not None:
                 )
                 marker_data.append({"Marqueur": idx+1, "Coordonnées": coords, "Classe": selected_class})
     else:
-        st.write("Aucun marqueur n'a été dessiné.")
-    
+        st.write("Aucun marqueur n'a été détecté.")
+
     if marker_data:
         st.markdown("### Récapitulatif des marqueurs")
         st.table(marker_data)
