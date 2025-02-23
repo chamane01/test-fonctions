@@ -1,7 +1,7 @@
 import streamlit as st
 import rasterio
 from rasterio.transform import from_origin
-from PIL import Image, ImageOps
+from PIL import Image
 import exifread
 import numpy as np
 import os
@@ -11,56 +11,48 @@ import math
 
 def extract_exif_info(image_file):
     """
-    Extrait les informations EXIF d'une image : 
-    - GPS (lat, lon, altitude)
-    - EXIF FocalLength
-    - FocalPlaneXResolution et FocalPlaneResolutionUnit (pour calculer la largeur du capteur)
-    Renvoie (lat, lon, altitude, focal_length, fp_x_res, fp_unit) ou None si non disponibles.
+    Extrait les informations EXIF d'une image : GPS (lat, lon, altitude), FocalLength et la résolution du capteur.
+    Renvoie (lat, lon, altitude, focal_length, fp_x_res, fp_unit) ou des valeurs None si non disponibles.
     """
     image_file.seek(0)
     tags = exifread.process_file(image_file)
     
-    lat = lon = altitude = focal_length = None
-    fp_x_res = fp_unit = None
+    lat = None
+    lon = None
+    altitude = None
+    focal_length = None
     
-    # --- GPS Latitude / Longitude ---
     if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
         lat_vals = tags['GPS GPSLatitude'].values
         lon_vals = tags['GPS GPSLongitude'].values
-        lat_ref = tags.get('GPS GPSLatitudeRef', None)
-        lon_ref = tags.get('GPS GPSLongitudeRef', None)
-        
-        if lat_vals and lon_vals and lat_ref and lon_ref:
-            lat = (float(lat_vals[0].num) / lat_vals[0].den +
-                   float(lat_vals[1].num) / lat_vals[1].den / 60 +
-                   float(lat_vals[2].num) / lat_vals[2].den / 3600)
-            lon = (float(lon_vals[0].num) / lon_vals[0].den +
-                   float(lon_vals[1].num) / lon_vals[1].den / 60 +
-                   float(lon_vals[2].num) / lon_vals[2].den / 3600)
-            
-            # Gestion N/S et E/W
-            if lat_ref.printable.strip().upper() == 'S':
-                lat = -lat
-            if lon_ref.printable.strip().upper() == 'W':
-                lon = -lon
+        lat_ref = tags['GPS GPSLatitudeRef'].printable.strip()
+        lon_ref = tags['GPS GPSLongitudeRef'].printable.strip()
+        lat = (float(lat_vals[0].num) / lat_vals[0].den +
+               float(lat_vals[1].num) / lat_vals[1].den / 60 +
+               float(lat_vals[2].num) / lat_vals[2].den / 3600)
+        lon = (float(lon_vals[0].num) / lon_vals[0].den +
+               float(lon_vals[1].num) / lon_vals[1].den / 60 +
+               float(lon_vals[2].num) / lon_vals[2].den / 3600)
+        if lat_ref.upper() == 'S':
+            lat = -lat
+        if lon_ref.upper() == 'W':
+            lon = -lon
     
-    # --- GPS Altitude ---
     if 'GPS GPSAltitude' in tags:
         alt_tag = tags['GPS GPSAltitude']
         altitude = float(alt_tag.values[0].num) / alt_tag.values[0].den
         
-    # --- Focal Length ---
     if 'EXIF FocalLength' in tags:
         focal_tag = tags['EXIF FocalLength']
         focal_length = float(focal_tag.values[0].num) / focal_tag.values[0].den
-    
-    # --- Focal Plane Resolution (X) + Unit ---
+        
+    # Extraction de la résolution du capteur
+    fp_x_res = None
+    fp_unit = None
     if 'EXIF FocalPlaneXResolution' in tags and 'EXIF FocalPlaneResolutionUnit' in tags:
         fp_res_tag = tags['EXIF FocalPlaneXResolution']
         fp_unit_tag = tags['EXIF FocalPlaneResolutionUnit']
-        
         fp_x_res = float(fp_res_tag.values[0].num) / fp_res_tag.values[0].den
-        # fp_unit : 2 = pouces, 3 = cm, 4 = mm, etc.
         fp_unit = int(fp_unit_tag.values[0])
     
     return lat, lon, altitude, focal_length, fp_x_res, fp_unit
@@ -75,45 +67,35 @@ def latlon_to_utm(lat, lon):
         utm_crs = f"EPSG:326{zone:02d}"
     else:
         utm_crs = f"EPSG:327{zone:02d}"
-    
     transformer = Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
     utm_x, utm_y = transformer.transform(lon, lat)
     return utm_x, utm_y, utm_crs
 
-def compute_gsd(altitude, focal_length_mm, sensor_width_mm, image_width_px):
+def compute_gsd(altitude, focal_length, sensor_width, image_width):
     """
-    Calcule le GSD (m/pixel) à partir de :
-    - altitude (m)
-    - focal_length_mm (mm)
-    - sensor_width_mm (mm)
-    - image_width_px (pixels)
+    Calcule le Ground Sampling Distance (GSD) en mètres par pixel.
+    sensor_width est en mm, focal_length en mm, altitude en m.
     """
-    # Convertir mm -> m
-    focal_length_m = focal_length_mm / 1000.0
-    sensor_width_m = sensor_width_mm / 1000.0
-    
-    # Formule GSD = (Altitude * LargeurCapteur) / (Focale * NbPixels)
-    gsd = (altitude * sensor_width_m) / (focal_length_m * image_width_px)
+    # Conversion de la largeur du capteur de mm en m
+    sensor_width_m = sensor_width / 1000.0
+    gsd = (altitude * sensor_width_m) / (focal_length * image_width)
     return gsd
 
 def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs):
     """
     Convertit une image JPEG en GeoTIFF géoréférencé en UTM.
-    - utm_center : (x, y) du centre en coordonnées UTM
-    - pixel_size : taille d'un pixel en mètres (ici forcée à 0.03 m/pixel)
-    - utm_crs    : code EPSG (ex: 'EPSG:32632')
+    utm_center est le centre de l'image en coordonnées UTM (x, y).
+    pixel_size est la taille réelle d'un pixel en mètres.
     """
-    # Correction d'orientation grâce aux métadonnées EXIF
     img = Image.open(image_file)
-    img = ImageOps.exif_transpose(img)
     img_array = np.array(img)
     height, width = img_array.shape[:2]
     
-    # Coordonnées du coin supérieur gauche (x_min, y_max)
-    x_min = utm_center[0] - (width / 2) * pixel_size
-    y_max = utm_center[1] + (height / 2) * pixel_size  # y décroit vers le bas dans l'image
-    
-    transform = from_origin(x_min, y_max, pixel_size, pixel_size)
+    # Calcul du coin supérieur gauche à partir du centre
+    top_left_x = utm_center[0] - (width / 2) * pixel_size
+    top_left_y = utm_center[1] + (height / 2) * pixel_size  # y augmente vers le nord
+
+    transform = from_origin(top_left_x, top_left_y, pixel_size, pixel_size)
     
     with rasterio.open(
         output_path, 'w',
@@ -131,118 +113,82 @@ def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs):
         else:
             dst.write(img_array, 1)
 
-st.title("Conversion JPEG → GeoTIFF sans saisie manuelle")
+st.title("Conversion JPEG → GeoTIFF avec échelle réelle")
 
-uploaded_files = st.file_uploader(
-    "Téléversez une ou plusieurs images (JPG/JPEG) avec métadonnées EXIF",
-    type=["jpg", "jpeg"],
-    accept_multiple_files=True
-)
+# Valeur par défaut pour la largeur du capteur (utilisée si la métadonnée manque)
+fallback_sensor_width = st.number_input("Largeur du capteur (mm) (sera utilisée si les métadonnées sont incomplètes)", value=6.17, step=0.01)
+
+uploaded_files = st.file_uploader("Choisissez une ou plusieurs images JPEG", type=['jpg', 'jpeg'], accept_multiple_files=True)
 
 if uploaded_files:
-    images_info = []
+    images_info = []  # Liste des informations extraites pour chaque image
     
-    for up_file in uploaded_files:
-        file_bytes = up_file.read()
+    for uploaded_file in uploaded_files:
+        file_bytes = uploaded_file.read()
         file_buffer = io.BytesIO(file_bytes)
-        
         lat, lon, altitude, focal_length, fp_x_res, fp_unit = extract_exif_info(file_buffer)
         
-        # Vérifier la présence de coordonnées GPS
         if lat is None or lon is None:
-            st.warning(f"{up_file.name} : pas de coordonnées GPS, l'image sera ignorée.")
+            st.warning(f"Aucune info GPS pour {uploaded_file.name}")
             continue
         
-        # Ouvrir l'image pour connaître sa taille en pixels
+        # Ouverture de l'image pour obtenir ses dimensions
         img = Image.open(io.BytesIO(file_bytes))
-        img_width, img_height = img.size
+        image_width, image_height = img.size
         
-        # Calcul de la largeur du capteur (mm) si FocalPlaneXResolution disponible
-        sensor_width_mm = None
-        if fp_x_res and fp_unit:
-            if fp_unit == 2:   # pouces
-                sensor_width_mm = (img_width / fp_x_res) * 25.4
-            elif fp_unit == 3: # cm
-                sensor_width_mm = (img_width / fp_x_res) * 10
-            elif fp_unit == 4: # mm
-                sensor_width_mm = (img_width / fp_x_res)
+        # Calcul de la largeur physique du capteur
+        if fp_x_res is not None and fp_unit is not None:
+            if fp_unit == 2:  # unité en pouces
+                sensor_width = (image_width / fp_x_res) * 25.4
+            elif fp_unit == 3:  # unité en centimètres
+                sensor_width = (image_width / fp_x_res) * 10
+            elif fp_unit == 4:  # unité en millimètres
+                sensor_width = (image_width / fp_x_res)
+            else:
+                st.info(f"Unité de résolution non reconnue dans les métadonnées de {uploaded_file.name}. Utilisation de la valeur par défaut.")
+                sensor_width = fallback_sensor_width
+        else:
+            st.info(f"Les métadonnées de {uploaded_file.name} ne contiennent pas la résolution du capteur. Utilisation de la valeur par défaut.")
+            sensor_width = fallback_sensor_width
         
         utm_x, utm_y, utm_crs = latlon_to_utm(lat, lon)
-        
         images_info.append({
-            "filename": up_file.name,
-            "data": file_bytes,
-            "lat": lat,
-            "lon": lon,
-            "altitude": altitude,        # en m
-            "focal_length": focal_length, # en mm
-            "sensor_width": sensor_width_mm, # en mm
-            "utm": (utm_x, utm_y),
-            "utm_crs": utm_crs,
-            "img_width": img_width,
-            "img_height": img_height
+            'name': uploaded_file.name,
+            'data': file_bytes,
+            'lat': lat,
+            'lon': lon,
+            'altitude': altitude,
+            'focal_length': focal_length,
+            'sensor_width': sensor_width,
+            'utm': (utm_x, utm_y),
+            'utm_crs': utm_crs,
+            'image_width': image_width,
+            'image_height': image_height
         })
     
     if len(images_info) == 0:
-        st.error("Aucune image exploitable (avec coordonnées GPS) n'a été trouvée.")
+        st.error("Aucune image avec des informations GPS valides n'a été trouvée.")
     else:
-        ref_image_info = None
-        for info in images_info:
-            if (info["altitude"] is not None and 
-                info["focal_length"] is not None and
-                info["sensor_width"] is not None):
-                ref_image_info = info
-                break
+        # Utilisation de la première image comme référence
+        ref_image_info = images_info[0]
+        ref_img = Image.open(io.BytesIO(ref_image_info['data']))
+        ref_width, ref_height = ref_img.size
         
-        if ref_image_info:
-            # Calcul du GSD (m/pixel) à partir de l'image de référence
-            pixel_size_calc = compute_gsd(
-                altitude=ref_image_info["altitude"],
-                focal_length_mm=ref_image_info["focal_length"],
-                sensor_width_mm=ref_image_info["sensor_width"],
-                image_width_px=ref_image_info["img_width"]
-            )
-            st.success(
-                f"Image de référence : {ref_image_info['filename']} \n\n"
-                f"GSD calculé = {pixel_size_calc:.4f} m/pixel"
-            )
+        if ref_image_info['altitude'] is not None and ref_image_info['focal_length'] is not None:
+            pixel_size = compute_gsd(ref_image_info['altitude'], ref_image_info['focal_length'], ref_image_info['sensor_width'], ref_width)
+            st.success(f"Échelle calculée : {pixel_size:.4f} m/pixel")
         else:
-            st.warning(
-                "Aucune image ne possède toutes les métadonnées nécessaires (Altitude, Focale, "
-                "Largeur de capteur)."
-            )
+            st.error("Informations photogrammétriques incomplètes pour la première image.")
+            pixel_size = 1.0  # Valeur par défaut
         
-        # Forcer la résolution spatiale à 3 cm/pixel (0.03 m/pixel) quel que soit le calcul du GSD
-        pixel_size = 0.03
-        st.info(f"Résolution spatiale appliquée : {pixel_size*100:.0f} cm/pixel")
+        # Conversion de l'image de référence en GeoTIFF
+        tiff_path = "output.tif"
+        ref_utm = ref_image_info['utm']
+        utm_crs = ref_image_info['utm_crs']
         
-        # On utilise l'image de référence si disponible, sinon la première image exploitable
-        final_ref = ref_image_info if ref_image_info else images_info[0]
+        convert_to_tiff(io.BytesIO(ref_image_info['data']), tiff_path, ref_utm, pixel_size, utm_crs)
         
-        output_path = "output.tif"
-        convert_to_tiff(
-            image_file=io.BytesIO(final_ref["data"]),
-            output_path=output_path,
-            utm_center=final_ref["utm"],
-            pixel_size=pixel_size,
-            utm_crs=final_ref["utm_crs"]
-        )
+        with open(tiff_path, "rb") as f:
+            st.download_button("Télécharger le fichier GeoTIFF", f, file_name="image_geotiff.tif")
         
-        st.success(f"Image {final_ref['filename']} convertie en GeoTIFF.")
-        
-        # Vérification et affichage des métadonnées GPS du GeoTIFF créé
-        with rasterio.open(output_path) as src:
-            st.write("**Méta-données GeoTIFF**")
-            st.write("CRS :", src.crs)
-            st.write("Transform :", src.transform)
-        
-        # Proposer le téléchargement
-        with open(output_path, "rb") as f:
-            st.download_button(
-                label="Télécharger le GeoTIFF",
-                data=f,
-                file_name="image_geotiff.tif",
-                mime="image/tiff"
-            )
-        
-        os.remove(output_path)
+        os.remove(tiff_path)
