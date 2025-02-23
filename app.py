@@ -345,7 +345,7 @@ if uploaded_files:
                 mime="application/zip"
             )
         
-        # --- Nouvel ajout : Export groupé de toutes les images en JPEG avec métadonnées de cadre ---
+        # --- Export groupé de toutes les images en JPEG avec métadonnées de cadre ---
         if st.button("Convertir et télécharger **toutes** les images en JPEG avec métadonnées de cadre"):
             zip_buffer_jpeg = io.BytesIO()
             with zipfile.ZipFile(zip_buffer_jpeg, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -404,7 +404,14 @@ if uploaded_files:
                         else:
                             exif_dict = {"0th":{}, "Exif":{}, "GPS":{}, "1st":{}, "thumbnail":None}
                         user_comment = metadata_str
-                        exif_dict["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.dump(user_comment, encoding="unicode")
+                        try:
+                            # On essaie d'utiliser piexif.helper.dump
+                            exif_dict["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.dump(user_comment, encoding="unicode")
+                        except AttributeError:
+                            # Fonction de repli si helper.dump n'est pas disponible
+                            prefix = b"UNICODE\0"
+                            encoded_comment = user_comment.encode("utf-16")
+                            exif_dict["Exif"][piexif.ExifIFD.UserComment] = prefix + encoded_comment
                         exif_bytes = piexif.dump(exif_dict)
                     except ImportError:
                         st.error("La librairie piexif est requise pour ajouter des métadonnées JPEG. Veuillez l'installer.")
