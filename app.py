@@ -113,7 +113,7 @@ def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs, ro
     height, width = img_array.shape[:2]
     
     # Calcul de la nouvelle taille de pixel :
-    # Si l'image est réduite (scaling_factor < 1), la résolution spatiale effective est pixel_size / scaling_factor
+    # Si l'image est redimensionnée, la résolution spatiale effective est pixel_size / scaling_factor
     effective_pixel_size = pixel_size / scaling_factor
 
     center_x, center_y = utm_center
@@ -242,10 +242,22 @@ if uploaded_files:
         )
         st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
         
-        # Sélecteur du facteur de redimensionnement
-        scale_options = ["/10", "/5", "/2", "0", "*2", "*5", "*10"]
+        # Sélecteur du facteur de redimensionnement élargi
+        scale_options = ["/50", "/20", "/10", "/5", "/2", "0", "*2", "*5", "*10", "*20", "*50"]
         selected_scale = st.select_slider("Choisissez le facteur de redimensionnement de l'image", options=scale_options, value="0")
-        mapping = {"/10": 0.1, "/5": 0.2, "/2": 0.5, "0": 1, "*2": 2, "*5": 5, "*10": 10}
+        mapping = {
+            "/50": 1/50,
+            "/20": 1/20,
+            "/10": 1/10,
+            "/5": 1/5,
+            "/2": 1/2,
+            "0": 1,
+            "*2": 2,
+            "*5": 5,
+            "*10": 10,
+            "*20": 20,
+            "*50": 50
+        }
         scaling_factor = mapping[selected_scale]
         st.info(f"Facteur de redimensionnement sélectionné : {scaling_factor}")
         
