@@ -1,39 +1,42 @@
 import streamlit as st
-from streamlit_drawable_canvas import st_canvas
+import base64
+from io import BytesIO
 from PIL import Image
+from streamlit_drawable_canvas import st_canvas
+
+# --- Patch pour corriger l'erreur "st.image.image_to_url" ---
+if not hasattr(st.image, "image_to_url"):
+    def image_to_url(img):
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        return f"data:image/png;base64,{img_str}"
+    st.image.image_to_url = image_to_url
+# -----------------------------------------------------------
 
 st.title("Application de Marquage d'Images")
 st.write("Téléversez vos images, naviguez entre elles et placez des marqueurs avec classe et gravité.")
 
-# -------------------------------
 # 1. Téléversement des images
-# -------------------------------
 uploaded_files = st.sidebar.file_uploader(
     "Téléverser des images (png, jpg, jpeg)",
     type=["png", "jpg", "jpeg"],
     accept_multiple_files=True
 )
 
-# Si aucune image n'est téléversée, on affiche un message d'instruction
 if not uploaded_files:
     st.info("Veuillez téléverser au moins une image.")
     st.stop()
 
-# Charger les images avec PIL
 images = [Image.open(file) for file in uploaded_files]
 
-# -------------------------------
 # 2. Navigation entre les images
-# -------------------------------
 img_index = st.slider("Sélectionner l'image", 0, len(images) - 1, 0)
 current_image = images[img_index]
 
-# Affichage de quelques infos sur l'image (dimensions)
 st.write(f"Dimensions de l'image : {current_image.width} x {current_image.height}")
 
-# -------------------------------
-# 3. Sélection par défaut de la classe et gravité
-# -------------------------------
+# 3. Sélection par défaut de la classe et de la gravité
 st.sidebar.markdown("### Paramètres par défaut pour les marqueurs")
 default_class = st.sidebar.selectbox(
     "Classe par défaut",
@@ -44,9 +47,7 @@ default_severity = st.sidebar.selectbox(
     options=[1, 2, 3]
 )
 
-# -------------------------------
 # 4. Affichage de l'image avec un canvas interactif
-# -------------------------------
 st.markdown("#### Placez vos marqueurs sur l'image")
 canvas_result = st_canvas(
     fill_color="rgba(255, 0, 0, 0.3)",  # couleur de remplissage pour les marqueurs
@@ -60,27 +61,21 @@ canvas_result = st_canvas(
     key="canvas"
 )
 
-# -------------------------------
 # 5. Traitement des marqueurs et attribution des classes/gravités
-# -------------------------------
 markers = []
 
 if canvas_result.json_data is not None:
-    # Récupérer la liste des objets dessinés
     objects = canvas_result.json_data.get("objects", [])
     if objects:
         st.markdown("#### Liste des marqueurs placés")
         for idx, obj in enumerate(objects):
-            # Récupérer la position absolue du marqueur
             x_abs = obj.get("left", 0)
             y_abs = obj.get("top", 0)
-            # Calcul des coordonnées relatives par rapport à l'image (entre 0 et 1)
             x_rel = x_abs / current_image.width
             y_rel = y_abs / current_image.height
 
             st.write(f"**Marqueur {idx+1}** : Position absolue ({x_abs:.1f}, {y_abs:.1f}) - Relative ({x_rel:.2f}, {y_rel:.2f})")
 
-            # Option 1 : Attribution après avoir placé le marqueur
             col1, col2 = st.columns(2)
             with col1:
                 marker_class = st.selectbox(
@@ -97,7 +92,6 @@ if canvas_result.json_data is not None:
                     key=f"severity_{idx}"
                 )
 
-            # Enregistrer les informations du marqueur
             markers.append({
                 "index": idx,
                 "position_absolue": {"x": x_abs, "y": y_abs},
@@ -110,5 +104,3 @@ if canvas_result.json_data is not None:
         st.json(markers)
     else:
         st.info("Aucun marqueur placé pour le moment.")
-
-# Vous pouvez par la suite enregistrer les données (ex : dans un fichier ou une base de données)
