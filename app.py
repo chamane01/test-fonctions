@@ -5,35 +5,29 @@ import numpy as np
 
 # Configuration de la page
 st.set_page_config(page_title="Application de Dessin", layout="wide")
+
 st.title("Application de Dessin Basique")
 
-# Paramètres du pinceau pointillé
-dot_size = st.sidebar.radio("Taille du point", [5, 10, 20])
+# Paramètres du canevas
+drawing_mode = st.sidebar.selectbox("Mode de dessin", ["freedraw", "line", "rect", "circle", "transform"])
+stroke_width = st.sidebar.slider("Taille du pinceau", 1, 25, 5)
 stroke_color = st.sidebar.color_picker("Couleur du pinceau", "#000000")
-
-# Téléversement d'une image comme fond
-uploaded_file = st.sidebar.file_uploader("Téléverser une image de fond", type=["png", "jpg", "jpeg"])
-background_image = None
-
-if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert("RGBA")
-    image = image.resize((600, 400))  # Adapter la taille au canevas
-    background_image = image  # Passage direct de l'objet PIL
+background_color = st.sidebar.color_picker("Couleur de fond", "#FFFFFF")
 
 # Création du canevas
 canvas_result = st_canvas(
-    stroke_width=dot_size,
+    fill_color="rgba(255, 165, 0, 0.3)",  # Couleur de remplissage par défaut
+    stroke_width=stroke_width,
     stroke_color=stroke_color,
-    background_image=background_image,  # Utilisation de l'objet PIL directement
+    background_color=background_color,
     height=400,
     width=600,
-    drawing_mode="point",
+    drawing_mode=drawing_mode,
     key="canvas",
 )
 
 # Sauvegarde du dessin si l'utilisateur le souhaite
 if canvas_result.image_data is not None:
-    # Les valeurs de canvas_result.image_data sont entre 0 et 1, on les met à l'échelle sur 0-255.
     img = Image.fromarray((canvas_result.image_data * 255).astype(np.uint8))
     if st.sidebar.button("Sauvegarder le dessin"):
         img.save("dessin.png")
