@@ -19,18 +19,17 @@ canvas_width, canvas_height = 600, 400
 uploaded_file = st.sidebar.file_uploader("Téléverser une image de fond", type=["png", "jpg", "jpeg"])
 
 if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert("RGBA")
-    image = image.resize((canvas_width, canvas_height))
-    background_image = np.array(image)
+    background_image = Image.open(uploaded_file).convert("RGBA")
+    background_image = background_image.resize((canvas_width, canvas_height))
 else:
-    # Image blanche par défaut pour éviter le problème de "None"
-    background_image = np.ones((canvas_height, canvas_width, 4), dtype=np.uint8) * 255
+    # Création d'une image blanche par défaut sous forme de PIL.Image
+    background_image = Image.new("RGBA", (canvas_width, canvas_height), (255, 255, 255, 255))
 
 # Création du canevas
 canvas_result = st_canvas(
     stroke_width=dot_size,
     stroke_color=stroke_color,
-    background_image=background_image,  # Image toujours définie
+    background_image=background_image,  # Image PIL directement
     height=canvas_height,
     width=canvas_width,
     drawing_mode="point",
