@@ -8,6 +8,7 @@ import os
 from pyproj import Transformer
 import io
 import math
+from affine import Affine
 
 def extract_exif_info(image_file):
     """
@@ -96,12 +97,14 @@ def compute_gsd(altitude, focal_length_mm, sensor_width_mm, image_width_px):
     gsd = (altitude * sensor_width_m) / (focal_length_m * image_width_px)
     return gsd
 
-def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs):
+def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs, rotation_angle=0):
     """
-    Convertit une image JPEG en GeoTIFF géoréférencé en UTM.
-    - utm_center : (x, y) du centre en coordonnées UTM
-    - pixel_size : taille d'un pixel en mètres (par exemple 0.03 m/pixel)
-    - utm_crs    : code EPSG (ex: 'EPSG:32632')
+    Convertit une image JPEG en GeoTIFF géoréférencé en UTM avec correction d'orientation.
+    La transformation affine est construite de façon à :
+    - Centrer l'image sur son centre (dimensions en pixels)
+    - Appliquer l'échelle (taille d'un pixel)
+    - Appliquer une rotation (pour aligner la trajectoire avec le nord)
+    - Positionner le centre sur les coordonnées UTM calculées
     """
     # Correction d'orientation grâce aux métadonnées EXIF
     img = Image.open(image_file)
@@ -109,12 +112,15 @@ def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs):
     img_array = np.array(img)
     height, width = img_array.shape[:2]
     
-    # Coordonnées du coin supérieur gauche (x_min, y_max)
-    x_min = utm_center[0] - (width / 2) * pixel_size
-    y_max = utm_center[1] + (height / 2) * pixel_size  # y décroit vers le bas dans l'image
-    
-    transform = from_origin(x_min, y_max, pixel_size, pixel_size)
-    
+    # Construction de la transformation affine
+    # On souhaite : T = Translation(utm_center) * Rotation(rotation_angle) * Scale(pixel_size, -pixel_size) * Translation(-width/2, -height/2)
+    center_x, center_y = utm_center
+    T1 = Affine.translation(-width/2, -height/2)
+    T2 = Affine.scale(pixel_size, -pixel_size)  # y négatif pour que le haut de l'image corresponde au nord
+    T3 = Affine.rotation(rotation_angle)         # rotation en degrés (sens trigonométrique)
+    T4 = Affine.translation(center_x, center_y)
+    transform = T4 * T3 * T2 * T1
+
     with rasterio.open(
         output_path, 'w',
         driver='GTiff',
@@ -131,7 +137,7 @@ def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs):
         else:
             dst.write(img_array, 1)
 
-st.title("Conversion JPEG → GeoTIFF avec résolution personnalisée")
+st.title("Conversion JPEG → GeoTIFF avec orientation corrigée")
 
 uploaded_files = st.file_uploader(
     "Téléversez une ou plusieurs images (JPG/JPEG) avec métadonnées EXIF",
@@ -186,6 +192,7 @@ if uploaded_files:
     if len(images_info) == 0:
         st.error("Aucune image exploitable (avec coordonnées GPS) n'a été trouvée.")
     else:
+        # Choisir une image de référence possédant les métadonnées nécessaires
         ref_image_info = None
         for info in images_info:
             if (info["altitude"] is not None and 
@@ -222,6 +229,23 @@ if uploaded_files:
         )
         st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
         
+        # Calcul de l'angle de trajectoire si plusieurs images sont fournies
+        if len(images_info) >= 2:
+            first_img = images_info[0]
+            last_img = images_info[-1]
+            dx = last_img["utm"][0] - first_img["utm"][0]
+            dy = last_img["utm"][1] - first_img["utm"][1]
+            # L'angle mesuré à partir du nord (0° = nord, 90° = est, -90° = ouest)
+            flight_angle = math.degrees(math.atan2(dx, dy))
+            st.info(f"Angle de trajectoire calculé : {flight_angle:.1f}° (0° = nord)")
+        else:
+            flight_angle = 0
+            st.info("Angle de trajectoire non calculable (une seule image) → 0°")
+        
+        # Pour orienter l'image de façon que le nord soit en haut, on applique une rotation de -flight_angle
+        rotation_correction = -flight_angle
+        st.info(f"Correction d'orientation appliquée : {rotation_correction:.1f}°")
+        
         # On utilise l'image de référence si disponible, sinon la première image exploitable
         final_ref = ref_image_info if ref_image_info else images_info[0]
         
@@ -231,12 +255,13 @@ if uploaded_files:
             output_path=output_path,
             utm_center=final_ref["utm"],
             pixel_size=pixel_size,
-            utm_crs=final_ref["utm_crs"]
+            utm_crs=final_ref["utm_crs"],
+            rotation_angle=rotation_correction
         )
         
         st.success(f"Image {final_ref['filename']} convertie en GeoTIFF.")
         
-        # Vérification et affichage des métadonnées GPS du GeoTIFF créé
+        # Vérification et affichage des métadonnées du GeoTIFF créé
         with rasterio.open(output_path) as src:
             st.write("**Méta-données GeoTIFF**")
             st.write("CRS :", src.crs)
