@@ -4,7 +4,6 @@ from folium.plugins import Draw  # Plugin pour dessiner sur la carte
 from streamlit_folium import st_folium
 import rasterio
 from rasterio.warp import calculate_default_transform, reproject, Resampling, transform
-from rasterio.coords import BoundingBox  # Pour recréer des bornes
 from PIL import Image
 import numpy as np
 import base64
@@ -86,31 +85,22 @@ def normalize_data(data):
     norm_data = (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
     return norm_data
 
-def compute_zoomed_bounds(bounds, zoom_factor=4):
-    """
-    Calcule de nouvelles bornes centrées sur le même centre mais dont la largeur et la hauteur
-    sont divisées par le facteur de zoom, ce qui revient à zoomer sur l'image.
-    """
-    center_lon = (bounds.left + bounds.right) / 2
-    center_lat = (bounds.top + bounds.bottom) / 2
-    half_width = (bounds.right - bounds.left) / 2
-    half_height = (bounds.top - bounds.bottom) / 2
-    new_half_width = half_width / zoom_factor
-    new_half_height = half_height / zoom_factor
-    return BoundingBox(
-        left=center_lon - new_half_width,
-        bottom=center_lat - new_half_height,
-        right=center_lon + new_half_width,
-        top=center_lat + new_half_height
-    )
+def enlarge_image(image_path, factor=4):
+    """Retourne une version de l'image dont la taille en pixels est multipliée par 'factor'."""
+    image = Image.open(image_path)
+    new_size = (image.width * factor, image.height * factor)
+    enlarged_image = image.resize(new_size, Image.NEAREST)
+    unique_id = str(uuid.uuid4())[:8]
+    enlarged_path = f"enlarged_{unique_id}.png"
+    enlarged_image.save(enlarged_path)
+    return enlarged_path
 
-def create_map(center_lat, center_lon, bounds, display_path, marker_data=None):
+def create_map(center_lat, center_lon, bounds, display_path, enlarged_path, marker_data=None):
     m = folium.Map(location=[center_lat, center_lon])
-    # Calque original
+    # Calque d'origine
     add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
-    # Calque zoomé à 4x (même TIFF mais sur des bornes plus restreintes => image agrandie)
-    zoom_bounds = compute_zoomed_bounds(bounds, zoom_factor=4)
-    add_image_overlay(m, display_path, zoom_bounds, "TIFF Zoom 4x", opacity=0.7)
+    # Calque avec image grossie (upscalée) : même emprise géographique
+    add_image_overlay(m, enlarged_path, bounds, "TIFF Grossi 4x", opacity=0.7)
     
     # Ajout du plugin de dessin
     draw = Draw(
@@ -189,6 +179,9 @@ if uploaded_file is not None:
         image.save(temp_png_path)
         display_path = temp_png_path
 
+    # Création d'une version "grossie" 4x (upscalée) de l'image PNG
+    enlarged_path = enlarge_image(display_path, factor=4)
+
     with rasterio.open(reprojected_path) as src:
         bounds = src.bounds
     st.write("Bornes (EPSG:4326) :", bounds)
@@ -201,7 +194,7 @@ if uploaded_file is not None:
 
     # Affichage initial de la carte
     map_placeholder = st.empty()
-    m = create_map(center_lat, center_lon, bounds, display_path, marker_data=None)
+    m = create_map(center_lat, center_lon, bounds, display_path, enlarged_path, marker_data=None)
     result = st_folium(m, width=700, height=500, key="folium_map")
 
     st.subheader("Classification des marqueurs")
@@ -246,13 +239,10 @@ if uploaded_file is not None:
         st.markdown("### Récapitulatif des marqueurs")
         st.table(marker_data)
         # Mise à jour de la carte avec les cercles classifiés
-        m_updated = create_map(center_lat, center_lon, bounds, display_path, marker_data=marker_data)
+        m_updated = create_map(center_lat, center_lon, bounds, display_path, enlarged_path, marker_data=marker_data)
         map_placeholder.write(st_folium(m_updated, width=700, height=500, key="updated_map"))
     
     # Nettoyage des fichiers temporaires
-    if os.path.exists(temp_tiff_path):
-        os.remove(temp_tiff_path)
-    if reprojected_path != temp_tiff_path and os.path.exists(reprojected_path):
-        os.remove(reprojected_path)
-    if os.path.exists(temp_png_path):
-        os.remove(temp_png_path)
+    for path in [temp_tiff_path, reprojected_path, temp_png_path, enlarged_path]:
+        if os.path.exists(path):
+            os.remove(path)
