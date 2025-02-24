@@ -30,7 +30,7 @@ class_color = {
 # Définition de la taille (rayon) pour chaque niveau de gravité
 gravity_sizes = {1: 5, 2: 10, 3: 15}
 
-# --- Fonction de reprojection (reprenant le code de référence) ---
+# --- Fonction de reprojection (code de référence) ---
 def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
     with rasterio.open(input_tiff) as src:
         transform_, width, height = calculate_default_transform(
@@ -87,10 +87,15 @@ def normalize_data(data):
     norm_data = (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
     return norm_data
 
-def create_map(center_lat, center_lon, bounds, display_path, marker_data=None):
-    m = folium.Map(location=[center_lat, center_lon])
+# Modification de la fonction create_map pour permettre de masquer le fond OSM
+def create_map(center_lat, center_lon, bounds, display_path, marker_data=None, hide_osm=False):
+    # Si hide_osm est True, on ne charge aucun fond (tiles=None)
+    if hide_osm:
+        m = folium.Map(location=[center_lat, center_lon], tiles=None)
+    else:
+        m = folium.Map(location=[center_lat, center_lon])
     add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
-    # Plugin de dessin
+    # Ajout du plugin de dessin
     draw = Draw(
         draw_options={
             'marker': True,
@@ -105,7 +110,7 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None):
     draw.add_to(m)
     m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
     folium.LayerControl().add_to(m)
-    # Ajout des marqueurs déjà définis
+    # Ajout des marqueurs s'ils sont fournis
     if marker_data:
         for marker in marker_data:
             lat = marker["lat"]
@@ -122,8 +127,7 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None):
             ).add_to(m)
     return m
 
-# --- Début de l'application Streamlit ---
-st.title("Affichage de deux TIFF avec reprojection des marqueurs et conversion UTM")
+st.title("Affichage de deux TIFF avec reprojection et conversion UTM")
 
 # Téléversement des deux fichiers TIFF
 col1, col2 = st.columns(2)
@@ -145,22 +149,17 @@ if uploaded_file_grand is not None and uploaded_file_petit is not None:
     # --- Traitement du TIFF GRAND ---
     with rasterio.open(temp_tiff_grand_path) as src:
         st.write("CRS du TIFF GRAND :", src.crs)
-        # On récupère les bornes d'origine avant reprojection
-        grand_bounds_orig = src.bounds
-    # Reprojection si nécessaire
     if src.crs.to_string() != "EPSG:4326":
         st.write("Reprojection du TIFF GRAND vers EPSG:4326...")
         reprojected_grand_path = reproject_tiff(temp_tiff_grand_path, "EPSG:4326")
     else:
         reprojected_grand_path = temp_tiff_grand_path
-    # Relecture des bornes du TIFF GRAND reprojeté
     with rasterio.open(reprojected_grand_path) as src:
         grand_bounds = src.bounds
 
     # --- Traitement du TIFF PETIT ---
     with rasterio.open(temp_tiff_petit_path) as src:
         st.write("CRS du TIFF PETIT :", src.crs)
-        petit_bounds_orig = src.bounds
     if src.crs.to_string() != "EPSG:4326":
         st.write("Reprojection du TIFF PETIT vers EPSG:4326...")
         reprojected_petit_path = reproject_tiff(temp_tiff_petit_path, "EPSG:4326")
@@ -169,7 +168,7 @@ if uploaded_file_grand is not None and uploaded_file_petit is not None:
     with rasterio.open(reprojected_petit_path) as src:
         petit_bounds = src.bounds
 
-    # Option d'application d'un gradient pour le TIFF PETIT (pour la carte couleur)
+    # Option d'application d'un gradient pour le TIFF PETIT
     apply_gradient = st.checkbox("Appliquer un gradient de couleur pour le TIFF PETIT", value=False)
 
     # --- Création de l'image d'affichage pour le TIFF GRAND ---
@@ -191,7 +190,7 @@ if uploaded_file_grand is not None and uploaded_file_petit is not None:
 
     # --- Création de l'image d'affichage pour le TIFF PETIT ---
     if apply_gradient:
-        temp_png_petit = f"colored_petit_{unique_file_id}.png"
+        temp_png_petit = f"colored_{unique_file_id}.png"
         apply_color_gradient(reprojected_petit_path, temp_png_petit)
     else:
         with rasterio.open(reprojected_petit_path) as src:
@@ -206,14 +205,14 @@ if uploaded_file_grand is not None and uploaded_file_petit is not None:
                 band = data[0]
                 band_norm = normalize_data(band)
                 image_petit = Image.fromarray(band_norm, mode="L")
-        temp_png_petit = f"converted_petit_{unique_file_id}.png"
+        temp_png_petit = f"converted_{unique_file_id}.png"
         image_petit.save(temp_png_petit)
     display_path_petit = temp_png_petit
 
     st.write("Bornes TIFF GRAND (EPSG:4326) :", grand_bounds)
     st.write("Bornes TIFF PETIT (EPSG:4326) :", petit_bounds)
 
-    # --- Calcul des centres et détermination de la zone UTM pour chaque TIFF ---
+    # --- Détermination des centres et des zones UTM pour chaque TIFF ---
     center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
     center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
     utm_zone_grand = int((center_lon_grand + 180) / 6) + 1
@@ -226,8 +225,9 @@ if uploaded_file_grand is not None and uploaded_file_petit is not None:
 
     # -------------------- Carte 1 : TIFF GRAND pour le dessin des marqueurs --------------------
     st.subheader("Carte 1 : TIFF GRAND (pour dessin des marqueurs)")
+    # Ici, on masque la couche OSM en passant hide_osm=True
     map_placeholder_grand = st.empty()
-    m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand, marker_data=None)
+    m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand, marker_data=None, hide_osm=True)
     result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
 
     # -------------------- Extraction, reprojection et conversion UTM des marqueurs --------------------
@@ -254,30 +254,26 @@ if uploaded_file_grand is not None and uploaded_file_petit is not None:
                     # Projection dans le système du TIFF PETIT (EPSG:4326)
                     new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
                     new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
-                    # Conversion en UTM pour le TIFF GRAND
-                    utm_x_grand, utm_y_grand = transform("EPSG:4326", utm_crs_grand, [lon], [lat])
-                    utm_coords_grand = (round(utm_x_grand[0], 2), round(utm_y_grand[0], 2))
                     # Conversion en UTM pour le TIFF PETIT
                     utm_x_petit, utm_y_petit = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
                     utm_coords_petit = (round(utm_x_petit[0], 2), round(utm_y_petit[0], 2))
                 else:
-                    lon = lat = new_lon = new_lat = None
-                    utm_coords_grand = utm_coords_petit = "Inconnues"
+                    new_lon = new_lat = None
+                    utm_coords_petit = "Inconnues"
                 st.markdown(f"**Marqueur {idx+1}**")
                 col1, col2 = st.columns(2)
                 with col1:
                     selected_class = st.selectbox("Classe", [f"Classe {i}" for i in range(1, 14)], key=f"class_{idx}")
                 with col2:
                     selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{idx}")
+                # Dans le récapitulatif, on ne conserve que les données reprojetées (du TIFF PETIT)
                 marker_data.append({
                     "Marqueur": idx+1,
-                    "Coordonnées TIFF GRAND (EPSG:4326)": (round(lon, 4), round(lat, 4)) if lon and lat else "Inconnues",
-                    "Coordonnées UTM TIFF GRAND": utm_coords_grand,
-                    "Coordonnées TIFF PETIT (EPSG:4326)": (round(new_lon, 4), round(new_lat, 4)) if new_lon and new_lat else "Inconnues",
-                    "Coordonnées UTM TIFF PETIT": utm_coords_petit,
+                    "Coordonnées (EPSG:4326)": (round(new_lon, 4), round(new_lat, 4)) if new_lon and new_lat else "Inconnues",
+                    "Coordonnées UTM": utm_coords_petit,
                     "Classe": selected_class,
                     "Gravité": selected_gravity,
-                    # Pour l'affichage sur la carte PETIT, on utilisera les coordonnées reprojetées
+                    # Ces valeurs servent à l'affichage sur la carte (position reprojetée)
                     "lat": new_lat,
                     "lon": new_lon,
                     "color": class_color.get(selected_class, "#000000"),
