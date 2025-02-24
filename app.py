@@ -108,10 +108,8 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None):
         for marker in marker_data:
             lat = marker["lat"]
             lon = marker["lon"]
-            selected_class = marker["Classe"]
-            selected_gravity = marker["Gravité"]
-            color = class_color.get(selected_class, "#000000")
-            radius = gravity_sizes.get(selected_gravity, 5)
+            color = marker.get("color", "#000000")
+            radius = marker.get("radius", 5)
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=radius,
@@ -122,68 +120,102 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None):
             ).add_to(m)
     return m
 
-st.title("Affichage de TIFF avec classification dynamique des marqueurs")
+st.title("Affichage de deux TIFF avec reprojection des marqueurs")
 
-uploaded_file = st.file_uploader("Téléversez votre fichier TIFF", type=["tif", "tiff"])
-if uploaded_file is not None:
+# Téléversement des deux fichiers TIFF
+col1, col2 = st.columns(2)
+with col1:
+    uploaded_file_grand = st.file_uploader("Téléversez votre fichier TIFF GRAND", type=["tif", "tiff"])
+with col2:
+    uploaded_file_petit = st.file_uploader("Téléversez votre fichier TIFF PETIT", type=["tif", "tiff"])
+
+if uploaded_file_grand is not None and uploaded_file_petit is not None:
     unique_file_id = str(uuid.uuid4())[:8]
-    temp_tiff_path = f"uploaded_{unique_file_id}.tif"
-    with open(temp_tiff_path, "wb") as f:
-        f.write(uploaded_file.read())
-    st.write("Fichier TIFF uploadé.")
+    temp_tiff_grand_path = f"uploaded_grand_{unique_file_id}.tif"
+    temp_tiff_petit_path = f"uploaded_petit_{unique_file_id}.tif"
+    with open(temp_tiff_grand_path, "wb") as f:
+        f.write(uploaded_file_grand.read())
+    with open(temp_tiff_petit_path, "wb") as f:
+        f.write(uploaded_file_petit.read())
+    st.write("Fichiers TIFF uploadés.")
 
-    with rasterio.open(temp_tiff_path) as src:
-        st.write("CRS du TIFF :", src.crs)
-        bounds = src.bounds
-
+    # Traitement du TIFF GRAND
+    with rasterio.open(temp_tiff_grand_path) as src:
+        st.write("CRS du TIFF GRAND :", src.crs)
+        grand_bounds = src.bounds
     if src.crs.to_string() != "EPSG:4326":
-        st.write("Reprojection vers EPSG:4326...")
-        reprojected_path = reproject_tiff(temp_tiff_path, "EPSG:4326")
+        st.write("Reprojection du TIFF GRAND vers EPSG:4326...")
+        reprojected_grand_path = reproject_tiff(temp_tiff_grand_path, "EPSG:4326")
     else:
-        reprojected_path = temp_tiff_path
+        reprojected_grand_path = temp_tiff_grand_path
 
-    apply_gradient = st.checkbox("Appliquer un gradient de couleur (pour MNS/MNT)", value=False)
-    if apply_gradient:
-        unique_png_id = str(uuid.uuid4())[:8]
-        temp_png_path = f"colored_{unique_png_id}.png"
-        apply_color_gradient(reprojected_path, temp_png_path)
-        display_path = temp_png_path
+    # Traitement du TIFF PETIT
+    with rasterio.open(temp_tiff_petit_path) as src:
+        st.write("CRS du TIFF PETIT :", src.crs)
+        petit_bounds = src.bounds
+    if src.crs.to_string() != "EPSG:4326":
+        st.write("Reprojection du TIFF PETIT vers EPSG:4326...")
+        reprojected_petit_path = reproject_tiff(temp_tiff_petit_path, "EPSG:4326")
     else:
-        with rasterio.open(reprojected_path) as src:
+        reprojected_petit_path = temp_tiff_petit_path
+
+    # Option d'application d'un gradient pour le TIFF PETIT (pour la carte couleur)
+    apply_gradient = st.checkbox("Appliquer un gradient de couleur pour le TIFF PETIT", value=False)
+
+    # Création de l'image d'affichage pour le TIFF GRAND (affiché tel quel)
+    with rasterio.open(reprojected_grand_path) as src:
+        data = src.read()
+        if data.shape[0] >= 3:
+            r = normalize_data(data[0])
+            g = normalize_data(data[1])
+            b = normalize_data(data[2])
+            rgb_norm = np.dstack((r, g, b))
+            image_grand = Image.fromarray(rgb_norm)
+        else:
+            band = data[0]
+            band_norm = normalize_data(band)
+            image_grand = Image.fromarray(band_norm, mode="L")
+    temp_png_grand = f"converted_grand_{unique_file_id}.png"
+    image_grand.save(temp_png_grand)
+    display_path_grand = temp_png_grand
+
+    # Création de l'image d'affichage pour le TIFF PETIT
+    if apply_gradient:
+        temp_png_petit = f"colored_petit_{unique_file_id}.png"
+        apply_color_gradient(reprojected_petit_path, temp_png_petit)
+    else:
+        with rasterio.open(reprojected_petit_path) as src:
             data = src.read()
             if data.shape[0] >= 3:
                 r = normalize_data(data[0])
                 g = normalize_data(data[1])
                 b = normalize_data(data[2])
                 rgb_norm = np.dstack((r, g, b))
-                image = Image.fromarray(rgb_norm)
+                image_petit = Image.fromarray(rgb_norm)
             else:
                 band = data[0]
                 band_norm = normalize_data(band)
-                image = Image.fromarray(band_norm, mode="L")
-        temp_png_path = f"converted_{unique_file_id}.png"
-        image.save(temp_png_path)
-        display_path = temp_png_path
+                image_petit = Image.fromarray(band_norm, mode="L")
+        temp_png_petit = f"converted_petit_{unique_file_id}.png"
+        image_petit.save(temp_png_petit)
+    display_path_petit = temp_png_petit
 
-    with rasterio.open(reprojected_path) as src:
-        bounds = src.bounds
-    st.write("Bornes (EPSG:4326) :", bounds)
+    st.write("Bornes TIFF GRAND (EPSG:4326) :", grand_bounds)
+    st.write("Bornes TIFF PETIT (EPSG:4326) :", petit_bounds)
 
-    center_lat = (bounds.bottom + bounds.top) / 2
-    center_lon = (bounds.left + bounds.right) / 2
-    # Détermination de la zone UTM (pour l'affichage des coordonnées)
-    utm_zone = int((center_lon + 180) / 6) + 1
-    utm_crs = f"EPSG:326{utm_zone:02d}"  # Supposons l'hémisphère nord
+    # -------------------- Carte 1 : TIFF GRAND --------------------
+    center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
+    center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
+    st.subheader("Carte 1 : TIFF GRAND (pour dessin des marqueurs)")
+    map_placeholder_grand = st.empty()
+    m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand, marker_data=None)
+    result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
 
-    # Affichage initial de la carte
-    map_placeholder = st.empty()
-    m = create_map(center_lat, center_lon, bounds, display_path, marker_data=None)
-    result = st_folium(m, width=700, height=500, key="folium_map")
-
+    # -------------------- Extraction et reprojection des marqueurs --------------------
     st.subheader("Classification des marqueurs")
     marker_data = []
     features = []
-    all_drawings = result.get("all_drawings")
+    all_drawings = result_grand.get("all_drawings")
     if all_drawings:
         if isinstance(all_drawings, dict) and "features" in all_drawings:
             features = all_drawings.get("features", [])
@@ -197,11 +229,15 @@ if uploaded_file is not None:
                 coords = feature.get("geometry", {}).get("coordinates")
                 if coords and isinstance(coords, list) and len(coords) >= 2:
                     lon, lat = coords[0], coords[1]
-                    utm_x, utm_y = transform("EPSG:4326", utm_crs, [lon], [lat])
-                    utm_coords = (round(utm_x[0], 2), round(utm_y[0], 2))
+                    # Calcul des pourcentages par rapport aux bornes du TIFF GRAND
+                    percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
+                    percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
+                    # Projection des coordonnées dans le système du TIFF PETIT
+                    new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
+                    new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
                 else:
-                    lat, lon, utm_coords = None, None, "Inconnues"
-                st.markdown(f"**Marqueur {idx+1} (Coordonnées UTM : {utm_coords})**")
+                    lat, lon, new_lat, new_lon = None, None, None, None
+                st.markdown(f"**Marqueur {idx+1}**")
                 col1, col2 = st.columns(2)
                 with col1:
                     selected_class = st.selectbox("Classe", [f"Classe {i}" for i in range(1, 14)], key=f"class_{idx}")
@@ -209,26 +245,32 @@ if uploaded_file is not None:
                     selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{idx}")
                 marker_data.append({
                     "Marqueur": idx+1,
-                    "Coordonnées UTM": utm_coords,
-                    "lat": lat,
-                    "lon": lon,
+                    "Coordonnées TIFF GRAND": (round(lon,4), round(lat,4)) if lon and lat else "Inconnues",
+                    "Coordonnées TIFF PETIT": (round(new_lon,4), round(new_lat,4)) if new_lon and new_lat else "Inconnues",
                     "Classe": selected_class,
-                    "Gravité": selected_gravity
+                    "Gravité": selected_gravity,
+                    # Pour la carte PETIT, on utilise les coordonnées reprojetées
+                    "lat": new_lat,
+                    "lon": new_lon,
+                    "color": class_color.get(selected_class, "#000000"),
+                    "radius": gravity_sizes.get(selected_gravity, 5)
                 })
     else:
         st.write("Aucun marqueur n'a été détecté.")
 
+    # -------------------- Carte 2 : TIFF PETIT avec marqueurs reprojetés --------------------
+    center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
+    center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
+    st.subheader("Carte 2 : TIFF PETIT (avec marqueurs reprojetés)")
+    map_placeholder_petit = st.empty()
+    m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds, display_path_petit, marker_data=marker_data)
+    st_folium(m_petit, width=700, height=500, key="folium_map_petit")
+
     if marker_data:
         st.markdown("### Récapitulatif des marqueurs")
         st.table(marker_data)
-        # Mise à jour de la carte avec les cercles classifiés
-        m_updated = create_map(center_lat, center_lon, bounds, display_path, marker_data=marker_data)
-        map_placeholder.write(st_folium(m_updated, width=700, height=500, key="updated_map"))
     
-    # Nettoyage des fichiers temporaires
-    if os.path.exists(temp_tiff_path):
-        os.remove(temp_tiff_path)
-    if reprojected_path != temp_tiff_path and os.path.exists(reprojected_path):
-        os.remove(reprojected_path)
-    if os.path.exists(temp_png_path):
-        os.remove(temp_png_path)
+    # -------------------- Nettoyage des fichiers temporaires --------------------
+    for file_path in [temp_tiff_grand_path, temp_tiff_petit_path, reprojected_grand_path, reprojected_petit_path, temp_png_grand, temp_png_petit]:
+        if os.path.exists(file_path):
+            os.remove(file_path)
