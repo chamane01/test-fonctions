@@ -1,6 +1,6 @@
 import streamlit as st
 import folium
-from folium.plugins import Draw
+from folium.plugins import Draw  # Plugin pour dessiner sur la carte
 from streamlit_folium import st_folium
 import rasterio
 from rasterio.warp import calculate_default_transform, reproject, Resampling, transform
@@ -9,10 +9,9 @@ import numpy as np
 import base64
 import uuid
 import os
-import subprocess
 import matplotlib.pyplot as plt
 
-# Dictionnaire associant une couleur à chacune des 13 classes
+# Dictionnaire associant une couleur à chaque classe
 class_color = {
     "Classe 1": "#FF0000",
     "Classe 2": "#00FF00",
@@ -28,8 +27,7 @@ class_color = {
     "Classe 12": "#A52A2A",
     "Classe 13": "#808080"
 }
-
-# Définition de la taille (rayon en pixels) pour chaque niveau de gravité
+# Définition de la taille (rayon) pour chaque niveau de gravité
 gravity_sizes = {1: 5, 2: 10, 3: 15}
 
 def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
@@ -68,6 +66,18 @@ def apply_color_gradient(tiff_path, output_png_path):
         plt.imsave(output_png_path, colored_image)
         plt.close()
 
+def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1):
+    with open(image_path, "rb") as f:
+        image_data = f.read()
+    image_base64 = base64.b64encode(image_data).decode("utf-8")
+    img_data_url = f"data:image/png;base64,{image_base64}"
+    folium.raster_layers.ImageOverlay(
+        image=img_data_url,
+        bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
+        name=layer_name,
+        opacity=opacity,
+    ).add_to(map_object)
+
 def normalize_data(data):
     lower = np.percentile(data, 2)
     upper = np.percentile(data, 98)
@@ -75,25 +85,9 @@ def normalize_data(data):
     norm_data = (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
     return norm_data
 
-def generate_tiles(tiff_path, output_dir, zoom_range="0-22"):
-    """
-    Génère des tuiles à partir du TIFF en utilisant gdal2tiles.py.
-    """
-    cmd = f"gdal2tiles.py -z {zoom_range} {tiff_path} {output_dir}"
-    subprocess.run(cmd, shell=True)
-
-def create_map(center_lat, center_lon, bounds, tiles_url, marker_data=None):
-    # Création de la carte avec un zoom initial élevé et max_zoom fixé à 22
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=18, max_zoom=22)
-    # Ajout des tuiles générées par gdal2tiles
-    folium.TileLayer(
-        tiles=f"{tiles_url}/{{z}}/{{x}}/{{y}}.png",
-        attr="Tuiles générées par gdal2tiles",
-        name="TIFF Tiles",
-        overlay=True,
-        control=True,
-        max_zoom=22
-    ).add_to(m)
+def create_map(center_lat, center_lon, bounds, display_path, marker_data=None):
+    m = folium.Map(location=[center_lat, center_lon])
+    add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
     # Ajout du plugin de dessin
     draw = Draw(
         draw_options={
@@ -128,9 +122,8 @@ def create_map(center_lat, center_lon, bounds, tiles_url, marker_data=None):
             ).add_to(m)
     return m
 
-st.title("TIFF en haute résolution avec classification des marqueurs")
+st.title("Affichage de TIFF avec classification dynamique des marqueurs")
 
-# Téléversement du TIFF
 uploaded_file = st.file_uploader("Téléversez votre fichier TIFF", type=["tif", "tiff"])
 if uploaded_file is not None:
     unique_file_id = str(uuid.uuid4())[:8]
@@ -139,25 +132,22 @@ if uploaded_file is not None:
         f.write(uploaded_file.read())
     st.write("Fichier TIFF uploadé.")
 
-    # Lecture du TIFF et récupération des bornes
     with rasterio.open(temp_tiff_path) as src:
         st.write("CRS du TIFF :", src.crs)
         bounds = src.bounds
 
-    # Reprojection si nécessaire
     if src.crs.to_string() != "EPSG:4326":
         st.write("Reprojection vers EPSG:4326...")
         reprojected_path = reproject_tiff(temp_tiff_path, "EPSG:4326")
     else:
         reprojected_path = temp_tiff_path
 
-    # Option de gradient de couleur (non utilisé pour le tiling ici)
     apply_gradient = st.checkbox("Appliquer un gradient de couleur (pour MNS/MNT)", value=False)
     if apply_gradient:
         unique_png_id = str(uuid.uuid4())[:8]
         temp_png_path = f"colored_{unique_png_id}.png"
         apply_color_gradient(reprojected_path, temp_png_path)
-        # Pour le tiling, nous utilisons directement le TIFF reprojeté
+        display_path = temp_png_path
     else:
         with rasterio.open(reprojected_path) as src:
             data = src.read()
@@ -171,37 +161,23 @@ if uploaded_file is not None:
                 band = data[0]
                 band_norm = normalize_data(band)
                 image = Image.fromarray(band_norm, mode="L")
-        unique_png_id = str(uuid.uuid4())[:8]
         temp_png_path = f"converted_{unique_file_id}.png"
         image.save(temp_png_path)
-        # Nous utilisons toujours le TIFF reprojeté pour le tiling
+        display_path = temp_png_path
 
-    # Assurez-vous que le dossier 'static' existe pour servir les tuiles
-    if not os.path.exists("static"):
-        os.mkdir("static")
-    # Le dossier de tuiles sera placé dans 'static'
-    tiles_dir = f"static/tiles_{unique_file_id}"
-    if not os.path.exists(tiles_dir):
-        st.info("Génération des tuiles en cours (cela peut prendre quelques instants)...")
-        generate_tiles(reprojected_path, tiles_dir, zoom_range="0-22")
-        st.success("Tuiles générées.")
-
-    # Récupération (de nouveau) des bornes
     with rasterio.open(reprojected_path) as src:
         bounds = src.bounds
     st.write("Bornes (EPSG:4326) :", bounds)
 
-    # Calcul du centre et détermination de la zone UTM (pour le récapitulatif)
     center_lat = (bounds.bottom + bounds.top) / 2
     center_lon = (bounds.left + bounds.right) / 2
+    # Détermination de la zone UTM (pour l'affichage des coordonnées)
     utm_zone = int((center_lon + 180) / 6) + 1
-    utm_crs = f"EPSG:326{utm_zone:02d}"  # Pour l'hémisphère nord
+    utm_crs = f"EPSG:326{utm_zone:02d}"  # Supposons l'hémisphère nord
 
-    # Affichage initial de la carte avec les tuiles
+    # Affichage initial de la carte
     map_placeholder = st.empty()
-    # L'URL de base pour les tuiles sera "/static/tiles_<id>"
-    tiles_url = f"/static/tiles_{unique_file_id}"
-    m = create_map(center_lat, center_lon, bounds, tiles_url, marker_data=None)
+    m = create_map(center_lat, center_lon, bounds, display_path, marker_data=None)
     result = st_folium(m, width=700, height=500, key="folium_map")
 
     st.subheader("Classification des marqueurs")
@@ -246,10 +222,10 @@ if uploaded_file is not None:
         st.markdown("### Récapitulatif des marqueurs")
         st.table(marker_data)
         # Mise à jour de la carte avec les cercles classifiés
-        m_updated = create_map(center_lat, center_lon, bounds, tiles_url, marker_data=marker_data)
+        m_updated = create_map(center_lat, center_lon, bounds, display_path, marker_data=marker_data)
         map_placeholder.write(st_folium(m_updated, width=700, height=500, key="updated_map"))
     
-    # Nettoyage des fichiers temporaires (les tuiles restent dans static pour que la carte s'affiche)
+    # Nettoyage des fichiers temporaires
     if os.path.exists(temp_tiff_path):
         os.remove(temp_tiff_path)
     if reprojected_path != temp_tiff_path and os.path.exists(reprojected_path):
