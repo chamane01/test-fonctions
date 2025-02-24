@@ -82,12 +82,12 @@ def generate_tiles(tiff_path, output_dir, zoom_range="0-22"):
     cmd = f"gdal2tiles.py -z {zoom_range} {tiff_path} {output_dir}"
     subprocess.run(cmd, shell=True)
 
-def create_map(center_lat, center_lon, bounds, tiles_dir, marker_data=None):
+def create_map(center_lat, center_lon, bounds, tiles_url, marker_data=None):
     # Création de la carte avec un zoom initial élevé et max_zoom fixé à 22
     m = folium.Map(location=[center_lat, center_lon], zoom_start=18, max_zoom=22)
     # Ajout des tuiles générées par gdal2tiles
     folium.TileLayer(
-        tiles=f"{tiles_dir}/{{z}}/{{x}}/{{y}}.png",
+        tiles=f"{tiles_url}/{{z}}/{{x}}/{{y}}.png",
         attr="Tuiles générées par gdal2tiles",
         name="TIFF Tiles",
         overlay=True,
@@ -128,7 +128,7 @@ def create_map(center_lat, center_lon, bounds, tiles_dir, marker_data=None):
             ).add_to(m)
     return m
 
-st.title("Affichage de TIFF avec tuiles haute résolution et classification des marqueurs")
+st.title("TIFF en haute résolution avec classification des marqueurs")
 
 # Téléversement du TIFF
 uploaded_file = st.file_uploader("Téléversez votre fichier TIFF", type=["tif", "tiff"])
@@ -151,15 +151,14 @@ if uploaded_file is not None:
     else:
         reprojected_path = temp_tiff_path
 
-    # Option de gradient de couleur
+    # Option de gradient de couleur (non utilisé pour le tiling ici)
     apply_gradient = st.checkbox("Appliquer un gradient de couleur (pour MNS/MNT)", value=False)
     if apply_gradient:
         unique_png_id = str(uuid.uuid4())[:8]
         temp_png_path = f"colored_{unique_png_id}.png"
         apply_color_gradient(reprojected_path, temp_png_path)
-        # Pour le tiling, on travaille directement sur le TIFF reprojeté
+        # Pour le tiling, nous utilisons directement le TIFF reprojeté
     else:
-        # Si pas de gradient, on peut laisser le TIFF tel quel pour la génération des tuiles
         with rasterio.open(reprojected_path) as src:
             data = src.read()
             if data.shape[0] >= 3:
@@ -173,23 +172,26 @@ if uploaded_file is not None:
                 band_norm = normalize_data(band)
                 image = Image.fromarray(band_norm, mode="L")
         unique_png_id = str(uuid.uuid4())[:8]
-        temp_png_path = f"converted_{unique_png_id}.png"
+        temp_png_path = f"converted_{unique_file_id}.png"
         image.save(temp_png_path)
-        # Nous n'utilisons pas ce PNG pour le tiling, nous utilisons le TIFF reprojeté.
+        # Nous utilisons toujours le TIFF reprojeté pour le tiling
 
-    # Génération des tuiles à partir du TIFF reprojeté
-    tiles_dir = f"tiles_{unique_file_id}"
+    # Assurez-vous que le dossier 'static' existe pour servir les tuiles
+    if not os.path.exists("static"):
+        os.mkdir("static")
+    # Le dossier de tuiles sera placé dans 'static'
+    tiles_dir = f"static/tiles_{unique_file_id}"
     if not os.path.exists(tiles_dir):
         st.info("Génération des tuiles en cours (cela peut prendre quelques instants)...")
         generate_tiles(reprojected_path, tiles_dir, zoom_range="0-22")
         st.success("Tuiles générées.")
 
-    # Récupération des bornes (à nouveau, au cas où)
+    # Récupération (de nouveau) des bornes
     with rasterio.open(reprojected_path) as src:
         bounds = src.bounds
     st.write("Bornes (EPSG:4326) :", bounds)
 
-    # Calcul du centre et détermination de la zone UTM (pour affichage dans le bilan)
+    # Calcul du centre et détermination de la zone UTM (pour le récapitulatif)
     center_lat = (bounds.bottom + bounds.top) / 2
     center_lon = (bounds.left + bounds.right) / 2
     utm_zone = int((center_lon + 180) / 6) + 1
@@ -197,7 +199,9 @@ if uploaded_file is not None:
 
     # Affichage initial de la carte avec les tuiles
     map_placeholder = st.empty()
-    m = create_map(center_lat, center_lon, bounds, tiles_dir, marker_data=None)
+    # L'URL de base pour les tuiles sera "/static/tiles_<id>"
+    tiles_url = f"/static/tiles_{unique_file_id}"
+    m = create_map(center_lat, center_lon, bounds, tiles_url, marker_data=None)
     result = st_folium(m, width=700, height=500, key="folium_map")
 
     st.subheader("Classification des marqueurs")
@@ -242,12 +246,13 @@ if uploaded_file is not None:
         st.markdown("### Récapitulatif des marqueurs")
         st.table(marker_data)
         # Mise à jour de la carte avec les cercles classifiés
-        m_updated = create_map(center_lat, center_lon, bounds, tiles_dir, marker_data=marker_data)
+        m_updated = create_map(center_lat, center_lon, bounds, tiles_url, marker_data=marker_data)
         map_placeholder.write(st_folium(m_updated, width=700, height=500, key="updated_map"))
     
-    # Nettoyage des fichiers temporaires
+    # Nettoyage des fichiers temporaires (les tuiles restent dans static pour que la carte s'affiche)
     if os.path.exists(temp_tiff_path):
         os.remove(temp_tiff_path)
     if reprojected_path != temp_tiff_path and os.path.exists(reprojected_path):
         os.remove(reprojected_path)
-    # Vous pouvez aussi choisir de conserver le dossier de tuiles pour une utilisation ultérieure
+    if os.path.exists(temp_png_path):
+        os.remove(temp_png_path)
