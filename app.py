@@ -70,7 +70,8 @@ def apply_color_gradient(tiff_path, output_png_path):
         plt.imsave(output_png_path, colored_image)
         plt.close()
 
-def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1):
+# Modification : ajout du paramètre "show" et "control" pour gérer l'affichage dans le LayerControl
+def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1, show=True, control=True):
     with open(image_path, "rb") as f:
         image_data = f.read()
     image_base64 = base64.b64encode(image_data).decode("utf-8")
@@ -80,6 +81,8 @@ def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1):
         bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
         name=layer_name,
         opacity=opacity,
+        show=show,
+        control=control
     ).add_to(map_object)
 
 def normalize_data(data):
@@ -89,14 +92,13 @@ def normalize_data(data):
     norm_data = (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
     return norm_data
 
-# << Modification 2 >>
-# Ajout du paramètre tiff_opacity (par défaut à 1) pour contrôler l'opacité de l'overlay TIFF.
-def create_map(center_lat, center_lon, bounds, display_path, marker_data=None, hide_osm=False, tiff_opacity=1):
+# Modification : ajout des paramètres "tiff_opacity", "tiff_show" et "tiff_control" pour contrôler l'overlay TIFF
+def create_map(center_lat, center_lon, bounds, display_path, marker_data=None, hide_osm=False, tiff_opacity=1, tiff_show=True, tiff_control=True):
     if hide_osm:
         m = folium.Map(location=[center_lat, center_lon], tiles=None)
     else:
         m = folium.Map(location=[center_lat, center_lon])
-    add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=tiff_opacity)
+    add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=tiff_opacity, show=tiff_show, control=tiff_control)
     draw = Draw(
         draw_options={
             'marker': True,
@@ -321,18 +323,16 @@ if uploaded_files_grand and uploaded_files_petit:
         ###############################################
         # Carte 2 : TIFF PETIT avec TOUS les marqueurs
         ###############################################
-        # << Modification 1 >>
-        # Au lieu d'afficher seulement les marqueurs de la paire courante,
-        # nous agrégeons tous les marqueurs enregistrés pour les afficher sur la carte PETIT.
+        # On agrège tous les marqueurs enregistrés pour les afficher sur la carte PETIT.
         global_markers = []
         for markers in st.session_state.markers_by_pair.values():
             global_markers.extend(markers)
 
         st.subheader("Carte 2 : TIFF PETIT (avec tous les marqueurs reprojetés)")
         map_placeholder_petit = st.empty()
-        # << Modification 2 >>
-        # On passe tiff_opacity=0 pour rendre transparent l'overlay TIFF sur la carte PETIT.
-        m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds, display_path_petit, marker_data=global_markers, tiff_opacity=0)
+        # Pour la carte PETIT, l'overlay TIFF est rendu transparent (tiff_opacity=0) et est retiré du gestionnaire de couche (tiff_control=False)
+        m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds, display_path_petit,
+                             marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False)
         st_folium(m_petit, width=700, height=500, key="folium_map_petit")
 
         ###############################################
