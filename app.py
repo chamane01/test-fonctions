@@ -4,6 +4,7 @@ from folium.plugins import Draw  # Plugin pour dessiner sur la carte
 from streamlit_folium import st_folium
 import rasterio
 from rasterio.warp import calculate_default_transform, reproject, Resampling, transform
+from rasterio.coords import BoundingBox
 from PIL import Image
 import numpy as np
 import base64
@@ -85,22 +86,31 @@ def normalize_data(data):
     norm_data = (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
     return norm_data
 
-def enlarge_image(image_path, factor=4):
-    """Retourne une version de l'image dont la taille en pixels est multipliée par 'factor'."""
-    image = Image.open(image_path)
-    new_size = (image.width * factor, image.height * factor)
-    enlarged_image = image.resize(new_size, Image.NEAREST)
-    unique_id = str(uuid.uuid4())[:8]
-    enlarged_path = f"enlarged_{unique_id}.png"
-    enlarged_image.save(enlarged_path)
-    return enlarged_path
+def compute_zoomed_bounds(bounds, zoom_factor=4):
+    """
+    Retourne des bornes zoomées : centrées sur le même point que 'bounds' mais
+    avec une largeur et une hauteur divisées par 'zoom_factor'.
+    """
+    center_lon = (bounds.left + bounds.right) / 2
+    center_lat = (bounds.top + bounds.bottom) / 2
+    half_width = (bounds.right - bounds.left) / 2
+    half_height = (bounds.top - bounds.bottom) / 2
+    new_half_width = half_width / zoom_factor
+    new_half_height = half_height / zoom_factor
+    return BoundingBox(
+        left=center_lon - new_half_width,
+        bottom=center_lat - new_half_height,
+        right=center_lon + new_half_width,
+        top=center_lat + new_half_height
+    )
 
-def create_map(center_lat, center_lon, bounds, display_path, enlarged_path, marker_data=None):
+def create_map(center_lat, center_lon, bounds, display_path, marker_data=None):
     m = folium.Map(location=[center_lat, center_lon])
-    # Calque d'origine
+    # Calque d'origine (affiché sur l'emprise complète)
     add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
-    # Calque avec image grossie (upscalée) : même emprise géographique
-    add_image_overlay(m, enlarged_path, bounds, "TIFF Grossi 4x", opacity=0.7)
+    # Calque zoomé : bornes réduites, ce qui agrandit visuellement l'image
+    zoomed_bounds = compute_zoomed_bounds(bounds, zoom_factor=4)
+    add_image_overlay(m, display_path, zoomed_bounds, "TIFF Grossi 4x", opacity=0.7)
     
     # Ajout du plugin de dessin
     draw = Draw(
@@ -117,7 +127,8 @@ def create_map(center_lat, center_lon, bounds, display_path, enlarged_path, mark
     draw.add_to(m)
     m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
     folium.LayerControl().add_to(m)
-    # Ajout des marqueurs classifiés si fournis
+    
+    # Ajout des marqueurs classifiés (le cas échéant)
     if marker_data:
         for marker in marker_data:
             lat = marker["lat"]
@@ -146,16 +157,19 @@ if uploaded_file is not None:
         f.write(uploaded_file.read())
     st.write("Fichier TIFF uploadé.")
 
+    # Lecture du TIFF et affichage du CRS
     with rasterio.open(temp_tiff_path) as src:
         st.write("CRS du TIFF :", src.crs)
         bounds = src.bounds
 
+    # Reprojection vers EPSG:4326 si nécessaire
     if src.crs.to_string() != "EPSG:4326":
         st.write("Reprojection vers EPSG:4326...")
         reprojected_path = reproject_tiff(temp_tiff_path, "EPSG:4326")
     else:
         reprojected_path = temp_tiff_path
 
+    # Choix entre gradient de couleur ou conversion en image RGB/monochrome
     apply_gradient = st.checkbox("Appliquer un gradient de couleur (pour MNS/MNT)", value=False)
     if apply_gradient:
         unique_png_id = str(uuid.uuid4())[:8]
@@ -179,9 +193,7 @@ if uploaded_file is not None:
         image.save(temp_png_path)
         display_path = temp_png_path
 
-    # Création d'une version "grossie" 4x (upscalée) de l'image PNG
-    enlarged_path = enlarge_image(display_path, factor=4)
-
+    # Réouverture du TIFF reprojeté pour récupérer les bornes (EPSG:4326)
     with rasterio.open(reprojected_path) as src:
         bounds = src.bounds
     st.write("Bornes (EPSG:4326) :", bounds)
@@ -194,7 +206,7 @@ if uploaded_file is not None:
 
     # Affichage initial de la carte
     map_placeholder = st.empty()
-    m = create_map(center_lat, center_lon, bounds, display_path, enlarged_path, marker_data=None)
+    m = create_map(center_lat, center_lon, bounds, display_path, marker_data=None)
     result = st_folium(m, width=700, height=500, key="folium_map")
 
     st.subheader("Classification des marqueurs")
@@ -238,11 +250,11 @@ if uploaded_file is not None:
     if marker_data:
         st.markdown("### Récapitulatif des marqueurs")
         st.table(marker_data)
-        # Mise à jour de la carte avec les cercles classifiés
-        m_updated = create_map(center_lat, center_lon, bounds, display_path, enlarged_path, marker_data=marker_data)
+        # Mise à jour de la carte avec les marqueurs classifiés
+        m_updated = create_map(center_lat, center_lon, bounds, display_path, marker_data=marker_data)
         map_placeholder.write(st_folium(m_updated, width=700, height=500, key="updated_map"))
     
     # Nettoyage des fichiers temporaires
-    for path in [temp_tiff_path, reprojected_path, temp_png_path, enlarged_path]:
+    for path in [temp_tiff_path, reprojected_path, temp_png_path]:
         if os.path.exists(path):
             os.remove(path)
