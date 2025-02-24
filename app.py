@@ -120,7 +120,7 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None):
             ).add_to(m)
     return m
 
-st.title("Affichage de deux TIFF avec reprojection des marqueurs")
+st.title("Affichage de deux TIFF avec reprojection des marqueurs et conversion UTM")
 
 # Téléversement des deux fichiers TIFF
 col1, col2 = st.columns(2)
@@ -203,15 +203,24 @@ if uploaded_file_grand is not None and uploaded_file_petit is not None:
     st.write("Bornes TIFF GRAND (EPSG:4326) :", grand_bounds)
     st.write("Bornes TIFF PETIT (EPSG:4326) :", petit_bounds)
 
-    # -------------------- Carte 1 : TIFF GRAND --------------------
+    # Détermination des centres pour calculer la zone UTM de chacun
     center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
     center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
+    utm_zone_grand = int((center_lon_grand + 180) / 6) + 1
+    utm_crs_grand = f"EPSG:326{utm_zone_grand:02d}"  # Supposons l'hémisphère nord
+
+    center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
+    center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
+    utm_zone_petit = int((center_lon_petit + 180) / 6) + 1
+    utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"  # Supposons l'hémisphère nord
+
+    # -------------------- Carte 1 : TIFF GRAND --------------------
     st.subheader("Carte 1 : TIFF GRAND (pour dessin des marqueurs)")
     map_placeholder_grand = st.empty()
     m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand, marker_data=None)
     result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
 
-    # -------------------- Extraction et reprojection des marqueurs --------------------
+    # -------------------- Extraction, reprojection et conversion UTM des marqueurs --------------------
     st.subheader("Classification des marqueurs")
     marker_data = []
     features = []
@@ -232,11 +241,18 @@ if uploaded_file_grand is not None and uploaded_file_petit is not None:
                     # Calcul des pourcentages par rapport aux bornes du TIFF GRAND
                     percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
                     percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
-                    # Projection des coordonnées dans le système du TIFF PETIT
+                    # Projection des coordonnées dans le système du TIFF PETIT (EPSG:4326)
                     new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
                     new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
+                    # Conversion en UTM pour le TIFF GRAND
+                    utm_x_grand, utm_y_grand = transform("EPSG:4326", utm_crs_grand, [lon], [lat])
+                    utm_coords_grand = (round(utm_x_grand[0], 2), round(utm_y_grand[0], 2))
+                    # Conversion en UTM pour le TIFF PETIT
+                    utm_x_petit, utm_y_petit = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
+                    utm_coords_petit = (round(utm_x_petit[0], 2), round(utm_y_petit[0], 2))
                 else:
-                    lat, lon, new_lat, new_lon = None, None, None, None
+                    lat = lon = new_lat = new_lon = None
+                    utm_coords_grand = utm_coords_petit = "Inconnues"
                 st.markdown(f"**Marqueur {idx+1}**")
                 col1, col2 = st.columns(2)
                 with col1:
@@ -245,8 +261,10 @@ if uploaded_file_grand is not None and uploaded_file_petit is not None:
                     selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{idx}")
                 marker_data.append({
                     "Marqueur": idx+1,
-                    "Coordonnées TIFF GRAND": (round(lon,4), round(lat,4)) if lon and lat else "Inconnues",
-                    "Coordonnées TIFF PETIT": (round(new_lon,4), round(new_lat,4)) if new_lon and new_lat else "Inconnues",
+                    "Coordonnées TIFF GRAND (EPSG:4326)": (round(lon, 4), round(lat, 4)) if lon and lat else "Inconnues",
+                    "Coordonnées UTM TIFF GRAND": utm_coords_grand,
+                    "Coordonnées TIFF PETIT (EPSG:4326)": (round(new_lon, 4), round(new_lat, 4)) if new_lon and new_lat else "Inconnues",
+                    "Coordonnées UTM TIFF PETIT": utm_coords_petit,
                     "Classe": selected_class,
                     "Gravité": selected_gravity,
                     # Pour la carte PETIT, on utilise les coordonnées reprojetées
@@ -259,8 +277,6 @@ if uploaded_file_grand is not None and uploaded_file_petit is not None:
         st.write("Aucun marqueur n'a été détecté.")
 
     # -------------------- Carte 2 : TIFF PETIT avec marqueurs reprojetés --------------------
-    center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
-    center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
     st.subheader("Carte 2 : TIFF PETIT (avec marqueurs reprojetés)")
     map_placeholder_petit = st.empty()
     m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds, display_path_petit, marker_data=marker_data)
