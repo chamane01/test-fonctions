@@ -309,7 +309,7 @@ if uploaded_files:
             )
         os.remove(output_path)
         
-        # Téléchargement groupé de toutes les images en GeoTIFF dans une archive ZIP
+        # Téléchargement groupé de toutes les images en GeoTIFF
         if st.button("Convertir et télécharger **toutes** les images en GeoTIFF"):
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -342,6 +342,44 @@ if uploaded_files:
                 label="Télécharger toutes les images GeoTIFF (ZIP)",
                 data=zip_buffer,
                 file_name="images_geotiff.zip",
+                mime="application/zip"
+            )
+        
+        # -------------------------------
+        # Option supplémentaire GeoTIFF x4 :
+        # Les images seront converties en GeoTIFF en appliquant un facteur 4 sur la résolution spatiale entrée.
+        if st.button("Convertir et télécharger **toutes** les images en GeoTIFF x4"):
+            zip_buffer_geotiff_x4 = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer_geotiff_x4, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for i, info in enumerate(images_info):
+                    if len(images_info) >= 2:
+                        if i == 0:
+                            dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
+                            dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
+                        elif i == len(images_info) - 1:
+                            dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
+                            dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
+                        else:
+                            dx = images_info[i+1]["utm"][0] - images_info[i-1]["utm"][0]
+                            dy = images_info[i+1]["utm"][1] - images_info[i-1]["utm"][1]
+                        flight_angle_i = math.degrees(math.atan2(dx, dy))
+                    else:
+                        flight_angle_i = 0
+                    tiff_bytes_x4 = convert_to_tiff_in_memory(
+                        image_file=io.BytesIO(info["data"]),
+                        pixel_size=pixel_size * 4,  # Application d'un produit de 4 sur la résolution spatiale
+                        utm_center=info["utm"],
+                        utm_crs=info["utm_crs"],
+                        rotation_angle=-flight_angle_i,
+                        scaling_factor=scaling_factor
+                    )
+                    output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff_x4.tif"
+                    zip_file.writestr(output_filename, tiff_bytes_x4)
+            zip_buffer_geotiff_x4.seek(0)
+            st.download_button(
+                label="Télécharger toutes les images GeoTIFF x4 (ZIP)",
+                data=zip_buffer_geotiff_x4,
+                file_name="images_geotiff_x4.zip",
                 mime="application/zip"
             )
         
