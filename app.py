@@ -257,7 +257,7 @@ if uploaded_files:
         )
         st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
         
-        # Sélecteur élargi pour le facteur de redimensionnement
+        # Sélecteur élargi pour le facteur de redimensionnement (utilisé pour la conversion standard)
         scale_options = ["/50", "/20", "/10", "/5", "/2", "0", "*2", "*5", "*10", "*20", "*50"]
         selected_scale = st.select_slider("Choisissez le facteur de redimensionnement de l'image", options=scale_options, value="0")
         mapping = {
@@ -346,11 +346,12 @@ if uploaded_files:
             )
         
         # -------------------------------
-        # Option supplémentaire GeoTIFF x2.5 :
-        # Les images seront converties en GeoTIFF en appliquant un facteur 2.5 sur la résolution spatiale entrée.
-        if st.button("Convertir et télécharger **toutes** les images en GeoTIFF x2.5"):
-            zip_buffer_geotiff_x25 = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer_geotiff_x25, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        # Option supplémentaire GeoTIFF x2 :
+        # Pour cet export, le redimensionnement n'est plus soumis au sélecteur,
+        # le facteur de redimensionnement est fixé à 1/3 et la résolution spatiale est multipliée par 2.
+        if st.button("Convertir et télécharger **toutes** les images en GeoTIFF x2"):
+            zip_buffer_geotiff_x2 = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer_geotiff_x2, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
                     if len(images_info) >= 2:
                         if i == 0:
@@ -365,21 +366,21 @@ if uploaded_files:
                         flight_angle_i = math.degrees(math.atan2(dx, dy))
                     else:
                         flight_angle_i = 0
-                    tiff_bytes_x25 = convert_to_tiff_in_memory(
+                    tiff_bytes_x2 = convert_to_tiff_in_memory(
                         image_file=io.BytesIO(info["data"]),
-                        pixel_size=pixel_size * 2.5,  # Application d'un facteur 2.5 sur la résolution spatiale
+                        pixel_size=pixel_size * 2,  # Application d'un facteur 2 sur la résolution spatiale
                         utm_center=info["utm"],
                         utm_crs=info["utm_crs"],
                         rotation_angle=-flight_angle_i,
-                        scaling_factor=scaling_factor
+                        scaling_factor=1/3        # Facteur constant : division par 3
                     )
-                    output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.5.tif"
-                    zip_file.writestr(output_filename, tiff_bytes_x25)
-            zip_buffer_geotiff_x25.seek(0)
+                    output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
+                    zip_file.writestr(output_filename, tiff_bytes_x2)
+            zip_buffer_geotiff_x2.seek(0)
             st.download_button(
-                label="Télécharger toutes les images GeoTIFF x2.5 (ZIP)",
-                data=zip_buffer_geotiff_x25,
-                file_name="images_geotiff_x2.5.zip",
+                label="Télécharger toutes les images GeoTIFF x2 (ZIP)",
+                data=zip_buffer_geotiff_x2,
+                file_name="images_geotiff_x2.zip",
                 mime="application/zip"
             )
         
