@@ -4,6 +4,7 @@ from folium.plugins import Draw  # Plugin pour dessiner sur la carte
 from streamlit_folium import st_folium
 import rasterio
 from rasterio.warp import calculate_default_transform, reproject, Resampling, transform
+from rasterio.coords import BoundingBox  # Pour recréer des bornes
 from PIL import Image
 import numpy as np
 import base64
@@ -85,9 +86,32 @@ def normalize_data(data):
     norm_data = (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
     return norm_data
 
+def compute_zoomed_bounds(bounds, zoom_factor=4):
+    """
+    Calcule de nouvelles bornes centrées sur le même centre mais dont la largeur et la hauteur
+    sont divisées par le facteur de zoom, ce qui revient à zoomer sur l'image.
+    """
+    center_lon = (bounds.left + bounds.right) / 2
+    center_lat = (bounds.top + bounds.bottom) / 2
+    half_width = (bounds.right - bounds.left) / 2
+    half_height = (bounds.top - bounds.bottom) / 2
+    new_half_width = half_width / zoom_factor
+    new_half_height = half_height / zoom_factor
+    return BoundingBox(
+        left=center_lon - new_half_width,
+        bottom=center_lat - new_half_height,
+        right=center_lon + new_half_width,
+        top=center_lat + new_half_height
+    )
+
 def create_map(center_lat, center_lon, bounds, display_path, marker_data=None):
     m = folium.Map(location=[center_lat, center_lon])
+    # Calque original
     add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
+    # Calque zoomé à 4x (même TIFF mais sur des bornes plus restreintes => image agrandie)
+    zoom_bounds = compute_zoomed_bounds(bounds, zoom_factor=4)
+    add_image_overlay(m, display_path, zoom_bounds, "TIFF Zoom 4x", opacity=0.7)
+    
     # Ajout du plugin de dessin
     draw = Draw(
         draw_options={
