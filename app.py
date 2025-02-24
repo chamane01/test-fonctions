@@ -14,7 +14,6 @@ import matplotlib.pyplot as plt
 ###############################
 # Paramètres et dictionnaires
 ###############################
-# Couleurs associées aux classes
 class_color = {
     "Classe 1": "#FF0000",
     "Classe 2": "#00FF00",
@@ -91,13 +90,11 @@ def normalize_data(data):
     return norm_data
 
 def create_map(center_lat, center_lon, bounds, display_path, marker_data=None, hide_osm=False):
-    # Masquage du fond OSM si demandé
     if hide_osm:
         m = folium.Map(location=[center_lat, center_lon], tiles=None)
     else:
         m = folium.Map(location=[center_lat, center_lon])
     add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=1)
-    # Plugin de dessin
     draw = Draw(
         draw_options={
             'marker': True,
@@ -128,29 +125,20 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None, h
             ).add_to(m)
     return m
 
-#######################################################
+###############################################
 # Fonctions utilitaires pour le jumelage par centre
-#######################################################
+###############################################
 def get_reprojected_and_center(uploaded_file, group):
-    """
-    Sauvegarde le fichier téléchargé dans un fichier temporaire,
-    le reprojette si nécessaire, et retourne un dictionnaire contenant :
-      - "path" : chemin vers le TIFF reprojeté (EPSG:4326)
-      - "center" : (lon, lat) du centre de l'image (calculé à partir des bornes)
-      - "temp_original": chemin temporaire initial
-    """
     unique_id = str(uuid.uuid4())[:8]
     temp_path = f"uploaded_{group}_{unique_id}.tif"
     with open(temp_path, "wb") as f:
         f.write(uploaded_file.read())
-    # Ouvrir le TIFF et reprojeter si nécessaire
     with rasterio.open(temp_path) as src:
         crs_str = src.crs.to_string()
     if crs_str != "EPSG:4326":
         reproj_path = reproject_tiff(temp_path, "EPSG:4326")
     else:
         reproj_path = temp_path
-    # Calculer le centre à partir des bornes reprojetées
     with rasterio.open(reproj_path) as src:
         bounds = src.bounds
         center_lon = (bounds.left + bounds.right) / 2
@@ -165,7 +153,7 @@ if "current_pair_index" not in st.session_state:
 if "pairs" not in st.session_state:
     st.session_state.pairs = []  # Liste des paires { "grand":..., "petit":... }
 if "markers_by_pair" not in st.session_state:
-    st.session_state.markers_by_pair = {}  # Marqueurs par index de paire
+    st.session_state.markers_by_pair = {}  # Marqueurs par indice de paire
 
 ###############################################
 # UPLOAD MULTIPLE DES FICHIERS
@@ -179,20 +167,16 @@ if uploaded_files_grand and uploaded_files_petit:
     if len(uploaded_files_grand) != len(uploaded_files_petit):
         st.error("Le nombre de fichiers TIFF GRAND et TIFF PETIT doit être identique.")
     else:
-        # Pour chaque groupe, on construit une liste avec le chemin reprojeté et le centre
         grand_list = []
         petit_list = []
         for file in uploaded_files_grand:
-            # IMPORTANT : Pour permettre plusieurs lectures, on doit recréer une copie en mémoire
             file.seek(0)
             grand_list.append(get_reprojected_and_center(file, "grand"))
         for file in uploaded_files_petit:
             file.seek(0)
             petit_list.append(get_reprojected_and_center(file, "petit"))
-        # On trie chaque liste par (longitude, latitude) du centre
         grand_list = sorted(grand_list, key=lambda d: d["center"])
         petit_list = sorted(petit_list, key=lambda d: d["center"])
-        # On crée les paires en associant l'élément d'indice i de chaque liste
         pair_count = len(grand_list)
         pairs = []
         for i in range(pair_count):
@@ -200,28 +184,22 @@ if uploaded_files_grand and uploaded_files_petit:
         st.session_state.pairs = pairs
 
         ###############################################
-        # Navigation entre paires
+        # Navigation entre paires sans appel explicite de experimental_rerun
         ###############################################
         col_nav1, col_nav2, col_nav3 = st.columns([1,2,1])
-        with col_nav1:
-            if st.button("← Précédent"):
-                if st.session_state.current_pair_index > 0:
-                    st.session_state.current_pair_index -= 1
-                    st.experimental_rerun()  # Arrête l'exécution après la mise à jour
-        with col_nav3:
-            if st.button("Suivant →"):
-                if st.session_state.current_pair_index < pair_count - 1:
-                    st.session_state.current_pair_index += 1
-                    st.experimental_rerun()
+        prev_pressed = col_nav1.button("← Précédent")
+        next_pressed = col_nav3.button("Suivant →")
+        if prev_pressed and st.session_state.current_pair_index > 0:
+            st.session_state.current_pair_index -= 1
+        if next_pressed and st.session_state.current_pair_index < pair_count - 1:
+            st.session_state.current_pair_index += 1
         st.write(f"Affichage de la paire {st.session_state.current_pair_index + 1} sur {pair_count}")
         current_index = st.session_state.current_pair_index
         current_pair = st.session_state.pairs[current_index]
 
         ###############################################
-        # Traitement de la paire courante
+        # Traitement de la paire courante : génération des PNG
         ###############################################
-        # Pour chaque TIFF, on génère une image PNG d'affichage.
-        # --- TIFF GRAND ---
         reproj_grand_path = current_pair["grand"]["path"]
         with rasterio.open(reproj_grand_path) as src:
             grand_bounds = src.bounds
@@ -241,7 +219,6 @@ if uploaded_files_grand and uploaded_files_petit:
         image_grand.save(temp_png_grand)
         display_path_grand = temp_png_grand
 
-        # --- TIFF PETIT ---
         reproj_petit_path = current_pair["petit"]["path"]
         apply_gradient = st.checkbox("Appliquer un gradient de couleur pour le TIFF PETIT", value=False)
         if apply_gradient:
@@ -265,7 +242,6 @@ if uploaded_files_grand and uploaded_files_petit:
             image_petit.save(temp_png_petit)
         display_path_petit = temp_png_petit
 
-        # Affichage des bornes (pour information)
         with rasterio.open(reproj_grand_path) as src:
             grand_bounds = src.bounds
         with rasterio.open(reproj_petit_path) as src:
@@ -273,7 +249,6 @@ if uploaded_files_grand and uploaded_files_petit:
         st.write("Bornes TIFF GRAND (EPSG:4326) :", grand_bounds)
         st.write("Bornes TIFF PETIT (EPSG:4326) :", petit_bounds)
 
-        # Détermination des centres et zones UTM
         center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
         center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
         utm_zone_grand = int((center_lon_grand + 180) / 6) + 1
@@ -302,7 +277,6 @@ if uploaded_files_grand and uploaded_files_petit:
             elif isinstance(all_drawings, list):
                 features = all_drawings
 
-        # Calcul global du nombre de marqueurs (toutes paires confondues)
         global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values())
         current_markers = st.session_state.markers_by_pair.get(current_index, [])
         if features:
@@ -313,10 +287,8 @@ if uploaded_files_grand and uploaded_files_petit:
                     coords = feature.get("geometry", {}).get("coordinates")
                     if coords and isinstance(coords, list) and len(coords) >= 2:
                         lon, lat = coords[0], coords[1]
-                        # Calcul des pourcentages dans le TIFF GRAND
                         percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
                         percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
-                        # Projection dans le système du TIFF PETIT (EPSG:4326)
                         new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
                         new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
                         utm_x_petit, utm_y_petit = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
