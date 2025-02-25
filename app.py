@@ -95,23 +95,25 @@ if uploaded_file is not None:
                 cluster_min_points = st.slider("Nombre minimal de points par cluster", 
                                                min_value=100, max_value=20000, value=10000, step=100)
                 
-                # Extraction des lignes
-                lines = extract_lines(candidate_points_xy, eps=eps, 
-                                        min_samples=min_samples, cluster_min_points=cluster_min_points)
-                st.write(f"Nombre de segments linéaires extraits : **{len(lines)}**")
-                
-                # Affichage sur une carte 2D
-                fig, ax = plt.subplots(figsize=(8, 6))
-                ax.scatter(candidate_points_xy[:, 0], candidate_points_xy[:, 1],
-                           s=1, color='grey', label='Points candidats')
-                
-                for i, line in enumerate(lines):
-                    ax.plot(line[:, 0], line[:, 1], linewidth=2, label=f"Ligne {i+1}")
-                
-                ax.set_xlabel("X")
-                ax.set_ylabel("Y")
-                ax.set_title("Lignes électriques extraites")
-                ax.legend(loc='best', fontsize='small')
-                st.pyplot(fig)
-                
-    st.success("Traitement terminé. (Raisonnement terminé en 13 secondes)")
+                # Bouton pour lancer le calcul
+                if st.button("Lancer le calcul"):
+                    with st.spinner("Calcul en cours..."):
+                        # Extraction des lignes à partir des points candidats et des paramètres choisis
+                        lines = extract_lines(candidate_points_xy, eps=eps, 
+                                                min_samples=min_samples, cluster_min_points=cluster_min_points)
+                        st.write(f"Nombre de segments linéaires extraits : **{len(lines)}**")
+                        
+                        # Affichage sur une carte 2D
+                        fig, ax = plt.subplots(figsize=(8, 6))
+                        ax.scatter(candidate_points_xy[:, 0], candidate_points_xy[:, 1],
+                                   s=1, color='grey', label='Points candidats')
+                        
+                        for i, line in enumerate(lines):
+                            ax.plot(line[:, 0], line[:, 1], linewidth=2, label=f"Ligne {i+1}")
+                        
+                        ax.set_xlabel("X")
+                        ax.set_ylabel("Y")
+                        ax.set_title("Lignes électriques extraites")
+                        ax.legend(loc='best', fontsize='small')
+                        st.pyplot(fig)
+                    st.success("Calcul terminé. Les résultats précédents ont été écrasés par le nouveau calcul.")
