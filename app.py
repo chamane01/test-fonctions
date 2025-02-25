@@ -1,7 +1,5 @@
 import streamlit as st
 import numpy as np
-
-import pycsf
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 import alphashape
