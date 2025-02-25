@@ -66,6 +66,9 @@ def mask_special_zones(img_hsv, zone):
 # 4) Récupérer le masque pour une gamme de couleur donnée
 # ----------------------------------------------------------------------------
 def get_color_mask(img_bgr, target_color):
+    """
+    Renvoie un masque binaire (0/255) correspondant à la zone de couleur 'target_color'.
+    """
     img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     if target_color in ["Blancs", "Neutres", "Noirs"]:
         mask = mask_special_zones(img_hsv, target_color)
@@ -79,7 +82,24 @@ def get_color_mask(img_bgr, target_color):
     return mask
 
 # ----------------------------------------------------------------------------
-# 5) Appliquer la correction sélective sur une zone (masque)
+# 5) Suppression des petites composantes connectées (bruit)
+# ----------------------------------------------------------------------------
+def remove_small_components(mask, min_area):
+    """
+    Supprime les composantes connectées dont l'aire est inférieure à 'min_area'.
+    """
+    nb_components, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    new_mask = np.zeros_like(mask)
+    # stats[i, cv2.CC_STAT_AREA] => aire de la composante i
+    # i=0 => fond
+    for i in range(1, nb_components):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area >= min_area:
+            new_mask[labels == i] = 255
+    return new_mask
+
+# ----------------------------------------------------------------------------
+# 6) Appliquer la correction sélective sur une zone (masque)
 # ----------------------------------------------------------------------------
 def apply_selective_color(img_bgr, mask, c_adj, m_adj, y_adj, k_adj, method="Relative"):
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -100,6 +120,7 @@ def apply_selective_color(img_bgr, mask, c_adj, m_adj, y_adj, k_adj, method="Rel
                     m += m_adj
                     y += y_adj
                     k += k_adj
+                # Clip pour rester dans [0,100]
                 c = max(0, min(100, c))
                 m = max(0, min(100, m))
                 y = max(0, min(100, y))
@@ -109,16 +130,19 @@ def apply_selective_color(img_bgr, mask, c_adj, m_adj, y_adj, k_adj, method="Rel
     return cv2.cvtColor(out_img, cv2.COLOR_RGB2BGR)
 
 # ----------------------------------------------------------------------------
-# 6) Fonction d'application des modifications classiques
+# 7) Fonction d'application des modifications classiques
 # ----------------------------------------------------------------------------
 def apply_classic_modifications(img, brightness=0, contrast=1.0, saturation=1.0, gamma=1.0):
     img = img.astype(np.float32)
+    # Ajustement luminosité/contraste
     img = img * contrast + brightness
     img = np.clip(img, 0, 255).astype(np.uint8)
+    # Ajustement saturation
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
     hsv[..., 1] *= saturation
     hsv[..., 1] = np.clip(hsv[..., 1], 0, 255)
     img = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+    # Correction gamma
     if gamma != 1.0:
         invGamma = 1.0 / gamma
         table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(256)]).astype("uint8")
@@ -126,13 +150,21 @@ def apply_classic_modifications(img, brightness=0, contrast=1.0, saturation=1.0,
     return img
 
 # ----------------------------------------------------------------------------
-# 7) Barre latérale : organisation des paramètres
+# 8) Barre latérale : organisation des paramètres
 # ----------------------------------------------------------------------------
 st.sidebar.title("Paramètres de Correction")
 
 # Choix de la séquence de corrections
 correction_sequence = st.sidebar.radio("Séquence de corrections",
                                          options=["Correction 1 seule", "Correction 2 (en chaîne)", "Correction 3 (en chaîne)"])
+
+# ----- Filtrage du bruit global -----
+st.sidebar.subheader("Filtrage du bruit")
+remove_noise_active = st.sidebar.checkbox("Activer le filtrage du bruit", value=False)
+if remove_noise_active:
+    min_area = st.sidebar.slider("Taille minimale des zones (pixels)", 0, 5000, 50)
+else:
+    min_area = 0
 
 # ----- Correction 1 -----
 st.sidebar.subheader("Correction 1")
@@ -314,7 +346,7 @@ def generate_pdf(export_text, original_img, main_img, color_img):
     return pdf_bytes
 
 # ----------------------------------------------------------------------------
-# 8) Traitement de l'image et application des corrections
+# 9) Traitement de l'image et application des corrections
 # ----------------------------------------------------------------------------
 st.title("Correction Sélective – Mode Multicouche Dynamique")
 uploaded_file = st.file_uploader("Téléversez une image (JPEG/PNG)", type=["jpg", "jpeg", "png"])
@@ -328,24 +360,36 @@ if uploaded_file is not None:
     layer_results_corr1 = {}
     for layer in layer_names:
         if layer_params_corr1[layer]["active"]:
+            # 1) Récupération du masque
             mask = get_color_mask(original_bgr, layer)
+            # 2) Filtrage du bruit si activé
+            if remove_noise_active:
+                mask = remove_small_components(mask, min_area)
+            # 3) Application de la correction
             params = layer_params_corr1[layer]
-            result = apply_selective_color(original_bgr, mask, params["c_adj"], params["m_adj"],
-                                           params["y_adj"], params["k_adj"], params["method"])
+            result = apply_selective_color(original_bgr, mask,
+                                           params["c_adj"], params["m_adj"],
+                                           params["y_adj"], params["k_adj"],
+                                           params["method"])
             layer_results_corr1[layer] = {"mask": mask, "result": result}
+
     combined_main_corr1 = original_bgr.copy()
     for layer in layer_results_corr1:
         mask = layer_results_corr1[layer]["mask"]
         combined_main_corr1[mask != 0] = layer_results_corr1[layer]["result"][mask != 0]
+
     h, w = original_bgr.shape[:2]
     combined_color_corr1 = np.full((h, w, 3), 255, dtype=np.uint8)
     for layer in layer_results_corr1:
         mask = layer_results_corr1[layer]["mask"]
         combined_color_corr1[mask != 0] = layer_results_corr1[layer]["result"][mask != 0]
+
+    # Sélection d'affichage
     if main_display_mode == "Couche active" and selected_main_layer in layer_results_corr1:
         main_display_corr1 = layer_results_corr1[selected_main_layer]["result"]
     else:
         main_display_corr1 = combined_main_corr1
+
     if color_layer_display_mode == "Couche active" and selected_color_layer in layer_results_corr1:
         single_color = np.full((h, w, 3), 255, dtype=np.uint8)
         mask = layer_results_corr1[selected_color_layer]["mask"]
@@ -353,18 +397,24 @@ if uploaded_file is not None:
         color_display_corr1 = single_color
     else:
         color_display_corr1 = combined_color_corr1
+
+    # Modifications classiques (Corr 1)
     if classic_active_corr1:
         contrast_factor_corr1 = contrast_corr1 / 100.0
         saturation_factor_corr1 = saturation_corr1 / 100.0
         gamma_factor_corr1 = gamma_corr1 / 100.0
-        main_display_corr1 = apply_classic_modifications(main_display_corr1, brightness=brightness_corr1,
+        main_display_corr1 = apply_classic_modifications(main_display_corr1,
+                                                         brightness=brightness_corr1,
                                                          contrast=contrast_factor_corr1,
                                                          saturation=saturation_factor_corr1,
                                                          gamma=gamma_factor_corr1)
-        color_display_corr1 = apply_classic_modifications(color_display_corr1, brightness=brightness_corr1,
+        color_display_corr1 = apply_classic_modifications(color_display_corr1,
+                                                          brightness=brightness_corr1,
                                                           contrast=contrast_factor_corr1,
                                                           saturation=saturation_factor_corr1,
                                                           gamma=gamma_factor_corr1)
+
+    # Affichage ou passage aux corrections suivantes
     if correction_sequence == "Correction 1 seule":
         st.subheader("Image modifiée (Correction 1)")
         st.image(cv2.cvtColor(main_display_corr1, cv2.COLOR_BGR2RGB), use_container_width=True)
@@ -372,9 +422,14 @@ if uploaded_file is not None:
         st.image(cv2.cvtColor(color_display_corr1, cv2.COLOR_BGR2RGB), use_container_width=True)
         
         # Export de la correction 1
-        export_text_corr1 = generate_export_text("Correction 1", layer_params_corr1, classic_active_corr1,
-                                                 brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
-        pdf_bytes_corr1 = generate_pdf(export_text_corr1, original_bgr, main_display_corr1, color_display_corr1)
+        export_text_corr1 = generate_export_text("Correction 1", layer_params_corr1,
+                                                 classic_active_corr1,
+                                                 brightness_corr1, contrast_corr1,
+                                                 saturation_corr1, gamma_corr1)
+        pdf_bytes_corr1 = generate_pdf(export_text_corr1,
+                                       original_bgr,
+                                       main_display_corr1,
+                                       color_display_corr1)
         st.download_button("Télécharger les paramètres (TXT) - Corr 1",
                            data=export_text_corr1,
                            file_name="export_correction1.txt",
@@ -390,23 +445,35 @@ if uploaded_file is not None:
         layer_results_corr2 = {}
         for layer in layer_names:
             if layer_params_corr2[layer]["active"]:
+                # 1) Masque sur l'image issue de Corr 1
                 mask = get_color_mask(corr1_source, layer)
+                # 2) Filtrage du bruit
+                if remove_noise_active:
+                    mask = remove_small_components(mask, min_area)
+                # 3) Correction
                 params = layer_params_corr2[layer]
-                result = apply_selective_color(corr1_source, mask, params["c_adj"], params["m_adj"],
-                                               params["y_adj"], params["k_adj"], params["method"])
+                result = apply_selective_color(corr1_source, mask,
+                                               params["c_adj"], params["m_adj"],
+                                               params["y_adj"], params["k_adj"],
+                                               params["method"])
                 layer_results_corr2[layer] = {"mask": mask, "result": result}
+
         combined_main_corr2 = corr1_source.copy()
         for layer in layer_results_corr2:
             mask = layer_results_corr2[layer]["mask"]
             combined_main_corr2[mask != 0] = layer_results_corr2[layer]["result"][mask != 0]
+
         combined_color_corr2 = np.full((h, w, 3), 255, dtype=np.uint8)
         for layer in layer_results_corr2:
             mask = layer_results_corr2[layer]["mask"]
             combined_color_corr2[mask != 0] = layer_results_corr2[layer]["result"][mask != 0]
+
+        # Sélection d'affichage
         if main_display_mode == "Couche active" and selected_main_layer in layer_results_corr2:
             main_display_corr2 = layer_results_corr2[selected_main_layer]["result"]
         else:
             main_display_corr2 = combined_main_corr2
+
         if color_layer_display_mode == "Couche active" and selected_color_layer in layer_results_corr2:
             single_color_corr2 = np.full((h, w, 3), 255, dtype=np.uint8)
             mask = layer_results_corr2[selected_color_layer]["mask"]
@@ -414,30 +481,37 @@ if uploaded_file is not None:
             color_display_corr2 = single_color_corr2
         else:
             color_display_corr2 = combined_color_corr2
+
+        # Modifications classiques (Corr 2)
         if classic_active_corr2:
             contrast_factor_corr2 = contrast_corr2 / 100.0
             saturation_factor_corr2 = saturation_corr2 / 100.0
             gamma_factor_corr2 = gamma_corr2 / 100.0
-            main_display_corr2 = apply_classic_modifications(main_display_corr2, brightness=brightness_corr2,
+            main_display_corr2 = apply_classic_modifications(main_display_corr2,
+                                                             brightness=brightness_corr2,
                                                              contrast=contrast_factor_corr2,
                                                              saturation=saturation_factor_corr2,
                                                              gamma=gamma_factor_corr2)
-            color_display_corr2 = apply_classic_modifications(color_display_corr2, brightness=brightness_corr2,
+            color_display_corr2 = apply_classic_modifications(color_display_corr2,
+                                                              brightness=brightness_corr2,
                                                               contrast=contrast_factor_corr2,
                                                               saturation=saturation_factor_corr2,
                                                               gamma=gamma_factor_corr2)
+
         st.subheader("Image modifiée (Correction 2)")
         st.image(cv2.cvtColor(main_display_corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
         st.subheader("Couche de couleur (fond blanc) - Correction 2")
         st.image(cv2.cvtColor(color_display_corr2, cv2.COLOR_BGR2RGB), use_container_width=True)
         
-        # Export de la correction 2 avec cumul des paramètres de Corr 1 et Corr 2
-        export_text_corr2 = "Export cumulatif pour Correction 2\n\n"
-        export_text_corr2 += generate_export_text("Correction 1", layer_params_corr1, classic_active_corr1,
-                                                  brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
-        export_text_corr2 += "\n" + generate_export_text("Correction 2", layer_params_corr2, classic_active_corr2,
-                                                        brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
-        pdf_bytes_corr2 = generate_pdf(export_text_corr2, original_bgr, main_display_corr2, color_display_corr2)
+        # Export de la correction 2
+        export_text_corr2 = generate_export_text("Correction 2", layer_params_corr2,
+                                                 classic_active_corr2,
+                                                 brightness_corr2, contrast_corr2,
+                                                 saturation_corr2, gamma_corr2)
+        pdf_bytes_corr2 = generate_pdf(export_text_corr2,
+                                       original_bgr,
+                                       main_display_corr2,
+                                       color_display_corr2)
         st.download_button("Télécharger les paramètres (TXT) - Corr 2",
                            data=export_text_corr2,
                            file_name="export_correction2.txt",
@@ -453,23 +527,35 @@ if uploaded_file is not None:
             layer_results_corr3 = {}
             for layer in layer_names:
                 if layer_params_corr3[layer]["active"]:
+                    # 1) Masque sur l'image issue de Corr 2
                     mask = get_color_mask(corr2_source, layer)
+                    # 2) Filtrage du bruit
+                    if remove_noise_active:
+                        mask = remove_small_components(mask, min_area)
+                    # 3) Correction
                     params = layer_params_corr3[layer]
-                    result = apply_selective_color(corr2_source, mask, params["c_adj"], params["m_adj"],
-                                                   params["y_adj"], params["k_adj"], params["method"])
+                    result = apply_selective_color(corr2_source, mask,
+                                                   params["c_adj"], params["m_adj"],
+                                                   params["y_adj"], params["k_adj"],
+                                                   params["method"])
                     layer_results_corr3[layer] = {"mask": mask, "result": result}
+
             combined_main_corr3 = corr2_source.copy()
             for layer in layer_results_corr3:
                 mask = layer_results_corr3[layer]["mask"]
                 combined_main_corr3[mask != 0] = layer_results_corr3[layer]["result"][mask != 0]
+
             combined_color_corr3 = np.full((h, w, 3), 255, dtype=np.uint8)
             for layer in layer_results_corr3:
                 mask = layer_results_corr3[layer]["mask"]
                 combined_color_corr3[mask != 0] = layer_results_corr3[layer]["result"][mask != 0]
+
+            # Sélection d'affichage
             if main_display_mode == "Couche active" and selected_main_layer in layer_results_corr3:
                 main_display_corr3 = layer_results_corr3[selected_main_layer]["result"]
             else:
                 main_display_corr3 = combined_main_corr3
+
             if color_layer_display_mode == "Couche active" and selected_color_layer in layer_results_corr3:
                 single_color_corr3 = np.full((h, w, 3), 255, dtype=np.uint8)
                 mask = layer_results_corr3[selected_color_layer]["mask"]
@@ -477,32 +563,37 @@ if uploaded_file is not None:
                 color_display_corr3 = single_color_corr3
             else:
                 color_display_corr3 = combined_color_corr3
+
+            # Modifications classiques (Corr 3)
             if classic_active_corr3:
                 contrast_factor_corr3 = contrast_corr3 / 100.0
                 saturation_factor_corr3 = saturation_corr3 / 100.0
                 gamma_factor_corr3 = gamma_corr3 / 100.0
-                main_display_corr3 = apply_classic_modifications(main_display_corr3, brightness=brightness_corr3,
+                main_display_corr3 = apply_classic_modifications(main_display_corr3,
+                                                                 brightness=brightness_corr3,
                                                                  contrast=contrast_factor_corr3,
                                                                  saturation=saturation_factor_corr3,
                                                                  gamma=gamma_factor_corr3)
-                color_display_corr3 = apply_classic_modifications(color_display_corr3, brightness=brightness_corr3,
+                color_display_corr3 = apply_classic_modifications(color_display_corr3,
+                                                                  brightness=brightness_corr3,
                                                                   contrast=contrast_factor_corr3,
                                                                   saturation=saturation_factor_corr3,
                                                                   gamma=gamma_factor_corr3)
+
             st.subheader("Image modifiée (Correction 3)")
             st.image(cv2.cvtColor(main_display_corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
             st.subheader("Couche de couleur (fond blanc) - Correction 3")
             st.image(cv2.cvtColor(color_display_corr3, cv2.COLOR_BGR2RGB), use_container_width=True)
             
-            # Export de la correction 3 avec cumul des paramètres de Corr 1, Corr 2 et Corr 3
-            export_text_corr3 = "Export cumulatif pour Correction 3\n\n"
-            export_text_corr3 += generate_export_text("Correction 1", layer_params_corr1, classic_active_corr1,
-                                                      brightness_corr1, contrast_corr1, saturation_corr1, gamma_corr1)
-            export_text_corr3 += "\n" + generate_export_text("Correction 2", layer_params_corr2, classic_active_corr2,
-                                                            brightness_corr2, contrast_corr2, saturation_corr2, gamma_corr2)
-            export_text_corr3 += "\n" + generate_export_text("Correction 3", layer_params_corr3, classic_active_corr3,
-                                                            brightness_corr3, contrast_corr3, saturation_corr3, gamma_corr3)
-            pdf_bytes_corr3 = generate_pdf(export_text_corr3, original_bgr, main_display_corr3, color_display_corr3)
+            # Export de la correction 3
+            export_text_corr3 = generate_export_text("Correction 3", layer_params_corr3,
+                                                     classic_active_corr3,
+                                                     brightness_corr3, contrast_corr3,
+                                                     saturation_corr3, gamma_corr3)
+            pdf_bytes_corr3 = generate_pdf(export_text_corr3,
+                                           original_bgr,
+                                           main_display_corr3,
+                                           color_display_corr3)
             st.download_button("Télécharger les paramètres (TXT) - Corr 3",
                                data=export_text_corr3,
                                file_name="export_correction3.txt",
