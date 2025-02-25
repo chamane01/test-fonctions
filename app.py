@@ -1,106 +1,120 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
 import laspy
+import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-import folium
+import pandas as pd
 from sklearn.cluster import DBSCAN
-from streamlit_folium import folium_static
 
-# Fonction pour lire un fichier LAS/LAZ
-def read_las_file(file_path):
-    """Lit un fichier LAS/LAZ et retourne un DataFrame contenant les points."""
-    try:
-        las = laspy.read(file_path)
-        if len(las.x) == 0:
-            raise ValueError("Le fichier LAS/LAZ est vide ou mal formaté.")
+# Configuration de la page
+st.set_page_config(page_title="LiDAR Clustering", layout="wide")
+st.title("🛩️ Classification d'objets LiDAR avec SMRF")
 
-        df = pd.DataFrame({
-            'x': las.x,
-            'y': las.y,
-            'z': las.z,
-            'intensity': las.intensity if hasattr(las, 'intensity') else 0,
-            'classification': las.classification if hasattr(las, 'classification') else -1
-        })
+# Fonction de traitement SMRF (simplifiée)
+def apply_smrf(points, params):
+    """
+    Applique un filtre morphologique simplifié.
+    À remplacer par une implémentation PDAL réelle.
+    """
+    # Ici, vous devriez implémenter la logique SMRF avec PDAL
+    # Ceci est une simulation de classification
+    z = points[:, 2]
+    return (z > params['elevation_threshold']).astype(int)
+
+# Téléversement de fichier
+las_file = st.file_uploader("Téléversez un fichier LAS/LAZ", type=['las', 'laz'])
+
+if las_file:
+    # Lecture du fichier LAS/LAZ
+    with las_file.open() as f:
+        las = laspy.read(f)
+        points = np.vstack((las.x, las.y, las.z)).transpose()
+
+    # Sélection de l'objet à détecter
+    object_type = st.selectbox("Sélectionnez l'objet à détecter", [
+        "Bâtiments 🏢", 
+        "Basse végétation 🌱",
+        "Arbustes 🌿",
+        "Arbres 🌳",
+        "Lignes électriques ⚡",
+        "Cours d’eau 🌊"
+    ])
+
+    # Paramètres SMRF par défaut
+    params = {
+        'Bâtiments 🏢': (1.5, 25, 10, 3.5, 1),
+        'Basse végétation 🌱': (0.75, 7.5, 4.5, 0.6, 1),
+        'Arbustes 🌿': (1.5, 11.5, 7.5, 2, 1),
+        'Arbres 🌳': (3.5, 30, 15, 12.5, 2),
+        'Lignes électriques ⚡': (0.75, 12.5, 22.5, 30, 1),
+        'Cours d’eau 🌊': (2, 15, 3.5, -0.5, 1)
+    }[object_type]
+
+    # Widgets de paramétrage
+    with st.expander("Paramètres SMRF"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            cell_size = st.slider("Taille de maille (m)", 0.5, 5.0, params[0], 0.5)
+            window_size = st.slider("Taille de fenêtre (m)", 5, 40, params[1], 5)
+        with col2:
+            slope_threshold = st.slider("Seuil de pente (°)", 0, 30, params[2], 1)
+            elevation_threshold = st.slider("Seuil d'élévation (m)", -2.0, 50.0, params[3], 0.5)
+        with col3:
+            iterations = st.slider("Itérations", 1, 3, params[4], 1)
+
+    # Bouton de traitement
+    if st.button("Lancer la classification"):
+        # Application du "filtre" (simulation)
+        smrf_params = {
+            'elevation_threshold': elevation_threshold,
+            'slope_threshold': slope_threshold
+        }
         
-        return df
+        classified = apply_smrf(points, smrf_params)
+        object_points = points[classified == 1]
 
-    except Exception as e:
-        st.error(f"Erreur lors de la lecture du fichier LAS/LAZ : {e}")
-        return pd.DataFrame()
+        # Clustering avec DBSCAN
+        clustering = DBSCAN(eps=cell_size, min_samples=10).fit(object_points[:, :2])
+        
+        # Création du DataFrame
+        df = pd.DataFrame({
+            'X': object_points[:, 0],
+            'Y': object_points[:, 1],
+            'Cluster': clustering.labels_
+        })
 
-# Fonction de clustering avec DBSCAN
-def cluster_points(df, eps=3, min_samples=10):
-    """Applique DBSCAN sur les points pour regrouper les objets."""
-    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(df[['x', 'y', 'z']])
-    df['cluster'] = clustering.labels_  # Assigner les clusters
-    return df
+        # Visualisation
+        fig, ax = plt.subplots(figsize=(10, 8))
+        scatter = ax.scatter(
+            df['X'], 
+            df['Y'], 
+            c=df['Cluster'], 
+            cmap='tab20', 
+            s=1, 
+            alpha=0.6
+        )
+        
+        ax.set_title(f"Classification des {object_type.split()[0]}")
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        plt.colorbar(scatter, ax=ax, label='Clusters')
+        
+        st.pyplot(fig)
+        
+        # Statistiques
+        st.subheader("📊 Statistiques de classification")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Points totaux", len(points))
+        col2.metric("Points classifiés", len(object_points))
+        col3.metric("Clusters détectés", df['Cluster'].nunique()))
 
-# Fonction pour afficher les clusters en 2D
-def plot_2d_clusters(df):
-    """Affiche les clusters en 2D avec matplotlib."""
-    plt.figure(figsize=(10, 6))
-    sns.scatterplot(x=df['x'], y=df['y'], hue=df['cluster'], palette="viridis", s=10)
-    plt.xlabel("X (m)")
-    plt.ylabel("Y (m)")
-    plt.title("Visualisation 2D des clusters")
-    plt.legend(title="Cluster", loc='upper right', bbox_to_anchor=(1.15, 1))
-    st.pyplot(plt)
-
-# Fonction pour afficher les points sur une carte
-def plot_on_map(df):
-    """Affiche les points clusterisés sur une carte avec Folium."""
-    if df.empty:
-        st.warning("Aucun point à afficher sur la carte.")
-        return
-    
-    # Déterminer le centre de la carte
-    center_x, center_y = df['x'].mean(), df['y'].mean()
-    
-    # Créer une carte Folium
-    m = folium.Map(location=[center_y, center_x], zoom_start=15)
-    
-    # Assigner une couleur unique à chaque cluster
-    clusters = df['cluster'].unique()
-    colors = sns.color_palette("hsv", len(clusters)).as_hex()
-    cluster_colors = {cluster: colors[i] for i, cluster in enumerate(clusters)}
-
-    for _, row in df.iterrows():
-        folium.CircleMarker(
-            location=[row['y'], row['x']], 
-            radius=2,
-            color=cluster_colors[row['cluster']],
-            fill=True,
-            fill_opacity=0.7
-        ).add_to(m)
-
-    folium_static(m)
-
-# Interface Streamlit
-st.title("📌 Téléversement et Clustering de Fichiers LAS/LAZ")
-
-# Téléversement du fichier
-uploaded_file = st.file_uploader("Téléverse un fichier LAS/LAZ", type=["las", "laz"])
-
-if uploaded_file:
-    # Lire le fichier et afficher les premières lignes
-    st.write("📊 **Aperçu des données**")
-    df = read_las_file(uploaded_file)
-    st.dataframe(df.head())
-
-    if not df.empty:
-        # Paramètres DBSCAN
-        eps = st.slider("Échelle de regroupement (eps)", 1, 10, 3)
-        min_samples = st.slider("Nombre minimal de points par cluster", 5, 50, 10)
-
-        # Appliquer le clustering
-        df = cluster_points(df, eps, min_samples)
-
-        # Afficher la visualisation 2D
-        st.subheader("📍 Visualisation 2D des Clusters")
-        plot_2d_clusters(df)
-
-        # Afficher la carte interactive
-        st.subheader("🗺️ Carte des Clusters")
-        plot_on_map(df)
+# Instructions d'installation
+st.sidebar.markdown("### 📦 Dépendances requises")
+st.sidebar.code("""
+pip install streamlit laspy numpy pandas matplotlib scikit-learn
+""")
+st.sidebar.markdown("""
+**Note** : Pour une implémentation réelle du SMRF :
+1. Installer PDAL (`conda install -c conda-forge pdal`)
+2. Implémenter le pipeline SMRF
+3. Remplacer la fonction `apply_smrf` simulée
+""")
