@@ -23,7 +23,7 @@ def fit_line_pca(points):
     return np.array([point_min, point_max])
 
 def extract_lines(candidate_points, eps=1.0, min_samples=5, cluster_min_points=10000, 
-                  max_z_variation=2.0, min_line_length=10.0):
+                  max_z_variation=2.0, min_line_length=1000.0):
     """
     Applique DBSCAN pour regrouper les points (en 2D) et, pour chaque cluster suffisamment grand,
     extrait une droite via une analyse en composantes principales.
@@ -112,7 +112,7 @@ if uploaded_file is not None:
                 max_z_variation = st.slider("Variation maximale en hauteur dans un cluster (max_z_variation)",
                                             min_value=0.1, max_value=10.0, value=2.0, step=0.1)
                 min_line_length = st.slider("Longueur minimale d'une ligne (min_line_length)",
-                                            min_value=1.0, max_value=100.0, value=10.0, step=1.0)
+                                            min_value=1.0, max_value=1000.0, value=1000.0, step=1.0)
                 
                 if st.button("Lancer le calcul"):
                     with st.spinner("Calcul en cours..."):
