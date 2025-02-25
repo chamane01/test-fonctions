@@ -1,52 +1,67 @@
-import numpy as np
+import streamlit as st
 import laspy
-import scipy.ndimage as ndimage
+import pandas as pd
+import folium
+from streamlit_folium import st_folium
+import numpy as np
 
-# Supposons que 'las' contient le nuage chargé via laspy
-points = np.vstack((las.x, las.y, las.z)).T
+st.title("Visualisation 2D du Nuage de Points Classifié")
 
-# Construction d'un MNT simple (comme dans l'exemple précédent)
-# [Calcul du MNT par grille, puis interpolation pour obtenir ground_levels pour chaque point]
-# ground_levels = ...
+# Chargement du fichier classifié
+uploaded_classified = st.file_uploader("Téléchargez le fichier LAS classifié", type=["las", "laz"])
+if uploaded_classified is not None:
+    # Sauvegarde temporaire
+    with open("classified_output.las", "wb") as f:
+        f.write(uploaded_classified.read())
 
-# Calcul de la hauteur normalisée
-normalized_heights = points[:, 2] - ground_levels
-
-# Calcul d'une mesure de variance locale (exemple simplifié par cellule de grille)
-# Vous pouvez adapter en calculant l'écart-type sur un voisinage autour de chaque point.
-local_variance = np.zeros_like(normalized_heights)
-# (Ici, un calcul par cellule de la grille ou en utilisant un filtre glissant)
-
-# Initialisation du tableau de classification
-classifications = np.full(points.shape[0], 1, dtype=np.uint8)  # 1 = non classifié
-
-for i in range(points.shape[0]):
-    h = normalized_heights[i]
-    var = local_variance[i]
+    # Lecture du fichier LAS
+    las = laspy.read("classified_output.las")
     
-    # Sol
-    if h < 0.5:
-        classifications[i] = 2
-    # Végétation faible
-    elif h < 2.0:
-        classifications[i] = 3
-    # Possibilité d'arbre ou de bâtiment
-    elif h < 20:
-        if var < 0.3:
-            # Surface plane, potentiellement un bâtiment
-            classifications[i] = 6
-        elif var > 0.5:
-            # Forte irrégularité => peut correspondre à une canopée d'arbre
-            classifications[i] = 5
+    # Création d'un DataFrame avec les colonnes x, y, z et classification
+    # Attention : pour st.map() ou folium, il faut des coordonnées en lat/lon.
+    # Ici, on suppose que vos données sont déjà en EPSG:4326.
+    df = pd.DataFrame({
+        "lon": las.x,
+        "lat": las.y,
+        "elevation": las.z,
+        "classification": las.classification
+    })
+    
+    st.write("Nombre de points :", df.shape[0])
+    
+    # Définition d'une fonction pour attribuer une couleur selon la classification
+    def get_color(cl):
+        if cl == 2:
+            return "brown"   # Sol
+        elif cl == 3:
+            return "lightgreen"  # Végétation faible
+        elif cl == 4:
+            return "green"   # Végétation moyenne
+        elif cl == 5:
+            return "darkgreen"   # Végétation haute/arbres
+        elif cl == 6:
+            return "gray"    # Bâtiments
+        elif cl == 18:
+            return "red"     # Lignes électriques
         else:
-            # Zone intermédiaire
-            classifications[i] = 4
-    # Points très élevés
-    else:
-        # On pourrait aussi vérifier ici une possible détection de lignes électriques en cherchant l'alignement
-        classifications[i] = 1  # Non classifié par défaut
+            return "blue"    # Autres / non classifiés
 
-# Pour les lignes électriques, vous pourriez isoler les points avec h entre 8 et 15 m,
-# puis appliquer une analyse de clustering pour détecter des structures linéaires.
-# Par exemple, après clustering, pour un cluster dont l'extension en largeur est très faible,
-# réaffecter la classification à 18 (code pour ligne électrique).
+    # Création de la carte centrée sur la moyenne des coordonnées
+    center_lat = df["lat"].mean()
+    center_lon = df["lon"].mean()
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=14)
+    
+    # Ajout de chaque point dans la carte avec un cercle coloré selon la classification
+    for idx, row in df.iterrows():
+        folium.CircleMarker(
+            location=[row["lat"], row["lon"]],
+            radius=1,
+            color=get_color(row["classification"]),
+            fill=True,
+            fill_opacity=0.7,
+            tooltip=f"Classe : {row['classification']}, Z : {row['elevation']:.2f}"
+        ).add_to(m)
+    
+    st_folium(m, width=700, height=500)
+    
+    st.write("Utilisez la souris pour zoomer/dézoomer et explorer la carte.")
