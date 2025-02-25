@@ -9,7 +9,7 @@ from sklearn.cluster import DBSCAN
 import random
 
 st.set_page_config(layout="wide")
-st.title("Segmentation de fichier LAZ avec CSF & DBSCAN")
+st.title("Extraction des contours des objets (2D) à partir de fichiers LAS/LAZ")
 
 # ---------------------------
 # Fonctions utilitaires
@@ -18,7 +18,7 @@ st.title("Segmentation de fichier LAZ avec CSF & DBSCAN")
 def apply_csf(points, cloth_resolution, rigidness, iterations, class_threshold):
     """
     Dummy CSF : sépare le sol des objets en considérant le sol comme les points en dessous de la médiane de Z.
-    Dans une application réelle, il faut remplacer cette fonction par l’algorithme de simulation de tissu (CSF).
+    Remplacer par un algorithme CSF complet si nécessaire.
     """
     z_median = np.median(points[:, 2])
     ground_mask = points[:, 2] < z_median
@@ -35,7 +35,7 @@ def apply_dbscan(points, eps, min_samples):
 
 def extract_contour(points):
     """
-    Extrait le contour (convex hull) d’un ensemble de points 2D.
+    Extrait le contour (enveloppe convexe) d’un ensemble de points 2D.
     Renvoie une liste de coordonnées ou None si non applicable.
     """
     if len(points) < 3:
@@ -49,9 +49,9 @@ def extract_contour(points):
 
 def classify_cluster(points):
     """
-    Fonction de classification dummy qui attribue aléatoirement une classe parmi plusieurs.
-    Vous pourrez intégrer ici des règles ou un modèle d’apprentissage pour détecter par exemple :
-    ligne électrique, bâtiments, végétations, routes, infrastructures, eau, zones industrielles, agricoles, forestières, etc.
+    Classification dummy qui attribue aléatoirement une classe parmi plusieurs.
+    On peut étendre cette fonction pour inclure :
+    ligne electrique, batiments, vegetations, routes, infrastructures, eau, etc.
     """
     classes = [
         "ligne electrique", "batiments", "vegetations", "routes",
@@ -74,40 +74,38 @@ eps = st.sidebar.slider("DBSCAN eps", 0.1, 5.0, 1.0, step=0.1)
 min_samples = st.sidebar.slider("DBSCAN min_samples", 1, 50, 5)
 
 # ---------------------------
-# Téléversement du fichier LAZ
+# Téléversement du fichier LAZ/LAS
 # ---------------------------
-uploaded_file = st.file_uploader("Téléverser un fichier LAZ et LAS", type=["laz","las"])
+uploaded_file = st.file_uploader("Téléverser un fichier LAZ ou LAS", type=["laz", "las"])
 
 if uploaded_file is not None:
     try:
-        # Lecture du fichier LAZ
+        # Lecture du fichier LAS/LAZ
         las = pylas.read(uploaded_file)
-        # Extraction des coordonnées x, y, z sous forme de tableau numpy
+        # Extraction des coordonnées x, y, z
         points = np.vstack((las.x, las.y, las.z)).transpose()
         st.write(f"Nombre total de points : {points.shape[0]}")
         
         # ---------------------------
-        # Étape 1 : CSF pour séparer sol et objets
+        # Étape 1 : Séparation sol / objets via CSF
         # ---------------------------
         st.write("Application du filtre CSF pour séparer le sol des objets...")
         ground_mask, non_ground_mask = apply_csf(points, cloth_resolution, rigidness, iterations, class_threshold)
-        ground_points = points[ground_mask]
+        # On ne retient que les points d'objets pour la suite
         object_points = points[non_ground_mask]
-        st.write(f"Points de sol : {ground_points.shape[0]}, Points d'objets : {object_points.shape[0]}")
+        st.write(f"Points d'objets : {object_points.shape[0]}")
         
         # ---------------------------
-        # Étape 2 : DBSCAN pour regrouper les objets
+        # Étape 2 : Détection de clusters avec DBSCAN
         # ---------------------------
         st.write("Application de DBSCAN pour détecter les clusters d’objets...")
         labels = apply_dbscan(object_points, eps, min_samples)
-        # Création d'un DataFrame pour gérer les clusters
         df_objects = pd.DataFrame(object_points, columns=["x", "y", "z"])
         df_objects["cluster"] = labels
         
-        # Regroupement par cluster (on ignore le bruit identifié par DBSCAN : label = -1)
         clusters = {}
         for label in np.unique(labels):
-            if label == -1:
+            if label == -1:  # Bruit
                 continue
             cluster_pts = df_objects[df_objects["cluster"] == label][["x", "y", "z"]].values
             clusters[label] = cluster_pts
@@ -122,24 +120,12 @@ if uploaded_file is not None:
                 classifications[label] = classify_cluster(pts)
         
         # ---------------------------
-        # Affichage sur une carte 2D avec Plotly
+        # Affichage 2D des contours
         # ---------------------------
-        st.write("Affichage de la segmentation sur la carte 2D")
+        st.write("Affichage 2D : uniquement les contours (polylignes/polygones)")
         fig = go.Figure()
-        
-        # Afficher les points du sol en gris
-        fig.add_trace(go.Scatter(
-            x=ground_points[:, 0],
-            y=ground_points[:, 1],
-            mode='markers',
-            marker=dict(color='lightgray', size=1),
-            name='Sol'
-        ))
-        
-        # Couleurs pour les clusters
         color_map = px.colors.qualitative.Safe
         
-        # Afficher les contours des clusters
         for i, (label, contour_coords) in enumerate(contours.items()):
             xs, ys = zip(*contour_coords)
             # Fermer le polygone en ajoutant le premier point à la fin
@@ -154,22 +140,10 @@ if uploaded_file is not None:
                 name=f'Cluster {label} ({classe})'
             ))
         
-        # Optionnel : Afficher également les points des clusters
-        for label, pts in clusters.items():
-            fig.add_trace(go.Scatter(
-                x=pts[:, 0],
-                y=pts[:, 1],
-                mode='markers',
-                marker=dict(color=color_map[label % len(color_map)], size=3),
-                name=f'Points cluster {label}',
-                opacity=0.5
-            ))
-        
         fig.update_layout(
-            title="Segmentation et détection d’objets",
+            title="Contours des objets détectés",
             xaxis_title="X",
-            yaxis_title="Y",
-            legend=dict(itemsizing='constant')
+            yaxis_title="Y"
         )
         st.plotly_chart(fig, use_container_width=True)
         
@@ -184,4 +158,4 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Erreur lors du traitement du fichier : {e}")
 else:
-    st.info("Veuillez téléverser un fichier LAZ pour commencer le traitement.")
+    st.info("Veuillez téléverser un fichier LAZ ou LAS pour commencer le traitement.")
