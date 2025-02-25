@@ -22,4 +22,6 @@ pylas
 plotly
 alphashape
 laspy
+pycsf
+scipy
 
