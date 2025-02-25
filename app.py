@@ -23,40 +23,42 @@ def csf_segmentation(points, ground_percentile=10, height_threshold=1.0):
 def classify_cluster(points):
     """
     Applique des règles heuristiques pour classifier un cluster.
-    Ces règles sont purement indicatives :
-      - 'batiment' : cluster avec une hauteur (z_range) relativement élevée et une étendue horizontale modérée.
-      - 'route' : cluster plat avec une grande étendue.
-      - 'arbres' ou 'herbe' : végétation (on peut distinguer grossièrement selon la hauteur moyenne).
-      - 'ligne electrique' : cluster étroit et allongé.
-      - 'pylone' : petit cluster vertical.
+    Les règles ont été affinées pour mieux détecter les lignes électriques.
     """
     n = len(points)
-    if n < 30:
+    if n < 10:  # on ignore les clusters très petits
         return "inconnu"
     
     x_range = points[:, 0].max() - points[:, 0].min()
     y_range = points[:, 1].max() - points[:, 1].min()
     z_range = points[:, 2].max() - points[:, 2].min()
     
-    # Règle pour pylône : très petit en XY mais étendu en Z
+    # Détection des lignes électriques :
+    # On considère qu'un cluster est une ligne électrique s'il est très étroit dans une direction (< 5)
+    # et très allongé dans l'autre (> 50)
+    if min(x_range, y_range) < 5 and max(x_range, y_range) > 50:
+        return "ligne electrique"
+    
+    # Détection des pylônes : petit en XY mais étendu en Z
     if z_range > 5 and x_range < 5 and y_range < 5:
         return "pylone"
-    # Règle pour bâtiment : hauteur importante et cluster compact en XY
+    
+    # Détection des bâtiments : hauteur importante et cluster compact en XY
     if z_range > 3 and n > 100 and x_range < 30 and y_range < 30:
         return "batiment"
-    # Règle pour route : faible variation en altitude et grande étendue en XY
+    
+    # Détection des routes : faible variation en altitude et grande étendue en XY
     if z_range < 2 and (x_range > 20 or y_range > 20):
         return "route"
-    # Règle pour ligne électrique : cluster étroit et allongé
-    if n < 100 and max(x_range, y_range) > 30 and min(x_range, y_range) < 5:
-        return "ligne electrique"
-    # Règle pour végétation : cluster volumineux avec une certaine irrégularité
+    
+    # Détection de la végétation : cluster volumineux avec une certaine irrégularité
     if n > 200 and z_range > 2:
-        # On peut distinguer herbe et arbres par la hauteur moyenne (heuristique)
+        # On distingue herbe et arbres par la hauteur moyenne (heuristique)
         if np.mean(points[:, 2]) < (np.min(points[:, 2]) + 2):
             return "herbe"
         else:
             return "arbres"
+    
     return "inconnu"
 
 # --- Fonction pour générer une enveloppe convexe ---
@@ -109,7 +111,7 @@ def main():
         # --- Clustering DBSCAN ---
         st.write("**Clustering DBSCAN sur les points non-sol**")
         with st.spinner("Clustering en cours..."):
-            # On applique DBSCAN sur les coordonnées XY
+            # Application de DBSCAN sur les coordonnées XY
             dbscan = DBSCAN(eps=1.0, min_samples=10)
             labels = dbscan.fit_predict(non_ground_points[:, :2])
         unique_labels = set(labels)
@@ -146,7 +148,7 @@ def main():
             "inconnu": "gray"
         }
         
-        # Pour éviter des doublons dans la légende
+        # Pour éviter des doublons dans la légende, on garde la trace des catégories affichées
         legend_categories = set()
         for label, data in classified_clusters.items():
             pts = data["points"]
@@ -170,7 +172,7 @@ def main():
         
         # --- Affichage par zones pour un meilleur zoom ---
         st.write("**Affichage par zones**")
-        # Déterminer l'étendue en X et découper en 10 zones
+        # Découpage de l'étendue en X en 10 zones
         min_x = points[:, 0].min()
         max_x = points[:, 0].max()
         zones = np.linspace(min_x, max_x, num=11)  # 11 bornes => 10 zones
