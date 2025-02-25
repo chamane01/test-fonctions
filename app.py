@@ -1,96 +1,107 @@
 import streamlit as st
 import laspy
 import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
+import pydeck as pdk
+from tempfile import NamedTemporaryFile
+import pdal
+import json
 
-def apply_smrf(points, cell_size=0.5, window_size=10, elevation_threshold=0.5, slope_threshold_deg=15):
-    """
-    Pseudo-code d'un filtre SMRF adapté à la détection de lignes fines :
-    
-    Paramètres :
-      - cell_size : résolution spatiale pour la rasterisation (0.5–1 m)
-      - window_size : taille de la fenêtre morphologique (10–20 m)
-      - elevation_threshold : différence de hauteur maximale pour le filtrage (0.5–1 m)
-      - slope_threshold_deg : pente maximale considérée comme sol (15–30°)
-      - Initial Elevation : méthode d'initialisation fixée à "Minimum" (pour terrains variés)
-      
-    Processus (simplifié) :
-      1. Créer une grille 2D à partir des coordonnées (X, Y).
-      2. Calculer la hauteur minimale par cellule pour obtenir une surface de référence.
-      3. Appliquer une opération morphologique (opening) avec la fenêtre spécifiée.
-      4. Identifier les points dont l'altitude dépasse (surface + elevation_threshold),
-         en tenant compte d'une tolérance de pente (convertie ici depuis les degrés en gradient).
-      5. Retourner un masque booléen indiquant True pour les points considérés comme sol,
-         et False pour les points hors-sol (potentiellement des lignes électriques).
-         
-    Remarque : Cette implémentation est une version simplifiée pour illustrer le flux de traitement.
-    """
-    # Pour l'exemple, nous simulons le filtrage SMRF :
-    # On considère comme sol les points ayant une altitude inférieure ou égale à
-    # la valeur minimale relevée plus un offset (elevation_threshold) ajusté par la pente.
-    z = points[:, 2]
-    # Calcul de l'altitude minimale
-    z_min = np.min(z)
-    # Conversion de la pente en gradient (approximatif : tan(angle en radians))
-    slope_threshold = np.tan(np.deg2rad(slope_threshold_deg))
-    # Calcul d'un seuil local simple (simulation) : altitude minimale + elevation_threshold ajusté
-    threshold = z_min + elevation_threshold * (1 + slope_threshold)
-    # On considère comme sol les points dont l'altitude est inférieure ou égale à ce seuil
-    ground_mask = z <= threshold
-    return ground_mask
+st.title("Détection de lignes électriques LiDAR")
 
-def main():
-    st.title("Détection des lignes électriques via SMRF")
+# Paramètres SMRF ajustables
+st.sidebar.header("Paramètres SMRF")
+cell_size = st.sidebar.slider("Taille de cellule (m)", 0.5, 1.0, 0.5)
+window_size = st.sidebar.slider("Taille de fenêtre (m)", 10.0, 20.0, 15.0)
+elevation_threshold = st.sidebar.slider("Seuil d'élévation (m)", 0.5, 1.0, 0.5)
+slope_threshold = st.sidebar.slider("Seuil de pente (°)", 15, 30, 20)
 
-    uploaded_file = st.file_uploader("Fichier LAS/LAZ", type=["las", "laz"])
-    if uploaded_file is not None:
-        las = laspy.read(uploaded_file)
-        x, y, z = las.x, las.y, las.z
-        points = np.vstack((x, y, z)).T
+# Téléversement du fichier LAS/LAZ
+uploaded_file = st.file_uploader("Téléverser un fichier LAS/LAZ", type=["las", "laz"])
 
-        st.write(f"Total points : {len(points)}")
+if uploaded_file:
+    with NamedTemporaryFile(suffix=".las", delete=False) as tmp:
+        tmp.write(uploaded_file.getvalue())
+        input_path = tmp.name
 
-        st.subheader("Paramètres SMRF recommandés")
-        cell_size = st.slider("Cell Size (m)", 0.5, 1.0, 0.5, 0.1)
-        window_size = st.slider("Window Size (m)", 10, 20, 10, 1)
-        elevation_threshold = st.slider("Elevation Threshold (m)", 0.5, 1.0, 0.5, 0.1)
-        slope_threshold_deg = st.slider("Slope Threshold (°)", 15, 30, 15, 1)
-        st.info("Initial Elevation : Méthode 'Minimum' (fixé)")
+    # Pipeline PDAL avec SMRF
+    pipeline = {
+        "pipeline": [
+            {
+                "type": "readers.las",
+                "filename": input_path
+            },
+            {
+                "type": "filters.smrf",
+                "cell": cell_size,
+                "window": window_size,
+                "threshold": elevation_threshold,
+                "slope": slope_threshold
+            },
+            {
+                "type": "writers.las",
+                "filename": "filtered.las"
+            }
+        ]
+    }
 
-        # Paramètres pour la détection des lignes électriques par filtrage en hauteur
-        st.subheader("Filtrage post-traitement pour lignes électriques")
-        z_min_line = st.slider("Hauteur minimum (m)", 0.0, 20.0, 5.0, 0.5)
-        z_max_line = st.slider("Hauteur maximum (m)", 20.0, 50.0, 30.0, 0.5)
+    try:
+        pdal.Pipeline(json.dumps(pipeline)).execute()
+        
+        # Lecture des résultats
+        las = laspy.read("filtered.las")
+        z = las.z
+        classification = las.classification
 
-        if st.button("Lancer le traitement"):
-            with st.spinner("Application du filtre SMRF..."):
-                ground_mask = apply_smrf(points, cell_size, window_size, elevation_threshold, slope_threshold_deg)
+        # Filtrage des lignes électriques
+        non_ground_mask = (classification != 2)  # Classe 2 = sol
+        power_lines_mask = (z > 5) & (z < 30)    # Hauteur typique des lignes
+        
+        filtered_points = non_ground_mask & power_lines_mask
 
-            # Séparation des points en sol et hors-sol
-            ground_points = points[ground_mask]
-            non_ground_points = points[~ground_mask]
+        # Création d'un DataFrame pour la visualisation
+        df = pd.DataFrame({
+            "x": las.x[filtered_points],
+            "y": las.y[filtered_points],
+            "z": las.z[filtered_points]
+        })
 
-            st.write(f"Points classifiés comme sol : {len(ground_points)}")
-            st.write(f"Points classifiés comme hors-sol : {len(non_ground_points)}")
+        # Visualisation 3D avec PyDeck
+        st.subheader("Visualisation des lignes détectées")
+        view_state = pdk.ViewState(
+            longitude=np.mean(df["x"]),
+            latitude=np.mean(df["y"]),
+            zoom=14,
+            pitch=50,
+            bearing=0
+        )
 
-            # Filtrage pour isoler les lignes électriques (points entre 5 m et 30 m)
-            if len(non_ground_points) > 0:
-                mask_lines = (non_ground_points[:, 2] >= z_min_line) & (non_ground_points[:, 2] <= z_max_line)
-                candidate_line_points = non_ground_points[mask_lines]
-                st.write(f"Points candidats pour lignes électriques : {len(candidate_line_points)}")
-            else:
-                candidate_line_points = np.empty((0, 3))
-                st.write("Aucun point hors-sol détecté.")
+        layer = pdk.Layer(
+            "ScatterplotLayer",
+            data=df,
+            get_position=["x", "y", "z"],
+            get_color=[255, 0, 0, 160],
+            get_radius=1,
+            pickable=True
+        )
 
-            # Visualisation
-            fig, ax = plt.subplots(figsize=(8, 6))
-            if len(ground_points) > 0:
-                ax.scatter(ground_points[:, 0], ground_points[:, 1], s=1, color='green', label='Sol')
-            if len(candidate_line_points) > 0:
-                ax.scatter(candidate_line_points[:, 0], candidate_line_points[:, 1], s=1, color='red', label='Lignes électriques')
-            ax.set_title("Détection des lignes électriques via SMRF")
-            ax.legend()
-            st.pyplot(fig)
+        st.pydeck_chart(pdk.Deck(
+            layers=[layer],
+            initial_view_state=view_state,
+            tooltip={"text": "Altitude: {z} m"}
+        ))
 
-if __name__ == "__main__":
-    main()
+        # Statistiques
+        st.write(f"Points détectés comme lignes électriques : {len(df)}")
+        st.write("Distribution des hauteurs :")
+        st.bar_chart(df["z"].value_counts())
+
+    except Exception as e:
+        st.error(f"Erreur de traitement : {str(e)}")
+
+st.markdown("""
+**Instructions :**
+1. Téléversez un fichier LAS/LAZ
+2. Ajustez les paramètres SMRF dans la barre latérale
+3. Visualisez les résultats en 3D
+""")
