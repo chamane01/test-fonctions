@@ -3,113 +3,89 @@ import laspy
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.cluster import DBSCAN
-from sklearn.decomposition import PCA
-from scipy.ndimage import morphology
+# from smrf import SMRF # Hypothétique import si on a un module SMRF Python
 
-# --- Nouvelle fonction SMRF pour la filtration du sol ---
-def smrf_filter(points, cell_size=2.0, slope_threshold=0.2, window_size=3):
+def apply_smrf(points, cell_size=1.0, slope=0.2, window=18, elevation_threshold=0.5):
     """
-    Implémentation simplifiée du Simple Morphological Filter (SMRF)
-    pour l'extraction des points de sol.
+    Pseudo-code d'un filtre SMRF :
+    1. Créer une grille 2D à partir de points (X, Y).
+    2. Calculer la hauteur min par cellule -> surface initiale.
+    3. Faire une opération morphologique (opening) avec 'window'.
+    4. Marquer en hors-sol les points dont la hauteur est > (surface + elevation_threshold),
+       en tenant compte du slope pour les terrains en pente.
+    5. Retourne un masque (True = sol, False = non-sol).
     """
-    coords = points[:, :2]
-    z = points[:, 2]
-    
-    # Création d'une grille régulière
-    x_min, y_min = np.min(coords, axis=0)
-    x_max, y_max = np.max(coords, axis=0)
-    
-    grid_x = np.arange(x_min, x_max, cell_size)
-    grid_y = np.arange(y_min, y_max, cell_size)
-    
-    grid_ground = np.full((len(grid_y), len(grid_x)), np.nan)
-    
-    # Remplissage de la grille avec l'altitude minimale
-    for i, x in enumerate(grid_x):
-        for j, y in enumerate(grid_y):
-            mask = (coords[:, 0] >= x) & (coords[:, 0] < x + cell_size) & \
-                   (coords[:, 1] >= y) & (coords[:, 1] < y + cell_size)
-            if np.any(mask):
-                grid_ground[j, i] = np.min(z[mask])
-    
-    # Filtration morphologique
-    opened = morphology.grey_opening(grid_ground, size=window_size)
-    
-    # Interpolation pour obtenir le modèle de sol
-    from scipy.interpolate import RectBivariateSpline
-    x_idx = np.arange(grid_x.shape[0])
-    y_idx = np.arange(grid_y.shape[0])
-    interp_spline = RectBivariateSpline(y_idx, x_idx, opened)
-    return interp_spline
-# --- Fonctions utilitaires modifiées ---
+    # ... Implémentation à adapter ou à remplacer par une librairie existante ...
+    ground_mask = np.full(len(points), False, dtype=bool)
+    return ground_mask
 
-def fit_line_pca(points):
-    pca = PCA(n_components=2)
-    pca.fit(points)
-    
-    # Vérification de la linéarité
-    if pca.explained_variance_ratio_[0] < 0.9:  # Seuil de linéarité
-        return None
-    
-    pc1 = pca.components_[0]
-    proj = np.dot(points - pca.mean_, pc1)
-    t_min, t_max = proj.min(), proj.max()
-    return np.array([pca.mean_ + t_min * pc1, pca.mean_ + t_max * pc1])
+def main():
+    st.title("Extraction de lignes haute tension avec SMRF + DBSCAN")
 
-def extract_lines(points_xy, eps=0.5, min_samples=3, cluster_min_points=5000, linearity_threshold=0.9):
-    db = DBSCAN(eps=eps, min_samples=min_samples)
-    labels = db.fit_predict(points_xy)
-    
-    lines = []
-    for label in set(labels):
-        if label == -1:
-            continue
+    uploaded_file = st.file_uploader("Fichier LAS/LAZ", type=["las", "laz"])
+    if uploaded_file is not None:
+        las = laspy.read(uploaded_file)
+        x, y, z = las.x, las.y, las.z
+        points = np.vstack((x, y, z)).T
+
+        st.write(f"Total points: {len(points)}")
+
+        # Paramètres SMRF
+        cell_size = st.slider("Taille de cellule SMRF (m)", 0.5, 5.0, 1.0, 0.5)
+        slope = st.slider("Slope (tolérance de pente)", 0.0, 1.0, 0.2, 0.05)
+        window = st.slider("Window (morphological opening)", 5, 30, 18, 1)
+        elevation_threshold = st.slider("Elevation threshold", 0.1, 2.0, 0.5, 0.1)
+
+        # Paramètres de hauteur pour les câbles
+        z_min = st.slider("Hauteur minimum câbles", 0.0, 100.0, 20.0, 1.0)
+        z_max = st.slider("Hauteur maximum câbles", 0.0, 200.0, 80.0, 1.0)
+
+        # Paramètres DBSCAN
+        eps = st.slider("DBSCAN eps", 0.1, 10.0, 1.0, 0.1)
+        min_samples = st.slider("DBSCAN min_samples", 1, 20, 5, 1)
+        cluster_min_points = st.slider("Nombre min de points par cluster", 100, 20000, 10000, 100)
+
+        if st.button("Lancer le traitement"):
+            with st.spinner("Classification SMRF..."):
+                ground_mask = apply_smrf(points, cell_size, slope, window, elevation_threshold)
+
+            # On ne garde que les points hors-sol
+            non_ground_points = points[~ground_mask]
+
+            # Double seuil en hauteur
+            mask_height = (non_ground_points[:, 2] > z_min) & (non_ground_points[:, 2] < z_max)
+            candidate_points = non_ground_points[mask_height]
+            candidate_points_xy = candidate_points[:, :2]
+
+            st.write(f"Points candidats pour lignes: {len(candidate_points_xy)}")
+
+            # Clustering
+            with st.spinner("Clustering DBSCAN..."):
+                db = DBSCAN(eps=eps, min_samples=min_samples)
+                labels = db.fit_predict(candidate_points_xy)
             
-        cluster_points = points_xy[labels == label]
-        if len(cluster_points) < cluster_min_points:
-            continue
+            # Filtrage des clusters trop petits
+            unique_labels = set(labels)
+            lines = []
+            for label in unique_labels:
+                if label == -1:
+                    continue
+                cluster_pts = candidate_points_xy[labels == label]
+                if len(cluster_pts) >= cluster_min_points:
+                    # Extraire segment par PCA ou autre
+                    # ...
+                    lines.append(cluster_pts)
             
-        line_segment = fit_line_pca(cluster_points)
-        if line_segment is not None:
-            lines.append(line_segment)
-            
-    return lines
+            st.write(f"Clusters retenus: {len(lines)}")
 
-# --- Application Streamlit modifiée ---
+            # Visualisation
+            fig, ax = plt.subplots(figsize=(8,6))
+            ax.scatter(candidate_points_xy[:,0], candidate_points_xy[:,1], s=1, color='grey', label='Points candidats')
+            for i, cluster_pts in enumerate(lines):
+                ax.scatter(cluster_pts[:,0], cluster_pts[:,1], s=1, label=f"Cluster {i+1}")
+            ax.set_title("Clusters de câbles potentiels")
+            ax.legend()
+            st.pyplot(fig)
 
-st.title("Extraction de lignes électriques depuis un nuage LAS/LAZ")
-
-# ... (le reste du code d'interface reste similaire jusqu'au traitement du fichier)
-
-            else:
-                # --- Nouvelle section SMRF ---
-                st.markdown("### Paramètres SMRF pour la détection du sol")
-                cell_size = st.slider("Taille de cellule SMRF (m)", 0.5, 5.0, 2.0)
-                slope_threshold = st.slider("Seuil de pente SMRF", 0.1, 1.0, 0.2)
-                
-                with st.spinner("Calcul du modèle de terrain avec SMRF..."):
-                    smrf_model = smrf_filter(points, cell_size, slope_threshold)
-                    
-                    # Calcul de la hauteur normalisée
-                    grid_coords = np.floor((points[:, :2] - np.min(points[:, :2], axis=0)) / cell_size).astype(int)
-                    ground_z = smrf_model(grid_coords[:, 1], grid_coords[:, 0], grid=True)
-                    normalized_z = points[:, 2] - ground_z
-                    
-                # --- Nouveaux paramètres de hauteur relative ---
-                st.markdown("### Paramètres de hauteur des lignes")
-                min_height = st.slider("Hauteur minimale au-dessus du sol (m)", 5.0, 50.0, 15.0)
-                max_height = st.slider("Hauteur maximale au-dessus du sol (m)", 20.0, 100.0, 40.0)
-                
-                # Filtrage amélioré
-                mask = (normalized_z > min_height) & (normalized_z < max_height)
-                candidate_points = points[mask]
-                candidate_points_xy = candidate_points[:, :2]
-                
-                # --- Paramètres DBSCAN adaptés ---
-                st.markdown("### Paramètres du clustering adaptés")
-                eps = st.slider("DBSCAN - eps", 0.1, 5.0, 0.5, 0.1)
-                min_samples = st.slider("DBSCAN - min_samples", 1, 20, 3)
-                cluster_min_points = st.slider("Points minimum par cluster", 1000, 15000, 5000, 100)
-                linearity_threshold = st.slider("Seuil de linéarité PCA", 0.7, 1.0, 0.9)
-                
-                # ... (le reste du code reste similaire avec ajout du paramètre linearity_threshold)
+if __name__ == "__main__":
+    main()
