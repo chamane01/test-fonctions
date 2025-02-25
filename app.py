@@ -40,9 +40,9 @@ def apply_ground_filter(points, grid_size, height_threshold):
     x_edges = np.linspace(x_min, x_max, num_bins_x + 1)
     y_edges = np.linspace(y_min, y_max, num_bins_y + 1)
     
-    # Assigner chaque point à une cellule
-    bins_x = np.digitize(points[:,0], x_edges) - 1
-    bins_y = np.digitize(points[:,1], y_edges) - 1
+    # Assigner chaque point à une cellule et corriger les indices hors limites
+    bins_x = np.clip(np.digitize(points[:,0], x_edges) - 1, 0, num_bins_x - 1)
+    bins_y = np.clip(np.digitize(points[:,1], y_edges) - 1, 0, num_bins_y - 1)
     
     # Initialiser la DEM (Digital Elevation Model)
     DEM = np.full((num_bins_x, num_bins_y), np.inf)
@@ -149,7 +149,7 @@ Cette application permet de :
 """)
 
 # Téléversement du fichier LAZ
-uploaded_file = st.file_uploader("Choisissez votre fichier LAZ, las", type=["laz","las"])
+uploaded_file = st.file_uploader("Choisissez votre fichier LAZ", type=["laz"])
 
 # Paramètres ajustables dans la sidebar
 st.sidebar.header("Paramètres du filtre de sol")
@@ -177,11 +177,14 @@ if uploaded_file is not None:
         
         # Segmentation par DBSCAN sur les points non-sol
         st.write("**Segmentation des objets par DBSCAN...**")
-        labels = cluster_dbscan(non_ground_points, dbscan_eps, dbscan_min_samples)
-        unique_labels = set(labels)
-        nb_clusters = len(unique_labels) - (1 if -1 in unique_labels else 0)
-        st.write(f"Nombre de clusters détectés (hors bruit) : {nb_clusters}")
-
+        try:
+            labels = cluster_dbscan(non_ground_points, dbscan_eps, dbscan_min_samples)
+            unique_labels = set(labels)
+            nb_clusters = len(unique_labels) - (1 if -1 in unique_labels else 0)
+            st.write(f"Nombre de clusters détectés (hors bruit) : {nb_clusters}")
+        except Exception as e:
+            st.error(f"Erreur lors de la segmentation DBSCAN : {e}")
+        
         # Création de la figure d'affichage
         fig, ax = plt.subplots(figsize=(10, 8))
         ax.scatter(ground_points[:, 0], ground_points[:, 1], s=1, c="lightgray", label="Sol")
