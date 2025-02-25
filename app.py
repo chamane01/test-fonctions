@@ -1,9 +1,12 @@
 import streamlit as st
 import numpy as np
+import laspy
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 import alphashape
 from shapely.geometry import Polygon
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
 # ---------------------------
 # Fonctions utilitaires
@@ -21,36 +24,63 @@ def load_laz(file_obj):
         st.error(f"Erreur lors du chargement du fichier LAZ : {e}")
         return None
 
-def apply_csf(points, cloth_resolution, rigidness, iterations):
+def apply_ground_filter(points, grid_size, height_threshold):
     """
-    Applique le filtre CSF pour séparer le sol des objets.
-    Renvoie deux tableaux numpy : ground_points et non_ground_points.
+    Filtre le sol avec une approche simple basée sur une grille.
+    Pour chaque cellule, on calcule le minimum de z et on considère comme sol
+    les points dont z <= (min + height_threshold).
     """
-    csf = pycsf.CSF()
-    csf.setPointCloud(points)
-    csf.params.cloth_resolution = cloth_resolution
-    csf.params.rigidness = rigidness
-    csf.params.iterations = iterations
-    csf.do_filtering()
-    ground = csf.get_ground()
-    non_ground = csf.get_non_ground()
-    return ground, non_ground
+    x_min, y_min = np.min(points[:, 0]), np.min(points[:, 1])
+    x_max, y_max = np.max(points[:, 0]), np.max(points[:, 1])
+    
+    num_bins_x = int(np.ceil((x_max - x_min) / grid_size))
+    num_bins_y = int(np.ceil((y_max - y_min) / grid_size))
+    
+    # Définir les bords de la grille
+    x_edges = np.linspace(x_min, x_max, num_bins_x + 1)
+    y_edges = np.linspace(y_min, y_max, num_bins_y + 1)
+    
+    # Assigner chaque point à une cellule
+    bins_x = np.digitize(points[:,0], x_edges) - 1
+    bins_y = np.digitize(points[:,1], y_edges) - 1
+    
+    # Initialiser la DEM (Digital Elevation Model)
+    DEM = np.full((num_bins_x, num_bins_y), np.inf)
+    
+    # Pour chaque point, mettre à jour le minimum de z de la cellule correspondante
+    for i in range(points.shape[0]):
+        bx = bins_x[i]
+        by = bins_y[i]
+        if points[i,2] < DEM[bx, by]:
+            DEM[bx, by] = points[i,2]
+            
+    # Création du masque de points sol
+    ground_mask = np.zeros(points.shape[0], dtype=bool)
+    for i in range(points.shape[0]):
+        bx = bins_x[i]
+        by = bins_y[i]
+        if points[i,2] <= DEM[bx, by] + height_threshold:
+            ground_mask[i] = True
+            
+    ground_points = points[ground_mask]
+    non_ground_points = points[~ground_mask]
+    
+    return ground_points, non_ground_points
 
 def cluster_dbscan(points, eps, min_samples):
     """
-    Applique DBSCAN sur les points non-sol et renvoie le tableau des labels.
+    Applique DBSCAN sur les points et renvoie les labels de cluster.
     """
     db = DBSCAN(eps=eps, min_samples=min_samples).fit(points)
     return db.labels_
 
 def extract_contour(points):
     """
-    Extrait le contour 2D d'un ensemble de points (en utilisant alphashape)
+    Extrait le contour 2D d'un ensemble de points via alphashape
     et renvoie un objet shapely.Polygon.
     """
     if points.shape[0] < 4:
         return None
-    # On travaille en 2D (x,y)
     pts_2d = points[:, :2]
     try:
         alpha = alphashape.optimizealpha(pts_2d)
@@ -58,7 +88,7 @@ def extract_contour(points):
         if isinstance(hull, Polygon):
             return hull
         elif hull.geom_type == 'MultiPolygon':
-            # On prend le polygone de plus grande aire
+            # On choisit le polygone de plus grande aire
             hull = max(hull, key=lambda p: p.area)
             return hull
         else:
@@ -69,8 +99,8 @@ def extract_contour(points):
 
 def classify_cluster(polygon):
     """
-    Classe le polygone (extraction du contour) selon quelques critères heuristiques.
-    Renvoie une chaîne de caractères parmi : 
+    Classe le polygone selon des critères heuristiques basés sur l'aire et la forme.
+    Les classes proposées incluent : 
     "ligne electrique", "batiment", "vegetation", "route", "inconnu".
     """
     if polygon is None:
@@ -82,7 +112,6 @@ def classify_cluster(polygon):
     height = maxy - miny
     ratio = width / height if height > 0 else 0
     
-    # Heuristiques simples (à adapter selon vos données)
     if area < 5:
         return "ligne electrique"
     elif area < 50 and (ratio > 3 or ratio < 0.33):
@@ -113,7 +142,7 @@ st.title("Traitement de fichier LAZ : Segmentation & Classification")
 st.markdown("""
 Cette application permet de :
 1. Téléverser un fichier LAZ  
-2. Appliquer un filtrage du sol (CSF)  
+2. Appliquer un filtrage du sol (filtre basé sur une grille simple)  
 3. Segmenter les objets par DBSCAN  
 4. Extraire les contours et les regrouper en polylignes/polygones  
 5. Afficher les objets en 2D avec classification (ex. : ligne électrique, bâtiment, végétation, route, etc.)
@@ -123,10 +152,9 @@ Cette application permet de :
 uploaded_file = st.file_uploader("Choisissez votre fichier LAZ", type=["laz"])
 
 # Paramètres ajustables dans la sidebar
-st.sidebar.header("Paramètres CSF")
-csf_cloth_res = st.sidebar.slider("Cloth Resolution", min_value=0.1, max_value=5.0, value=1.0, step=0.1)
-csf_rigidness = st.sidebar.slider("Rigidness", min_value=0, max_value=10, value=2, step=1)
-csf_iterations = st.sidebar.slider("Nombre d'itérations", min_value=100, max_value=1000, value=500, step=50)
+st.sidebar.header("Paramètres du filtre de sol")
+grid_size = st.sidebar.slider("Taille de la grille (m)", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
+height_threshold = st.sidebar.slider("Seuil de hauteur (m)", min_value=0.1, max_value=5.0, value=0.5, step=0.1)
 
 st.sidebar.header("Paramètres DBSCAN")
 dbscan_eps = st.sidebar.slider("Epsilon", min_value=0.1, max_value=5.0, value=1.0, step=0.1)
@@ -138,14 +166,14 @@ if uploaded_file is not None:
     if points is not None:
         st.write(f"Nombre de points chargés : {points.shape[0]}")
 
-        # Application du filtrage CSF
-        st.write("**Application du filtre CSF pour séparer le sol des objets...**")
+        # Application du filtre de sol
+        st.write("**Application du filtre de sol...**")
         try:
-            ground_points, non_ground_points = apply_csf(points, csf_cloth_res, csf_rigidness, csf_iterations)
+            ground_points, non_ground_points = apply_ground_filter(points, grid_size, height_threshold)
             st.write(f"Nombre de points de sol : {ground_points.shape[0]}")
             st.write(f"Nombre de points d'objets : {non_ground_points.shape[0]}")
         except Exception as e:
-            st.error(f"Erreur lors du filtrage CSF : {e}")
+            st.error(f"Erreur lors du filtrage du sol : {e}")
         
         # Segmentation par DBSCAN sur les points non-sol
         st.write("**Segmentation des objets par DBSCAN...**")
@@ -161,10 +189,8 @@ if uploaded_file is not None:
         # Pour chaque cluster, extraction du contour et classification
         for label in unique_labels:
             if label == -1:
-                # Points bruit
-                continue
+                continue  # Ignorer le bruit
             cluster_pts = non_ground_points[labels == label]
-            # Extraction du contour en 2D
             polygon = extract_contour(cluster_pts)
             classification = classify_cluster(polygon)
             color = classification_colors.get(classification, "black")
@@ -173,7 +199,7 @@ if uploaded_file is not None:
             ax.scatter(cluster_pts[:, 0], cluster_pts[:, 1], s=1, c=color,
                        label=f"Cluster {label} - {classification}")
             
-            # Si un contour a été extrait, on l'affiche
+            # Affichage du contour s'il a été extrait
             if polygon is not None:
                 x, y = polygon.exterior.xy
                 ax.plot(x, y, color=color, linewidth=2)
@@ -181,7 +207,6 @@ if uploaded_file is not None:
         ax.set_title("Segmentation et Classification des Objets")
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
-        # Pour éviter les doublons dans la légende
         handles, labels_legend = ax.get_legend_handles_labels()
         by_label = dict(zip(labels_legend, handles))
         ax.legend(by_label.values(), by_label.keys(), loc="upper right", fontsize="small")
