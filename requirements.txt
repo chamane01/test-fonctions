@@ -23,6 +23,5 @@ plotly
 alphashape
 laspy
 scipy
-libpdal2
-pdal
+
 
