@@ -11,12 +11,7 @@ st.title("🛩️ Classification d'objets LiDAR avec SMRF")
 
 # Fonction de traitement SMRF (simplifiée)
 def apply_smrf(points, params):
-    """
-    Applique un filtre morphologique simplifié.
-    À remplacer par une implémentation PDAL réelle.
-    """
-    # Ici, vous devriez implémenter la logique SMRF avec PDAL
-    # Ceci est une simulation de classification
+    """Simulation de classification par élévation"""
     z = points[:, 2]
     return (z > params['elevation_threshold']).astype(int)
 
@@ -40,14 +35,15 @@ if las_file:
     ])
 
     # Paramètres SMRF par défaut
-    params = {
+    params_config = {
         'Bâtiments 🏢': (1.5, 25, 10, 3.5, 1),
         'Basse végétation 🌱': (0.75, 7.5, 4.5, 0.6, 1),
         'Arbustes 🌿': (1.5, 11.5, 7.5, 2, 1),
         'Arbres 🌳': (3.5, 30, 15, 12.5, 2),
         'Lignes électriques ⚡': (0.75, 12.5, 22.5, 30, 1),
         'Cours d’eau 🌊': (2, 15, 3.5, -0.5, 1)
-    }[object_type]
+    }
+    params = params_config[object_type]
 
     # Widgets de paramétrage
     with st.expander("Paramètres SMRF"):
@@ -63,7 +59,6 @@ if las_file:
 
     # Bouton de traitement
     if st.button("Lancer la classification"):
-        # Application du "filtre" (simulation)
         smrf_params = {
             'elevation_threshold': elevation_threshold,
             'slope_threshold': slope_threshold
@@ -105,16 +100,10 @@ if las_file:
         col1, col2, col3 = st.columns(3)
         col1.metric("Points totaux", len(points))
         col2.metric("Points classifiés", len(object_points))
-        col3.metric("Clusters détectés", df['Cluster'].nunique()))
+        col3.metric("Clusters détectés", df['Cluster'].nunique())  # Correction appliquée ici
 
-# Instructions d'installation
+# Notes d'installation
 st.sidebar.markdown("### 📦 Dépendances requises")
 st.sidebar.code("""
 pip install streamlit laspy numpy pandas matplotlib scikit-learn
-""")
-st.sidebar.markdown("""
-**Note** : Pour une implémentation réelle du SMRF :
-1. Installer PDAL (`conda install -c conda-forge pdal`)
-2. Implémenter le pipeline SMRF
-3. Remplacer la fonction `apply_smrf` simulée
 """)
