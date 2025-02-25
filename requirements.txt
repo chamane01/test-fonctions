@@ -20,3 +20,5 @@ piexif
 utm
 pylas
 plotly
+alphashape
+pycsf
