@@ -6,7 +6,7 @@ from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 from shapely.geometry import MultiPoint, Polygon
 
-# --- Fonction de segmentation (simulation CSF) ---
+# --- Segmentation (simulation CSF) ---
 def csf_segmentation(points, ground_percentile=10, height_threshold=1.0):
     """
     Sépare les points de sol des points non-sol.
@@ -19,49 +19,46 @@ def csf_segmentation(points, ground_percentile=10, height_threshold=1.0):
     ground_mask = z_vals <= ground_limit
     return points[ground_mask], points[~ground_mask]
 
-# --- Fonction de classification des clusters ---
+# --- Classification des clusters ---
 def classify_cluster(points):
     """
     Applique des règles heuristiques pour classifier un cluster.
-    Les règles ont été affinées pour mieux détecter les lignes électriques.
+    - Pylône : cluster avec une étendue verticale (z_range) > 10 m et une faible dispersion en XY.
+    - Ligne électrique : cluster présentant un rapport d'allongement (max/min) supérieur à 10,
+      typiquement constitué d'un nombre modéré de points et formant des arcs.
+    - Les autres objets sont classés selon des critères existants.
     """
     n = len(points)
-    if n < 10:  # on ignore les clusters très petits
+    if n < 10:
         return "inconnu"
     
     x_range = points[:, 0].max() - points[:, 0].min()
     y_range = points[:, 1].max() - points[:, 1].min()
     z_range = points[:, 2].max() - points[:, 2].min()
     
-    # Détection des lignes électriques :
-    # On considère qu'un cluster est une ligne électrique s'il est très étroit dans une direction (< 5)
-    # et très allongé dans l'autre (> 50)
-    if min(x_range, y_range) < 5 and max(x_range, y_range) > 50:
-        return "ligne electrique"
-    
-    # Détection des pylônes : petit en XY mais étendu en Z
-    if z_range > 5 and x_range < 5 and y_range < 5:
+    # Détection des pylônes : hauteur > 10m et cluster compact en XY
+    if z_range > 10 and x_range < 5 and y_range < 5:
         return "pylone"
     
-    # Détection des bâtiments : hauteur importante et cluster compact en XY
+    # Détection des lignes électriques : cluster très allongé (rapport > 10) et nombre modéré de points
+    ratio = max(x_range, y_range) / (min(x_range, y_range) + 1e-6)  # éviter la division par zéro
+    if ratio > 10 and n < 200:
+        return "ligne electrique"
+    
+    # Autres classifications
     if z_range > 3 and n > 100 and x_range < 30 and y_range < 30:
         return "batiment"
-    
-    # Détection des routes : faible variation en altitude et grande étendue en XY
     if z_range < 2 and (x_range > 20 or y_range > 20):
         return "route"
-    
-    # Détection de la végétation : cluster volumineux avec une certaine irrégularité
     if n > 200 and z_range > 2:
-        # On distingue herbe et arbres par la hauteur moyenne (heuristique)
+        # On distingue herbe et arbres par la hauteur moyenne
         if np.mean(points[:, 2]) < (np.min(points[:, 2]) + 2):
             return "herbe"
         else:
             return "arbres"
-    
     return "inconnu"
 
-# --- Fonction pour générer une enveloppe convexe ---
+# --- Enveloppe convexe (pour les objets non-ligne) ---
 def get_convex_hull(points):
     """
     Calcule l'enveloppe convexe (convex hull) en 2D (XY) d'un ensemble de points.
@@ -73,6 +70,29 @@ def get_convex_hull(points):
     if isinstance(hull, Polygon):
         return hull
     return None
+
+# --- Transformation des points d'une ligne électrique en polyligne ---
+def points_to_polyline(points):
+    """
+    Transforme un ensemble de points en une polyligne ordonnée en utilisant
+    un algorithme glouton (nearest neighbor). Ceci est une solution simple
+    pour tracer une ligne continue à partir de points "flottants".
+    """
+    if len(points) < 2:
+        return points
+    # On choisit le point le plus à gauche comme point de départ
+    points_copy = points.copy()
+    start_index = np.argmin(points_copy[:, 0])
+    polyline = [points_copy[start_index]]
+    points_copy = np.delete(points_copy, start_index, axis=0)
+    # Récupération du point le plus proche de l'extrémité courante
+    while len(points_copy) > 0:
+        last_point = polyline[-1]
+        distances = np.linalg.norm(points_copy - last_point, axis=1)
+        next_index = np.argmin(distances)
+        polyline.append(points_copy[next_index])
+        points_copy = np.delete(points_copy, next_index, axis=0)
+    return np.array(polyline)
 
 # --- Application principale ---
 def main():
@@ -90,7 +110,6 @@ def main():
     uploaded_file = st.file_uploader("Choisissez un fichier LAZ ou LAS", type=["laz", "las"])
     if uploaded_file is not None:
         try:
-            # Lecture du fichier dans un buffer
             file_bytes = uploaded_file.read()
             file_buffer = io.BytesIO(file_bytes)
             las = laspy.read(file_buffer)
@@ -111,18 +130,17 @@ def main():
         # --- Clustering DBSCAN ---
         st.write("**Clustering DBSCAN sur les points non-sol**")
         with st.spinner("Clustering en cours..."):
-            # Application de DBSCAN sur les coordonnées XY
             dbscan = DBSCAN(eps=1.0, min_samples=10)
             labels = dbscan.fit_predict(non_ground_points[:, :2])
         unique_labels = set(labels)
         n_clusters = len(unique_labels) - (1 if -1 in unique_labels else 0)
         st.write(f"Nombre de clusters détectés (hors bruit) : {n_clusters}")
         
-        # --- Regroupement et classification des clusters ---
+        # --- Regroupement et classification ---
         clusters = {}
         for label in unique_labels:
             if label == -1:
-                continue  # on ignore le bruit
+                continue  # Ignorer le bruit
             clusters[label] = non_ground_points[labels == label]
             
         st.write("**Classification des clusters**")
@@ -148,18 +166,23 @@ def main():
             "inconnu": "gray"
         }
         
-        # Pour éviter des doublons dans la légende, on garde la trace des catégories affichées
+        # Affichage de chaque cluster en fonction de sa classification
         legend_categories = set()
         for label, data in classified_clusters.items():
             pts = data["points"]
             category = data["category"]
-            hull = get_convex_hull(pts)
             color = color_map.get(category, "gray")
-            if hull is not None:
-                x, y = hull.exterior.xy
-                ax_global.fill(x, y, alpha=0.5, fc=color, ec="black")
+            if category == "ligne electrique":
+                # Transformation des points en polyligne et affichage
+                polyline = points_to_polyline(pts)
+                ax_global.plot(polyline[:, 0], polyline[:, 1], color=color, linewidth=2)
             else:
-                ax_global.scatter(pts[:, 0], pts[:, 1], c=color, s=5)
+                hull = get_convex_hull(pts)
+                if hull is not None:
+                    x, y = hull.exterior.xy
+                    ax_global.fill(x, y, alpha=0.5, fc=color, ec="black")
+                else:
+                    ax_global.scatter(pts[:, 0], pts[:, 1], c=color, s=5)
             if category not in legend_categories:
                 ax_global.scatter([], [], c=color, label=category)
                 legend_categories.add(category)
@@ -172,18 +195,15 @@ def main():
         
         # --- Affichage par zones pour un meilleur zoom ---
         st.write("**Affichage par zones**")
-        # Découpage de l'étendue en X en 10 zones
         min_x = points[:, 0].min()
         max_x = points[:, 0].max()
-        zones = np.linspace(min_x, max_x, num=11)  # 11 bornes => 10 zones
+        zones = np.linspace(min_x, max_x, num=11)  # 11 bornes pour 10 zones
         
-        # Création de 10 onglets pour afficher chaque zone
         zone_tabs = st.tabs([f"Zone {i+1}" for i in range(10)])
         for i, tab in enumerate(zone_tabs):
             with tab:
                 x_min_zone = zones[i]
                 x_max_zone = zones[i+1]
-                # Filtrer les points de sol pour la zone
                 zone_ground_mask = (ground_points[:, 0] >= x_min_zone) & (ground_points[:, 0] < x_max_zone)
                 zone_ground = ground_points[zone_ground_mask]
                 
@@ -191,20 +211,23 @@ def main():
                 ax.scatter(zone_ground[:, 0], zone_ground[:, 1],
                            c="saddlebrown", s=0.5, label="Sol")
                 
-                # Afficher les clusters présents dans la zone
                 for label, data in classified_clusters.items():
                     pts = data["points"]
                     zone_pts = pts[(pts[:, 0] >= x_min_zone) & (pts[:, 0] < x_max_zone)]
                     if len(zone_pts) == 0:
                         continue
                     category = data["category"]
-                    hull = get_convex_hull(zone_pts)
                     color = color_map.get(category, "gray")
-                    if hull is not None:
-                        xh, yh = hull.exterior.xy
-                        ax.fill(xh, yh, alpha=0.5, fc=color, ec="black")
+                    if category == "ligne electrique":
+                        polyline = points_to_polyline(zone_pts)
+                        ax.plot(polyline[:, 0], polyline[:, 1], color=color, linewidth=2)
                     else:
-                        ax.scatter(zone_pts[:, 0], zone_pts[:, 1], c=color, s=5)
+                        hull = get_convex_hull(zone_pts)
+                        if hull is not None:
+                            xh, yh = hull.exterior.xy
+                            ax.fill(xh, yh, alpha=0.5, fc=color, ec="black")
+                        else:
+                            ax.scatter(zone_pts[:, 0], zone_pts[:, 1], c=color, s=5)
                 
                 ax.set_xlim(x_min_zone, x_max_zone)
                 ax.set_xlabel("X")
