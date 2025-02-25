@@ -76,7 +76,7 @@ min_samples = st.sidebar.slider("DBSCAN min_samples", 1, 50, 5)
 # ---------------------------
 # Téléversement du fichier LAZ
 # ---------------------------
-uploaded_file = st.file_uploader("Téléverser un fichier LAZ", type=["laz"])
+uploaded_file = st.file_uploader("Téléverser un fichier LAZ et LAS", type=["laz","las"])
 
 if uploaded_file is not None:
     try:
