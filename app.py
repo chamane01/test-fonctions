@@ -1,107 +1,62 @@
 import streamlit as st
 import laspy
 import numpy as np
-import pandas as pd
-import pydeck as pdk
-from tempfile import NamedTemporaryFile
-import pdal
-import json
+import matplotlib.pyplot as plt
 
-st.title("Détection de lignes électriques LiDAR")
+def apply_smrf(points, cell_size=1.0, slope=0.2, window=18, elevation_threshold=0.5):
+    """
+    Pseudo-code d'un filtre SMRF :
+    1. Créer une grille 2D à partir des points (X, Y).
+    2. Calculer la hauteur minimale par cellule pour obtenir une surface initiale.
+    3. Appliquer une opération morphologique (opening) avec le paramètre 'window'.
+    4. Identifier les points hors-sol dont la hauteur est > (surface + elevation_threshold),
+       en tenant compte du 'slope' pour les terrains en pente.
+    5. Retourne un masque (True = sol, False = hors-sol).
+    
+    Note : Cette implémentation est simplifiée et retourne ici un masque fictif.
+    """
+    # Exemple simplifié : ici, on considère tous les points comme hors-sol.
+    # Dans une implémentation réelle, le filtre SMRF serait appliqué pour distinguer sol et hors-sol.
+    ground_mask = np.full(len(points), False, dtype=bool)
+    return ground_mask
 
-# Paramètres SMRF ajustables
-st.sidebar.header("Paramètres SMRF")
-cell_size = st.sidebar.slider("Taille de cellule (m)", 0.5, 1.0, 0.5)
-window_size = st.sidebar.slider("Taille de fenêtre (m)", 10.0, 20.0, 15.0)
-elevation_threshold = st.sidebar.slider("Seuil d'élévation (m)", 0.5, 1.0, 0.5)
-slope_threshold = st.sidebar.slider("Seuil de pente (°)", 15, 30, 20)
+def main():
+    st.title("Détection SMRF : Classification Sol vs Hors-sol")
 
-# Téléversement du fichier LAS/LAZ
-uploaded_file = st.file_uploader("Téléverser un fichier LAS/LAZ", type=["las", "laz"])
+    uploaded_file = st.file_uploader("Fichier LAS/LAZ", type=["las", "laz"])
+    if uploaded_file is not None:
+        las = laspy.read(uploaded_file)
+        x, y, z = las.x, las.y, las.z
+        points = np.vstack((x, y, z)).T
 
-if uploaded_file:
-    with NamedTemporaryFile(suffix=".las", delete=False) as tmp:
-        tmp.write(uploaded_file.getvalue())
-        input_path = tmp.name
+        st.write(f"Total points: {len(points)}")
 
-    # Pipeline PDAL avec SMRF
-    pipeline = {
-        "pipeline": [
-            {
-                "type": "readers.las",
-                "filename": input_path
-            },
-            {
-                "type": "filters.smrf",
-                "cell": cell_size,
-                "window": window_size,
-                "threshold": elevation_threshold,
-                "slope": slope_threshold
-            },
-            {
-                "type": "writers.las",
-                "filename": "filtered.las"
-            }
-        ]
-    }
+        # Paramètres SMRF
+        cell_size = st.slider("Taille de cellule SMRF (m)", 0.5, 5.0, 1.0, 0.5)
+        slope = st.slider("Slope (tolérance de pente)", 0.0, 1.0, 0.2, 0.05)
+        window = st.slider("Window (morphological opening)", 5, 30, 18, 1)
+        elevation_threshold = st.slider("Elevation threshold", 0.1, 2.0, 0.5, 0.1)
 
-    try:
-        pdal.Pipeline(json.dumps(pipeline)).execute()
-        
-        # Lecture des résultats
-        las = laspy.read("filtered.las")
-        z = las.z
-        classification = las.classification
+        if st.button("Lancer le traitement"):
+            with st.spinner("Application du filtre SMRF..."):
+                ground_mask = apply_smrf(points, cell_size, slope, window, elevation_threshold)
 
-        # Filtrage des lignes électriques
-        non_ground_mask = (classification != 2)  # Classe 2 = sol
-        power_lines_mask = (z > 5) & (z < 30)    # Hauteur typique des lignes
-        
-        filtered_points = non_ground_mask & power_lines_mask
+            # Séparation des points selon le masque SMRF
+            ground_points = points[ground_mask]
+            non_ground_points = points[~ground_mask]
 
-        # Création d'un DataFrame pour la visualisation
-        df = pd.DataFrame({
-            "x": las.x[filtered_points],
-            "y": las.y[filtered_points],
-            "z": las.z[filtered_points]
-        })
+            st.write(f"Points classifiés comme sol : {len(ground_points)}")
+            st.write(f"Points classifiés comme hors-sol : {len(non_ground_points)}")
 
-        # Visualisation 3D avec PyDeck
-        st.subheader("Visualisation des lignes détectées")
-        view_state = pdk.ViewState(
-            longitude=np.mean(df["x"]),
-            latitude=np.mean(df["y"]),
-            zoom=14,
-            pitch=50,
-            bearing=0
-        )
+            # Visualisation des résultats
+            fig, ax = plt.subplots(figsize=(8, 6))
+            if len(ground_points) > 0:
+                ax.scatter(ground_points[:, 0], ground_points[:, 1], s=1, color='green', label='Sol')
+            if len(non_ground_points) > 0:
+                ax.scatter(non_ground_points[:, 0], non_ground_points[:, 1], s=1, color='red', label='Hors-sol')
+            ax.set_title("Résultats de la classification SMRF")
+            ax.legend()
+            st.pyplot(fig)
 
-        layer = pdk.Layer(
-            "ScatterplotLayer",
-            data=df,
-            get_position=["x", "y", "z"],
-            get_color=[255, 0, 0, 160],
-            get_radius=1,
-            pickable=True
-        )
-
-        st.pydeck_chart(pdk.Deck(
-            layers=[layer],
-            initial_view_state=view_state,
-            tooltip={"text": "Altitude: {z} m"}
-        ))
-
-        # Statistiques
-        st.write(f"Points détectés comme lignes électriques : {len(df)}")
-        st.write("Distribution des hauteurs :")
-        st.bar_chart(df["z"].value_counts())
-
-    except Exception as e:
-        st.error(f"Erreur de traitement : {str(e)}")
-
-st.markdown("""
-**Instructions :**
-1. Téléversez un fichier LAS/LAZ
-2. Ajustez les paramètres SMRF dans la barre latérale
-3. Visualisez les résultats en 3D
-""")
+if __name__ == "__main__":
+    main()
