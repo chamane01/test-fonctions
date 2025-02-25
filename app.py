@@ -16,7 +16,6 @@ def apply_smrf(points, cell_size, slope, window, elevation_threshold, iterations
     
     Note : Cette implémentation est simplifiée et retourne ici un masque fictif.
     """
-    # Exemple simplifié : ici, on considère tous les points comme hors-sol.
     ground_mask = np.full(len(points), False, dtype=bool)
     return ground_mask
 
@@ -29,62 +28,105 @@ def main():
         x, y, z = las.x, las.y, las.z
         points = np.vstack((x, y, z)).T
 
-        st.write(f"Total points: {len(points)}")
-
-        # Sélection de l'objet à détecter
-        object_type = st.selectbox(
-            "Sélectionnez l'objet à détecter", 
+        st.write(f"Total points : {len(points)}")
+        
+        # Sélection de l'objet à traiter (les paramètres seront choisis en fonction)
+        st.sidebar.header("Choix de l'objet à traiter")
+        selected_object = st.sidebar.radio(
+            "Objet",
             ["Bâtiments 🏢", "Basse végétation 🌱", "Arbustes 🌿", "Arbres 🌳", "Lignes électriques ⚡", "Cours d’eau 🌊"]
         )
 
-        # Définition des paramètres par défaut selon l'objet
-        if object_type.startswith("Bâtiments"):
-            default_cell_size = 2.0   # entre 1 et 3 m
-            default_window = 25       # entre 20 et 30 m
-            default_slope = 10        # entre 5° et 15°
-            default_elevation = 3.5   # entre 2 et 5 m
-            default_iteration = 1     # 1 à 2
-            st.info("Conseil : Un filtre de surface plane peut être appliqué en post-traitement.")
-        elif object_type.startswith("Basse"):
-            default_cell_size = 0.75  # entre 0.5 et 1 m
-            default_window = 7        # entre 5 et 10 m
-            default_slope = 4         # entre 2° et 7°
-            default_elevation = 0.6   # entre 0.2 et 1 m
-            default_iteration = 1
-        elif object_type.startswith("Arbustes"):
-            default_cell_size = 1.5   # entre 1 et 2 m
-            default_window = 11     # entre 8 et 15 m
-            default_slope = 7         # entre 5° et 10°
-            default_elevation = 2     # entre 1 et 3 m
-            default_iteration = 1     # 1 à 2
-        elif object_type.startswith("Arbres"):
-            default_cell_size = 3.5   # entre 2 et 5 m
-            default_window = 30       # entre 20 et 40 m
-            default_slope = 15        # entre 10° et 20°
-            default_elevation = 12.5  # entre 5 et 20 m
-            default_iteration = 2     # 2 à 3
-            st.info("Conseil : Un post-traitement basé sur la canopée et la densité de points peut améliorer la détection.")
-        elif object_type.startswith("Lignes"):
-            default_cell_size = 0.75  # entre 0.5 et 1 m
-            default_window = 12       # entre 10 et 15 m
-            default_slope = 22        # entre 15° et 30°
-            default_elevation = 30    # entre 10 et 50 m
-            default_iteration = 1     # 1 à 2
-            st.info("Conseil : Un post-traitement basé sur la détection de structures filaires peut être utile.")
-        elif object_type.startswith("Cours"):
-            default_cell_size = 2.0   # entre 1 et 3 m
-            default_window = 15       # entre 10 et 20 m
-            default_slope = 3         # entre 2° et 5°
-            default_elevation = -0.5  # entre -2 et 1 m (zones en contrebas)
-            default_iteration = 1
-            st.info("Conseil : L’intégration d’un Modèle Numérique de Terrain (MNT) peut améliorer la détection.")
+        st.sidebar.header("Paramètres par objet")
+        # Bâtiments
+        with st.sidebar.expander("Bâtiments 🏢", expanded=False):
+            b_cell_size = st.slider("Cell Size (m)", 0.1, 10.0, 2.0, step=0.1, key="b_cell_size")
+            b_window = st.slider("Window Size (m)", 5, 50, 25, step=1, key="b_window")
+            b_slope = st.slider("Slope Threshold (°)", 0, 45, 10, step=1, key="b_slope")
+            b_elevation = st.slider("Elevation Threshold (m)", -5.0, 100.0, 3.5, step=0.1, key="b_elevation")
+            b_iterations = st.slider("Nombre d'itérations", 1, 5, 1, step=1, key="b_iterations")
+            st.info("Conseil : Un filtre de surface plane peut être appliqué en post-traitement.")
 
-        st.write("### Réglage des paramètres SMRF pour l'objet sélectionné")
-        cell_size = st.slider("Cell Size (m)", min_value=0.1, max_value=10.0, value=default_cell_size, step=0.1)
-        window = st.slider("Window Size (m)", min_value=5, max_value=50, value=default_window, step=1)
-        slope = st.slider("Slope Threshold (°)", min_value=0, max_value=45, value=default_slope, step=1)
-        elevation_threshold = st.slider("Elevation Threshold (m)", min_value=-5.0, max_value=100.0, value=default_elevation, step=0.1)
-        iterations = st.slider("Nombre d'itérations", min_value=1, max_value=5, value=default_iteration, step=1)
+        # Basse végétation
+        with st.sidebar.expander("Basse végétation 🌱", expanded=False):
+            lv_cell_size = st.slider("Cell Size (m)", 0.1, 10.0, 0.75, step=0.1, key="lv_cell_size")
+            lv_window = st.slider("Window Size (m)", 5, 50, 7, step=1, key="lv_window")
+            lv_slope = st.slider("Slope Threshold (°)", 0, 45, 4, step=1, key="lv_slope")
+            lv_elevation = st.slider("Elevation Threshold (m)", -5.0, 100.0, 0.6, step=0.1, key="lv_elevation")
+            lv_iterations = st.slider("Nombre d'itérations", 1, 5, 1, step=1, key="lv_iterations")
+
+        # Arbustes
+        with st.sidebar.expander("Arbustes 🌿", expanded=False):
+            arb_cell_size = st.slider("Cell Size (m)", 0.1, 10.0, 1.5, step=0.1, key="arb_cell_size")
+            arb_window = st.slider("Window Size (m)", 5, 50, 11, step=1, key="arb_window")
+            arb_slope = st.slider("Slope Threshold (°)", 0, 45, 7, step=1, key="arb_slope")
+            arb_elevation = st.slider("Elevation Threshold (m)", -5.0, 100.0, 2, step=0.1, key="arb_elevation")
+            arb_iterations = st.slider("Nombre d'itérations", 1, 5, 1, step=1, key="arb_iterations")
+
+        # Arbres
+        with st.sidebar.expander("Arbres 🌳", expanded=False):
+            a_cell_size = st.slider("Cell Size (m)", 0.1, 10.0, 3.5, step=0.1, key="a_cell_size")
+            a_window = st.slider("Window Size (m)", 5, 50, 30, step=1, key="a_window")
+            a_slope = st.slider("Slope Threshold (°)", 0, 45, 15, step=1, key="a_slope")
+            a_elevation = st.slider("Elevation Threshold (m)", -5.0, 100.0, 12.5, step=0.1, key="a_elevation")
+            a_iterations = st.slider("Nombre d'itérations", 1, 5, 2, step=1, key="a_iterations")
+            st.info("Conseil : Un post-traitement basé sur la canopée et la densité de points peut améliorer la détection.")
+
+        # Lignes électriques
+        with st.sidebar.expander("Lignes électriques ⚡", expanded=False):
+            l_cell_size = st.slider("Cell Size (m)", 0.1, 10.0, 0.75, step=0.1, key="l_cell_size")
+            l_window = st.slider("Window Size (m)", 5, 50, 12, step=1, key="l_window")
+            l_slope = st.slider("Slope Threshold (°)", 0, 45, 22, step=1, key="l_slope")
+            l_elevation = st.slider("Elevation Threshold (m)", -5.0, 100.0, 30, step=0.1, key="l_elevation")
+            l_iterations = st.slider("Nombre d'itérations", 1, 5, 1, step=1, key="l_iterations")
+            st.info("Conseil : Un post-traitement basé sur la détection de structures filaires peut être utile.")
+
+        # Cours d’eau
+        with st.sidebar.expander("Cours d’eau 🌊", expanded=False):
+            c_cell_size = st.slider("Cell Size (m)", 0.1, 10.0, 2.0, step=0.1, key="c_cell_size")
+            c_window = st.slider("Window Size (m)", 5, 50, 15, step=1, key="c_window")
+            c_slope = st.slider("Slope Threshold (°)", 0, 45, 3, step=1, key="c_slope")
+            c_elevation = st.slider("Elevation Threshold (m)", -5.0, 100.0, -0.5, step=0.1, key="c_elevation")
+            c_iterations = st.slider("Nombre d'itérations", 1, 5, 1, step=1, key="c_iterations")
+            st.info("Conseil : L’intégration d’un MNT peut améliorer la détection.")
+
+        # En fonction de l'objet sélectionné, récupérer les paramètres correspondants
+        if selected_object.startswith("Bâtiments"):
+            cell_size = b_cell_size
+            window = b_window
+            slope = b_slope
+            elevation_threshold = b_elevation
+            iterations = b_iterations
+        elif selected_object.startswith("Basse"):
+            cell_size = lv_cell_size
+            window = lv_window
+            slope = lv_slope
+            elevation_threshold = lv_elevation
+            iterations = lv_iterations
+        elif selected_object.startswith("Arbustes"):
+            cell_size = arb_cell_size
+            window = arb_window
+            slope = arb_slope
+            elevation_threshold = arb_elevation
+            iterations = arb_iterations
+        elif selected_object.startswith("Arbres"):
+            cell_size = a_cell_size
+            window = a_window
+            slope = a_slope
+            elevation_threshold = a_elevation
+            iterations = a_iterations
+        elif selected_object.startswith("Lignes"):
+            cell_size = l_cell_size
+            window = l_window
+            slope = l_slope
+            elevation_threshold = l_elevation
+            iterations = l_iterations
+        elif selected_object.startswith("Cours"):
+            cell_size = c_cell_size
+            window = c_window
+            slope = c_slope
+            elevation_threshold = c_elevation
+            iterations = c_iterations
 
         if st.button("Lancer le traitement"):
             with st.spinner("Application du filtre SMRF..."):
