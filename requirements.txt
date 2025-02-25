@@ -19,3 +19,4 @@ scikit-learn
 piexif
 utm
 pylas
+plotly.graph_objects
