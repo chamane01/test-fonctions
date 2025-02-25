@@ -18,3 +18,4 @@ matplotlib.colors
 scikit-learn
 piexif
 utm
+pylas
