@@ -3,22 +3,19 @@ import numpy as np
 import pandas as pd
 import pylas
 import plotly.graph_objects as go
-import plotly.express as px
 from shapely.geometry import MultiPoint
 from sklearn.cluster import DBSCAN
-import random
 
 st.set_page_config(layout="wide")
-st.title("Extraction des contours des objets (2D) à partir de fichiers LAS/LAZ")
+st.title("Extraction des contours des objets (2D)")
 
 # ---------------------------
 # Fonctions utilitaires
 # ---------------------------
-
 def apply_csf(points, cloth_resolution, rigidness, iterations, class_threshold):
     """
-    Dummy CSF : sépare le sol des objets en considérant le sol comme les points en dessous de la médiane de Z.
-    Remplacer par un algorithme CSF complet si nécessaire.
+    Filtrage CSF simplifié : sépare les points de sol et d'objets.
+    Ici, nous considérons comme sol les points en dessous de la médiane de Z.
     """
     z_median = np.median(points[:, 2])
     ground_mask = points[:, 2] < z_median
@@ -27,38 +24,27 @@ def apply_csf(points, cloth_resolution, rigidness, iterations, class_threshold):
 
 def apply_dbscan(points, eps, min_samples):
     """
-    Applique DBSCAN sur les points (en utilisant uniquement x,y pour la segmentation spatiale).
+    Applique DBSCAN sur les coordonnées X, Y.
     """
     clustering = DBSCAN(eps=eps, min_samples=min_samples)
     labels = clustering.fit_predict(points[:, :2])
     return labels
 
-def extract_contour(points):
+def extract_contour(points, simplify_tolerance=0.1):
     """
-    Extrait le contour (enveloppe convexe) d’un ensemble de points 2D.
-    Renvoie une liste de coordonnées ou None si non applicable.
+    Calcule l'enveloppe convexe des points 2D et la simplifie.
+    Renvoie une liste de coordonnées (x, y) représentant le contour.
     """
     if len(points) < 3:
         return None
     mp = MultiPoint(points[:, :2])
     hull = mp.convex_hull
-    if hull.geom_type == 'Polygon':
-        return list(hull.exterior.coords)
+    # Simplifier le polygone pour réduire le nombre de sommets (ajuster simplify_tolerance si besoin)
+    simplified_hull = hull.simplify(simplify_tolerance, preserve_topology=True)
+    if simplified_hull.geom_type == 'Polygon':
+        return list(simplified_hull.exterior.coords)
     else:
         return None
-
-def classify_cluster(points):
-    """
-    Classification dummy qui attribue aléatoirement une classe parmi plusieurs.
-    On peut étendre cette fonction pour inclure :
-    ligne electrique, batiments, vegetations, routes, infrastructures, eau, etc.
-    """
-    classes = [
-        "ligne electrique", "batiments", "vegetations", "routes",
-        "infrastructure", "eau", "terrain industriel",
-        "zones agricoles", "zones forestieres", "autre"
-    ]
-    return random.choice(classes)
 
 # ---------------------------
 # Paramètres dans la sidebar
@@ -80,81 +66,76 @@ uploaded_file = st.file_uploader("Téléverser un fichier LAZ ou LAS", type=["la
 
 if uploaded_file is not None:
     try:
-        # Lecture du fichier LAS/LAZ
+        # Lecture du fichier LAZ/LAS
         las = pylas.read(uploaded_file)
-        # Extraction des coordonnées x, y, z
         points = np.vstack((las.x, las.y, las.z)).transpose()
         st.write(f"Nombre total de points : {points.shape[0]}")
-        
+
         # ---------------------------
-        # Étape 1 : Séparation sol / objets via CSF
+        # Séparation sol / objets via CSF
         # ---------------------------
-        st.write("Application du filtre CSF pour séparer le sol des objets...")
-        ground_mask, non_ground_mask = apply_csf(points, cloth_resolution, rigidness, iterations, class_threshold)
-        # On ne retient que les points d'objets pour la suite
+        st.write("Application du filtre CSF...")
+        _, non_ground_mask = apply_csf(points, cloth_resolution, rigidness, iterations, class_threshold)
         object_points = points[non_ground_mask]
         st.write(f"Points d'objets : {object_points.shape[0]}")
-        
+
         # ---------------------------
-        # Étape 2 : Détection de clusters avec DBSCAN
+        # Détection des clusters avec DBSCAN
         # ---------------------------
-        st.write("Application de DBSCAN pour détecter les clusters d’objets...")
+        st.write("Application de DBSCAN pour détecter les clusters...")
         labels = apply_dbscan(object_points, eps, min_samples)
         df_objects = pd.DataFrame(object_points, columns=["x", "y", "z"])
         df_objects["cluster"] = labels
-        
+
         clusters = {}
         for label in np.unique(labels):
-            if label == -1:  # Bruit
+            # Ignore le bruit (label = -1) et les clusters trop petits
+            if label == -1:
                 continue
-            cluster_pts = df_objects[df_objects["cluster"] == label][["x", "y", "z"]].values
-            clusters[label] = cluster_pts
-        
-        # Extraction des contours et classification pour chaque cluster
+            pts = df_objects[df_objects["cluster"] == label][["x", "y", "z"]].values
+            if pts.shape[0] < 3:
+                continue
+            clusters[label] = pts
+
+        # Extraction des contours pour chaque cluster
         contours = {}
-        classifications = {}
         for label, pts in clusters.items():
-            contour = extract_contour(pts)
+            contour = extract_contour(pts, simplify_tolerance=0.1)
             if contour is not None:
                 contours[label] = contour
-                classifications[label] = classify_cluster(pts)
-        
+
         # ---------------------------
         # Affichage 2D des contours
         # ---------------------------
-        st.write("Affichage 2D : uniquement les contours (polylignes/polygones)")
+        st.write("Affichage 2D : uniquement les contours")
         fig = go.Figure()
-        color_map = px.colors.qualitative.Safe
-        
+
+        # Utilisation d'une palette de couleurs pour différencier les clusters
+        color_map = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                     "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+
         for i, (label, contour_coords) in enumerate(contours.items()):
             xs, ys = zip(*contour_coords)
             # Fermer le polygone en ajoutant le premier point à la fin
             xs = list(xs) + [xs[0]]
             ys = list(ys) + [ys[0]]
-            classe = classifications[label]
-            fig.add_trace(go.Scatter(
-                x=xs,
-                y=ys,
-                mode='lines',
-                line=dict(color=color_map[i % len(color_map)], width=3),
-                name=f'Cluster {label} ({classe})'
-            ))
-        
+            fig.add_trace(
+                go.Scatter(
+                    x=xs,
+                    y=ys,
+                    mode="lines",
+                    line=dict(color=color_map[i % len(color_map)], width=3),
+                    name=f"Cluster {label}"
+                )
+            )
+
         fig.update_layout(
             title="Contours des objets détectés",
             xaxis_title="X",
             yaxis_title="Y"
         )
         st.plotly_chart(fig, use_container_width=True)
-        
-        # Affichage d'un résumé des classifications
-        st.subheader("Classification des objets détectés")
-        df_class = pd.DataFrame({
-            "Cluster": list(classifications.keys()),
-            "Classification": list(classifications.values())
-        })
-        st.dataframe(df_class)
-        
+
     except Exception as e:
         st.error(f"Erreur lors du traitement du fichier : {e}")
 else:
