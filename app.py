@@ -7,8 +7,7 @@ from shapely.geometry import Polygon
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# --- Import pour CSF et clustering ---
-import pycsf
+# Import pour la recherche de voisins (clustering) et visualisation 3D
 from scipy.spatial import cKDTree
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
@@ -28,45 +27,77 @@ def load_laz(file_obj):
         st.error(f"Erreur lors du chargement du fichier LAZ : {e}")
         return None
 
-def apply_csf_filter(points, cloth_resolution, rigidness, iterations):
+def apply_ground_filter(points, grid_size, height_threshold):
     """
-    Applique le filtrage CSF pour séparer les points du sol des points d'objets.
-    Les paramètres CSF sont définis par la résolution du tissu, la rigidité et le nombre d’itérations.
+    Filtre le sol avec une approche simple basée sur une grille.
+    Pour chaque cellule, on calcule le minimum de z et on considère comme sol
+    les points dont z <= (min + height_threshold).
     """
-    csf = pycsf.CSF()
-    csf.setPointCloud(points)
-    csf.params.cloth_resolution = cloth_resolution
-    csf.params.rigidness = rigidness
-    csf.params.iterations = iterations
-    csf.do_filtering()
-    ground_points = csf.get_ground_points()
-    non_ground_points = csf.get_non_ground_points()
+    x_min, y_min = np.min(points[:, 0]), np.min(points[:, 1])
+    x_max, y_max = np.max(points[:, 0]), np.max(points[:, 1])
+    
+    num_bins_x = int(np.ceil((x_max - x_min) / grid_size))
+    num_bins_y = int(np.ceil((y_max - y_min) / grid_size))
+    
+    # Définir les bords de la grille
+    x_edges = np.linspace(x_min, x_max, num_bins_x + 1)
+    y_edges = np.linspace(y_min, y_max, num_bins_y + 1)
+    
+    # Assigner chaque point à une cellule
+    bins_x = np.clip(np.digitize(points[:,0], x_edges) - 1, 0, num_bins_x - 1)
+    bins_y = np.clip(np.digitize(points[:,1], y_edges) - 1, 0, num_bins_y - 1)
+    
+    # Initialiser le Digital Elevation Model (DEM)
+    DEM = np.full((num_bins_x, num_bins_y), np.inf)
+    
+    # Pour chaque point, mettre à jour le minimum de z de la cellule correspondante
+    for i in range(points.shape[0]):
+        bx = bins_x[i]
+        by = bins_y[i]
+        if points[i,2] < DEM[bx, by]:
+            DEM[bx, by] = points[i,2]
+            
+    # Création du masque de points sol
+    ground_mask = np.zeros(points.shape[0], dtype=bool)
+    for i in range(points.shape[0]):
+        bx = bins_x[i]
+        by = bins_y[i]
+        if points[i,2] <= DEM[bx, by] + height_threshold:
+            ground_mask[i] = True
+            
+    ground_points = points[ground_mask]
+    non_ground_points = points[~ground_mask]
+    
     return ground_points, non_ground_points
 
 def cluster_objects(points, distance_threshold):
     """
-    Regroupe les points (2D, en x et y) en clusters en utilisant une approche de composantes connexes.
-    Cette fonction implémente un union-find basé sur une recherche dans un arbre KD.
+    Regroupe les points (en 2D : x et y) en clusters en utilisant une approche
+    de composantes connexes et un arbre KD pour accélérer la recherche de voisins.
     """
     pts_2d = points[:, :2]
     tree = cKDTree(pts_2d)
     n = pts_2d.shape[0]
     # Initialisation pour union-find
     uf = list(range(n))
+    
     def find(i):
         while uf[i] != i:
             uf[i] = uf[uf[i]]
             i = uf[i]
         return i
+    
     def union(i, j):
         ri = find(i)
         rj = find(j)
         uf[ri] = rj
-    # Pour chaque point, on fusionne avec tous ses voisins dans le seuil donné
+    
+    # Pour chaque point, fusionner avec ses voisins dans le seuil donné
     for i in range(n):
         voisins = tree.query_ball_point(pts_2d[i], distance_threshold)
         for j in voisins:
             union(i, j)
+    
     # Attribution des labels de cluster
     rep_to_label = {}
     labels = np.empty(n, dtype=int)
@@ -77,6 +108,7 @@ def cluster_objects(points, distance_threshold):
             rep_to_label[rep] = label_counter
             label_counter += 1
         labels[i] = rep_to_label[rep]
+    
     return labels
 
 def extract_contour(points):
@@ -178,26 +210,25 @@ def get_box_faces(min_vals, max_vals):
 # Interface Streamlit
 # ---------------------------
 
-st.title("Traitement de fichier LAZ : Filtrage CSF et Modélisation 3D")
+st.title("Traitement de fichier LAZ : Filtrage par Grille et Modélisation 3D")
 st.markdown("""
 Cette application permet de :
 1. Téléverser un fichier LAZ  
-2. Appliquer le filtrage CSF pour séparer les points du sol des points d'objets  
-3. Segmenter les objets via un clustering basé sur la connectivité  
-4. Extraire les contours 2D et modéliser les objets en 3D (lignes, cubes, etc.)  
-5. Afficher les objets avec leur classification (ex. : ligne electrique, batiment, vegetation, route, etc.)
+2. Appliquer un filtrage du sol (basé sur une grille simple)  
+3. Segmenter les objets via un clustering par proximité  
+4. Extraire les contours 2D et modéliser les objets en 3D (lignes pour les lignes électriques, cubes pour les autres objets)  
+5. Afficher les objets avec leur classification (ex. : ligne électrique, bâtiment, végétation, route, etc.)
 """)
 
 # Téléversement du fichier LAZ
 uploaded_file = st.file_uploader("Choisissez votre fichier LAZ", type=["laz", "las"])
 
-# Paramètres CSF dans la sidebar
-st.sidebar.header("Paramètres du Filtrage CSF")
-cloth_resolution = st.sidebar.slider("Résolution du tissu (m)", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
-rigidness = st.sidebar.slider("Rigidité", min_value=1, max_value=10, value=3, step=1)
-iterations = st.sidebar.slider("Nombre d'itérations", min_value=50, max_value=1000, value=500, step=50)
+# Paramètres du filtrage du sol (par grille) dans la sidebar
+st.sidebar.header("Paramètres du Filtrage du Sol")
+grid_size = st.sidebar.slider("Taille de la grille (m)", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
+height_threshold = st.sidebar.slider("Seuil de hauteur (m)", min_value=0.1, max_value=5.0, value=0.5, step=0.1)
 
-# Paramètres du clustering (remplaçant DBSCAN)
+# Paramètres du clustering
 st.sidebar.header("Paramètres du Clustering")
 clustering_distance = st.sidebar.slider("Distance de clustering (m)", min_value=0.1, max_value=5.0, value=1.0, step=0.1)
 
@@ -207,14 +238,14 @@ if uploaded_file is not None:
     if points is not None:
         st.write(f"Nombre de points chargés : {points.shape[0]}")
         
-        # Application du filtrage CSF
-        st.write("**Application du filtrage CSF...**")
+        # Application du filtrage du sol par grille
+        st.write("**Application du filtrage du sol...**")
         try:
-            ground_points, non_ground_points = apply_csf_filter(points, cloth_resolution, rigidness, iterations)
+            ground_points, non_ground_points = apply_ground_filter(points, grid_size, height_threshold)
             st.write(f"Nombre de points de sol : {ground_points.shape[0]}")
             st.write(f"Nombre de points d'objets : {non_ground_points.shape[0]}")
         except Exception as e:
-            st.error(f"Erreur lors du filtrage CSF : {e}")
+            st.error(f"Erreur lors du filtrage du sol : {e}")
         
         # Clustering des points d'objets (via connectivité en 2D)
         st.write("**Clustering des objets...**")
@@ -262,7 +293,7 @@ if uploaded_file is not None:
                     ax.plot(x, y, z, color=color, linewidth=2,
                             label=f"Objet {label} - {classification}")
         
-        ax.set_title("Filtrage CSF et Modélisation 3D des Objets")
+        ax.set_title("Filtrage par Grille et Modélisation 3D des Objets")
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
