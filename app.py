@@ -149,7 +149,7 @@ Cette application permet de :
 """)
 
 # Téléversement du fichier LAZ
-uploaded_file = st.file_uploader("Choisissez votre fichier LAZ", type=["laz"])
+uploaded_file = st.file_uploader("Choisissez votre fichier LAZ", type=["laz","las"])
 
 # Paramètres ajustables dans la sidebar
 st.sidebar.header("Paramètres du filtre de sol")
