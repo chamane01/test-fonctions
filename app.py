@@ -22,11 +22,20 @@ def fit_line_pca(points):
     point_max = pca.mean_ + t_max * pc1
     return np.array([point_min, point_max])
 
-def extract_lines(points_xy, eps=1.0, min_samples=5, cluster_min_points=10000):
+def extract_lines(candidate_points, eps=1.0, min_samples=5, cluster_min_points=10000, 
+                  max_z_variation=2.0, min_line_length=10.0):
     """
     Applique DBSCAN pour regrouper les points (en 2D) et, pour chaque cluster suffisamment grand,
     extrait une droite via une analyse en composantes principales.
+    
+    Seuls les clusters dont :
+      - le nombre de points est supérieur à cluster_min_points,
+      - la variation en hauteur (z) est inférieure à max_z_variation,
+      - et dont la ligne extraite a une longueur supérieure à min_line_length
+    sont retenus.
     """
+    # Utiliser uniquement les coordonnées XY pour le clustering
+    points_xy = candidate_points[:, :2]
     db = DBSCAN(eps=eps, min_samples=min_samples)
     labels = db.fit_predict(points_xy)
     unique_labels = set(labels)
@@ -34,10 +43,19 @@ def extract_lines(points_xy, eps=1.0, min_samples=5, cluster_min_points=10000):
     for label in unique_labels:
         if label == -1:
             continue  # bruit
-        cluster_points = points_xy[labels == label]
+        cluster_points = candidate_points[labels == label]
         if len(cluster_points) < cluster_min_points:
             continue
-        line_segment = fit_line_pca(cluster_points)
+        # Vérifier la variation en hauteur
+        z_range = cluster_points[:, 2].max() - cluster_points[:, 2].min()
+        if z_range > max_z_variation:
+            continue
+        # Extraire la ligne via PCA en utilisant uniquement les coordonnées XY
+        line_segment = fit_line_pca(cluster_points[:, :2])
+        # Calculer la longueur du segment
+        length = np.linalg.norm(line_segment[1] - line_segment[0])
+        if length < min_line_length:
+            continue
         lines.append(line_segment)
     return lines
 
@@ -86,25 +104,30 @@ if uploaded_file is not None:
             if candidate_points.shape[0] == 0:
                 st.error("Aucun point au-dessus du seuil sélectionné.")
             else:
-                # Utilisation uniquement des coordonnées XY pour l'extraction de droites
-                candidate_points_xy = candidate_points[:, :2]
-                
-                st.markdown("### Paramètres du clustering DBSCAN")
+                st.markdown("### Paramètres du clustering DBSCAN et critères de lignes électriques")
                 eps = st.slider("DBSCAN - eps", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
                 min_samples = st.slider("DBSCAN - min_samples", min_value=1, max_value=20, value=5)
                 cluster_min_points = st.slider("Nombre minimal de points par cluster", 
                                                min_value=100, max_value=20000, value=10000, step=100)
+                max_z_variation = st.slider("Variation maximale en hauteur dans un cluster (max_z_variation)",
+                                            min_value=0.1, max_value=10.0, value=2.0, step=0.1)
+                min_line_length = st.slider("Longueur minimale d'une ligne (min_line_length)",
+                                            min_value=1.0, max_value=100.0, value=10.0, step=1.0)
                 
-                # Bouton pour lancer le calcul
                 if st.button("Lancer le calcul"):
                     with st.spinner("Calcul en cours..."):
-                        # Extraction des lignes à partir des points candidats et des paramètres choisis
-                        lines = extract_lines(candidate_points_xy, eps=eps, 
-                                                min_samples=min_samples, cluster_min_points=cluster_min_points)
+                        # Extraction des lignes en utilisant les paramètres actuels
+                        lines = extract_lines(candidate_points, eps=eps, 
+                                                min_samples=min_samples, 
+                                                cluster_min_points=cluster_min_points, 
+                                                max_z_variation=max_z_variation,
+                                                min_line_length=min_line_length)
                         st.write(f"Nombre de segments linéaires extraits : **{len(lines)}**")
                         
                         # Affichage sur une carte 2D
                         fig, ax = plt.subplots(figsize=(8, 6))
+                        # Utiliser les coordonnées XY des points candidats pour l'affichage
+                        candidate_points_xy = candidate_points[:, :2]
                         ax.scatter(candidate_points_xy[:, 0], candidate_points_xy[:, 1],
                                    s=1, color='grey', label='Points candidats')
                         
