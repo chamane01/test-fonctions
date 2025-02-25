@@ -23,3 +23,4 @@ plotly
 alphashape
 laspy
 scipy
+pdal
