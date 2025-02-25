@@ -22,7 +22,7 @@ def fit_line_pca(points):
     point_max = pca.mean_ + t_max * pc1
     return np.array([point_min, point_max])
 
-def extract_lines(points_xy, eps=1.0, min_samples=5, cluster_min_points=10):
+def extract_lines(points_xy, eps=1.0, min_samples=5, cluster_min_points=10000):
     """
     Applique DBSCAN pour regrouper les points (en 2D) et, pour chaque cluster suffisamment grand,
     extrait une droite via une analyse en composantes principales.
@@ -93,7 +93,7 @@ if uploaded_file is not None:
                 eps = st.slider("DBSCAN - eps", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
                 min_samples = st.slider("DBSCAN - min_samples", min_value=1, max_value=20, value=5)
                 cluster_min_points = st.slider("Nombre minimal de points par cluster", 
-                                               min_value=2, max_value=100, value=10)
+                                               min_value=100, max_value=20000, value=10000, step=100)
                 
                 # Extraction des lignes
                 lines = extract_lines(candidate_points_xy, eps=eps, 
