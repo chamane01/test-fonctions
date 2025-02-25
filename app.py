@@ -1,87 +1,57 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
 import laspy
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import pyproj
 from sklearn.cluster import DBSCAN
+from shapely.geometry import Point
+import geopandas as gpd
 
-# Fonction pour lire un fichier LAS et extraire les points
-def read_las_file(file_path):
-    """Lit un fichier .las et retourne un DataFrame avec les coordonnées des points."""
-    try:
-        with laspy.open(file_path) as las_file:
-            las = las_file.read()
-            df = pd.DataFrame({
-                'x': las.x,
-                'y': las.y,
-                'z': las.z
-            })
-        return df
-    except Exception as e:
-        st.error(f"Erreur lors de la lecture du fichier LAS : {e}")
-        return pd.DataFrame()
-
-# Fonction de clustering avec DBSCAN
-def cluster_points(df, eps=3, min_samples=10):
-    """Applique DBSCAN sur les points pour regrouper les objets."""
-    if df.empty:
-        st.warning("Le DataFrame est vide, impossible d'appliquer DBSCAN.")
-        return df
-
-    # Vérifier les valeurs manquantes et les supprimer
-    df = df.dropna(subset=['x', 'y', 'z'])
-
-    # Vérifier si les colonnes existent et sont bien numériques
-    try:
-        df[['x', 'y', 'z']] = df[['x', 'y', 'z']].astype(float)
-    except ValueError:
-        st.error("Les colonnes x, y, z contiennent des valeurs non numériques.")
-        return df
-
-    # Vérifier qu'il y a assez de points pour DBSCAN
-    if len(df) < min_samples:
-        st.warning("Pas assez de points valides pour appliquer DBSCAN.")
-        df['cluster'] = -1  # Mettre tout dans un seul cluster par défaut
-        return df
-
-    # Appliquer DBSCAN
-    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(df[['x', 'y', 'z']])
-    df['cluster'] = clustering.labels_
-    return df
+# Paramètres SMRF par type d'objet
+SMRF_PARAMS = {
+    "Bâtiments": {"cell_size": (1, 3), "window_size": (20, 30), "slope_threshold": (5, 15), "elevation_threshold": (2, 5), "iterations": (1, 2)},
+    "Basse végétation": {"cell_size": (0.5, 1), "window_size": (5, 10), "slope_threshold": (2, 7), "elevation_threshold": (0.2, 1), "iterations": (1, 1)},
+    "Arbustes": {"cell_size": (1, 2), "window_size": (8, 15), "slope_threshold": (5, 10), "elevation_threshold": (1, 3), "iterations": (1, 2)},
+    "Arbres": {"cell_size": (2, 5), "window_size": (20, 40), "slope_threshold": (10, 20), "elevation_threshold": (5, 20), "iterations": (2, 3)},
+    "Lignes électriques": {"cell_size": (0.5, 1), "window_size": (10, 15), "slope_threshold": (15, 30), "elevation_threshold": (10, 50), "iterations": (1, 2)},
+    "Cours d’eau": {"cell_size": (1, 3), "window_size": (10, 20), "slope_threshold": (2, 5), "elevation_threshold": (-2, 1), "iterations": (1, 1)}
+}
 
 # Interface Streamlit
-st.title("Analyse et Clustering de Fichiers LAS")
+st.title("📌 Clustering et Affichage 2D des Points LAS/LAZ")
 
-uploaded_file = st.file_uploader("Chargez un fichier .las", type=["las"])
+# Upload du fichier LAS/LAZ
+uploaded_file = st.file_uploader("Téléverser un fichier LAS ou LAZ", type=["las", "laz"])
 
 if uploaded_file is not None:
-    st.success("Fichier chargé avec succès !")
-
-    # Sauvegarde temporaire du fichier
-    file_path = "/tmp/uploaded_file.las"
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-
-    # Lecture et affichage des données
-    df = read_las_file(file_path)
-
-    if not df.empty:
-        st.write("Aperçu des données :")
-        st.dataframe(df.head())
-
-        # Paramètres pour DBSCAN
-        eps = st.slider("Distance maximale entre points (eps)", 1, 10, 3)
-        min_samples = st.slider("Nombre minimal de points par cluster", 1, 20, 10)
-
-        if st.button("Appliquer DBSCAN"):
-            df = cluster_points(df, eps, min_samples)
-            st.write("Résultats du clustering :")
-            st.dataframe(df.head())
-
-            # Affichage du nombre de clusters trouvés
-            n_clusters = len(set(df['cluster'])) - (1 if -1 in df['cluster'].unique() else 0)
-            st.write(f"Nombre de clusters détectés : {n_clusters}")
-
-            # Option de téléchargement du fichier avec les clusters
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("Télécharger les résultats", data=csv, file_name="clustering_results.csv", mime="text/csv")
-
+    with st.spinner("Chargement des données..."):
+        # Lecture du fichier LAS/LAZ
+        las = laspy.read(uploaded_file)
+        points = np.vstack((las.x, las.y, las.z)).T
+        df = pd.DataFrame(points, columns=["x", "y", "z"])
+        
+        # Sélection de l'objet à classifier
+        object_type = st.selectbox("Sélectionnez le type d'objet à détecter", list(SMRF_PARAMS.keys()))
+        params = SMRF_PARAMS[object_type]
+        
+        # Clustering avec DBSCAN
+        clustering = DBSCAN(eps=np.mean(params["cell_size"]), min_samples=5).fit(df)
+        df["cluster"] = clustering.labels_
+        
+        # Affichage des résultats
+        unique_clusters = df["cluster"].unique()
+        colors = plt.cm.get_cmap("tab10", len(unique_clusters))
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for i, cluster in enumerate(unique_clusters):
+            if cluster != -1:  # -1 correspond au bruit
+                cluster_points = df[df["cluster"] == cluster]
+                ax.scatter(cluster_points["x"], cluster_points["y"], s=1, color=colors(i), label=f"Cluster {cluster}")
+        
+        ax.set_xlabel("Longitude")
+        ax.set_ylabel("Latitude")
+        ax.set_title(f"Clustering des {object_type} sur une carte fixe 2D")
+        ax.legend()
+        
+        st.pyplot(fig)
