@@ -26,7 +26,7 @@ def classify_cluster(points):
     Ces règles sont purement indicatives :
       - 'batiment' : cluster avec une hauteur (z_range) relativement élevée et une étendue horizontale modérée.
       - 'route' : cluster plat avec une grande étendue.
-      - 'arbres' ou 'herbe' : vegetation (on peut distinguer grossièrement selon la hauteur moyenne).
+      - 'arbres' ou 'herbe' : végétation (on peut distinguer grossièrement selon la hauteur moyenne).
       - 'ligne electrique' : cluster étroit et allongé.
       - 'pylone' : petit cluster vertical.
     """
@@ -129,13 +129,11 @@ def main():
             category = classify_cluster(pts)
             classified_clusters[label] = {"points": pts, "category": category}
         
-        # --- Représentation sur une carte 2D ---
-        st.write("**Génération du plan de masse**")
-        fig, ax = plt.subplots(figsize=(10, 10))
-        
-        # On affiche en fond les points de sol (petits points marron)
-        ax.scatter(ground_points[:, 0], ground_points[:, 1],
-                   c="saddlebrown", s=0.5, label="Sol")
+        # --- Affichage global sur une carte 2D ---
+        st.write("**Plan de masse global**")
+        fig_global, ax_global = plt.subplots(figsize=(10, 10))
+        ax_global.scatter(ground_points[:, 0], ground_points[:, 1],
+                          c="saddlebrown", s=0.5, label="Sol")
         
         # Dictionnaire de couleurs pour chaque catégorie
         color_map = {
@@ -148,7 +146,7 @@ def main():
             "inconnu": "gray"
         }
         
-        # Pour éviter des doublons dans la légende, on garde la trace des catégories affichées
+        # Pour éviter des doublons dans la légende
         legend_categories = set()
         for label, data in classified_clusters.items():
             pts = data["points"]
@@ -157,19 +155,61 @@ def main():
             color = color_map.get(category, "gray")
             if hull is not None:
                 x, y = hull.exterior.xy
-                ax.fill(x, y, alpha=0.5, fc=color, ec="black")
+                ax_global.fill(x, y, alpha=0.5, fc=color, ec="black")
             else:
-                ax.scatter(pts[:, 0], pts[:, 1], c=color, s=5)
-            # Ajout dans la légende une seule fois par catégorie
+                ax_global.scatter(pts[:, 0], pts[:, 1], c=color, s=5)
             if category not in legend_categories:
-                ax.scatter([], [], c=color, label=category)
+                ax_global.scatter([], [], c=color, label=category)
                 legend_categories.add(category)
         
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_title("Plan de masse des objets détectés")
-        ax.legend(loc="upper right", fontsize="small")
-        st.pyplot(fig)
+        ax_global.set_xlabel("X")
+        ax_global.set_ylabel("Y")
+        ax_global.set_title("Plan de masse des objets détectés")
+        ax_global.legend(loc="upper right", fontsize="small")
+        st.pyplot(fig_global)
+        
+        # --- Affichage par zones pour un meilleur zoom ---
+        st.write("**Affichage par zones**")
+        # Déterminer l'étendue en X et découper en 10 zones
+        min_x = points[:, 0].min()
+        max_x = points[:, 0].max()
+        zones = np.linspace(min_x, max_x, num=11)  # 11 bornes => 10 zones
+        
+        # Création de 10 onglets pour afficher chaque zone
+        zone_tabs = st.tabs([f"Zone {i+1}" for i in range(10)])
+        for i, tab in enumerate(zone_tabs):
+            with tab:
+                x_min_zone = zones[i]
+                x_max_zone = zones[i+1]
+                # Filtrer les points de sol pour la zone
+                zone_ground_mask = (ground_points[:, 0] >= x_min_zone) & (ground_points[:, 0] < x_max_zone)
+                zone_ground = ground_points[zone_ground_mask]
+                
+                fig, ax = plt.subplots(figsize=(8, 8))
+                ax.scatter(zone_ground[:, 0], zone_ground[:, 1],
+                           c="saddlebrown", s=0.5, label="Sol")
+                
+                # Afficher les clusters présents dans la zone
+                for label, data in classified_clusters.items():
+                    pts = data["points"]
+                    zone_pts = pts[(pts[:, 0] >= x_min_zone) & (pts[:, 0] < x_max_zone)]
+                    if len(zone_pts) == 0:
+                        continue
+                    category = data["category"]
+                    hull = get_convex_hull(zone_pts)
+                    color = color_map.get(category, "gray")
+                    if hull is not None:
+                        xh, yh = hull.exterior.xy
+                        ax.fill(xh, yh, alpha=0.5, fc=color, ec="black")
+                    else:
+                        ax.scatter(zone_pts[:, 0], zone_pts[:, 1], c=color, s=5)
+                
+                ax.set_xlim(x_min_zone, x_max_zone)
+                ax.set_xlabel("X")
+                ax.set_ylabel("Y")
+                ax.set_title(f"Zone {i+1} (X: {x_min_zone:.2f} - {x_max_zone:.2f})")
+                ax.legend(loc="upper right", fontsize="small")
+                st.pyplot(fig)
         
         st.success("Traitement terminé.")
 
