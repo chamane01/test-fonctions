@@ -1,71 +1,52 @@
-import streamlit as st
-import laspy
 import numpy as np
+import laspy
 import scipy.ndimage as ndimage
-import tempfile
-import os
 
-st.title("Classification Lidar sans PDAL")
+# Supposons que 'las' contient le nuage chargé via laspy
+points = np.vstack((las.x, las.y, las.z)).T
 
-# Téléchargement du fichier LAS/LAZ
-uploaded_file = st.file_uploader("Téléchargez votre fichier LAS/LAZ", type=["las", "laz"])
-if uploaded_file is not None:
-    # Sauvegarde temporaire du fichier téléchargé
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".las") as tmp:
-        tmp.write(uploaded_file.read())
-        input_filename = tmp.name
+# Construction d'un MNT simple (comme dans l'exemple précédent)
+# [Calcul du MNT par grille, puis interpolation pour obtenir ground_levels pour chaque point]
+# ground_levels = ...
 
-    st.write("Fichier téléchargé:", input_filename)
-    
-    # Lecture du nuage de points avec laspy
-    las = laspy.read(input_filename)
-    points = np.vstack((las.x, las.y, las.z)).T
-    st.write("Nombre de points :", points.shape[0])
-    
-    # Paramètres de la grille et seuil de classification
-    grid_resolution = st.number_input("Résolution de la grille (m)", value=1.0)
-    threshold = st.number_input("Seuil de différence (m)", value=0.5)
+# Calcul de la hauteur normalisée
+normalized_heights = points[:, 2] - ground_levels
 
-    # Détermination des dimensions de la grille
-    x_min, x_max = points[:, 0].min(), points[:, 0].max()
-    y_min, y_max = points[:, 1].min(), points[:, 1].max()
-    nx = int(np.ceil((x_max - x_min) / grid_resolution))
-    ny = int(np.ceil((y_max - y_min) / grid_resolution))
+# Calcul d'une mesure de variance locale (exemple simplifié par cellule de grille)
+# Vous pouvez adapter en calculant l'écart-type sur un voisinage autour de chaque point.
+local_variance = np.zeros_like(normalized_heights)
+# (Ici, un calcul par cellule de la grille ou en utilisant un filtre glissant)
+
+# Initialisation du tableau de classification
+classifications = np.full(points.shape[0], 1, dtype=np.uint8)  # 1 = non classifié
+
+for i in range(points.shape[0]):
+    h = normalized_heights[i]
+    var = local_variance[i]
     
-    # Initialisation de la grille pour stocker le minimum de z (estimation du terrain)
-    ground_model = np.full((ny, nx), np.nan)
-    ix = ((points[:, 0] - x_min) / grid_resolution).astype(int)
-    iy = ((points[:, 1] - y_min) / grid_resolution).astype(int)
-    
-    # Calcul du minimum de z par cellule de la grille
-    for i in range(points.shape[0]):
-        row, col = iy[i], ix[i]
-        z = points[i, 2]
-        if np.isnan(ground_model[row, col]):
-            ground_model[row, col] = z
+    # Sol
+    if h < 0.5:
+        classifications[i] = 2
+    # Végétation faible
+    elif h < 2.0:
+        classifications[i] = 3
+    # Possibilité d'arbre ou de bâtiment
+    elif h < 20:
+        if var < 0.3:
+            # Surface plane, potentiellement un bâtiment
+            classifications[i] = 6
+        elif var > 0.5:
+            # Forte irrégularité => peut correspondre à une canopée d'arbre
+            classifications[i] = 5
         else:
-            ground_model[row, col] = min(ground_model[row, col], z)
-    
-    # Remplacer les cellules vides par la valeur maximale trouvée
-    ground_model = np.where(np.isnan(ground_model), np.nanmax(ground_model), ground_model)
-    
-    # Application d'un filtre minimum pour lisser le modèle de terrain
-    ground_smoothed = ndimage.minimum_filter(ground_model, size=3)
-    
-    # Interpolation simple (voisin le plus proche) du modèle de terrain pour chaque point
-    ground_levels = ground_smoothed[iy, ix]
-    
-    # Classification : on considère un point comme sol si sa hauteur est inférieure au MNT + seuil
-    # On attribue la valeur 2 pour le sol et 1 pour non-sol (valeurs conventionnelles)
-    classifications = np.where((points[:, 2] - ground_levels) < threshold, 2, 1)
-    
-    # Mise à jour de la classification dans le fichier LAS
-    las.classification = classifications.astype(np.uint8)
-    
-    # Sauvegarde du fichier classifié
-    output_file = "classified_output.las"
-    las.write(output_file)
-    
-    st.success("Classification effectuée avec succès!")
-    with open(output_file, "rb") as f:
-        st.download_button("Télécharger le fichier classifié", f, file_name="classified_output.las")
+            # Zone intermédiaire
+            classifications[i] = 4
+    # Points très élevés
+    else:
+        # On pourrait aussi vérifier ici une possible détection de lignes électriques en cherchant l'alignement
+        classifications[i] = 1  # Non classifié par défaut
+
+# Pour les lignes électriques, vous pourriez isoler les points avec h entre 8 et 15 m,
+# puis appliquer une analyse de clustering pour détecter des structures linéaires.
+# Par exemple, après clustering, pour un cluster dont l'extension en largeur est très faible,
+# réaffecter la classification à 18 (code pour ligne électrique).
