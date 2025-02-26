@@ -14,12 +14,20 @@ import zipfile
 
 # Fonction d'extraction des métadonnées EXIF
 def extract_exif_info(image_file):
+    """
+    Extrait les informations EXIF d'une image : 
+    - GPS (lat, lon, altitude)
+    - EXIF FocalLength
+    - FocalPlaneXResolution et FocalPlaneResolutionUnit (pour calculer la largeur du capteur)
+    Renvoie (lat, lon, altitude, focal_length, fp_x_res, fp_unit).
+    """
     image_file.seek(0)
     tags = exifread.process_file(image_file)
     
     lat = lon = altitude = focal_length = None
     fp_x_res = fp_unit = None
     
+    # --- GPS Latitude / Longitude ---
     if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
         lat_vals = tags['GPS GPSLatitude'].values
         lon_vals = tags['GPS GPSLongitude'].values
@@ -39,14 +47,17 @@ def extract_exif_info(image_file):
             if lon_ref.printable.strip().upper() == 'W':
                 lon = -lon
     
+    # --- GPS Altitude ---
     if 'GPS GPSAltitude' in tags:
         alt_tag = tags['GPS GPSAltitude']
         altitude = float(alt_tag.values[0].num) / alt_tag.values[0].den
         
+    # --- Focal Length ---
     if 'EXIF FocalLength' in tags:
         focal_tag = tags['EXIF FocalLength']
         focal_length = float(focal_tag.values[0].num) / focal_tag.values[0].den
     
+    # --- Focal Plane Resolution (X) + Unit ---
     if 'EXIF FocalPlaneXResolution' in tags and 'EXIF FocalPlaneResolutionUnit' in tags:
         fp_res_tag = tags['EXIF FocalPlaneXResolution']
         fp_unit_tag = tags['EXIF FocalPlaneResolutionUnit']
@@ -74,7 +85,7 @@ def compute_gsd(altitude, focal_length_mm, sensor_width_mm, image_width_px):
     gsd = (altitude * sensor_width_m) / (focal_length_m * image_width_px)
     return gsd
 
-# Conversion en GeoTIFF sur disque
+# Conversion en GeoTIFF sur disque (utilisé dans la conversion individuelle si besoin)
 def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs, rotation_angle=0, scaling_factor=1):
     img = Image.open(image_file)
     img = ImageOps.exif_transpose(img)
@@ -206,11 +217,12 @@ if uploaded_files:
         st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
         
         # -------------------------------
-        # configuration 1 : Export groupé en GeoTIFF avec facteur de redimensionnement -5 (scaling_factor = 1/5)
-        if st.button("configuration 1"):
+        # Conversion groupée en GeoTIFF (Configuration 1) avec scaling_factor fixe = 1/5 (correspondant à -5)
+        if st.button("Convertir et télécharger toutes les images en GeoTIFF"):
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
+                    # Calcul de l'angle de trajectoire pour chaque image
                     if len(images_info) >= 2:
                         if i == 0:
                             dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
@@ -230,7 +242,7 @@ if uploaded_files:
                         utm_center=info["utm"],
                         utm_crs=info["utm_crs"],
                         rotation_angle=-flight_angle_i,
-                        scaling_factor=1/5  # correspond à un facteur -5
+                        scaling_factor=1/5  # Facteur fixe -5
                     )
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
                     zip_file.writestr(output_filename, tiff_bytes)
@@ -243,8 +255,8 @@ if uploaded_files:
             )
         
         # -------------------------------
-        # configuration 2 : Export groupé en GeoTIFF x2 avec facteur de redimensionnement -3 (scaling_factor = 1/3 et résolution multipliée par 2)
-        if st.button("configuration 2"):
+        # Conversion groupée en GeoTIFF x2 (Configuration 2) avec scaling_factor fixe = 1/3 et résolution spatiale multipliée par 2
+        if st.button("Convertir et télécharger toutes les images en GeoTIFF x2"):
             zip_buffer_geotiff_x2 = io.BytesIO()
             with zipfile.ZipFile(zip_buffer_geotiff_x2, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
@@ -263,11 +275,11 @@ if uploaded_files:
                         flight_angle_i = 0
                     tiff_bytes_x2 = convert_to_tiff_in_memory(
                         image_file=io.BytesIO(info["data"]),
-                        pixel_size=pixel_size * 2,
+                        pixel_size=pixel_size * 2,  # Résolution spatiale doublée
                         utm_center=info["utm"],
                         utm_crs=info["utm_crs"],
                         rotation_angle=-flight_angle_i,
-                        scaling_factor=1/3  # correspond à un facteur -3
+                        scaling_factor=1/3  # Facteur fixe -3
                     )
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
                     zip_file.writestr(output_filename, tiff_bytes_x2)
@@ -280,8 +292,8 @@ if uploaded_files:
             )
         
         # -------------------------------
-        # configuration images : Export groupé en JPEG avec métadonnées de cadre avec facteur de redimensionnement 0 (pas de redimensionnement, scaling_factor = 1)
-        if st.button("configuration images"):
+        # Conversion groupée en JPEG avec métadonnées (Configuration JPEG) avec scaling_factor fixe = 1 (pas de redimensionnement)
+        if st.button("Convertir et télécharger toutes les images en JPEG avec métadonnées de cadre"):
             zip_buffer_jpeg = io.BytesIO()
             with zipfile.ZipFile(zip_buffer_jpeg, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
@@ -300,7 +312,7 @@ if uploaded_files:
                         flight_angle_i = 0
                     rotation_angle_i = -flight_angle_i
                     
-                    # Pour configuration images, pas de redimensionnement (scaling_factor = 1)
+                    # Pour cette configuration, aucun redimensionnement (scaling_factor = 1)
                     scaling_factor = 1
                     img = Image.open(io.BytesIO(info["data"]))
                     img = ImageOps.exif_transpose(img)
@@ -331,6 +343,7 @@ if uploaded_files:
                     
                     metadata_str = f"Frame Coordinates: {corner_coords}"
                     
+                    # Injection des métadonnées dans l'EXIF via piexif
                     try:
                         import piexif
                         if "exif" in img.info:
