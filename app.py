@@ -52,7 +52,7 @@ def assign_route_to_marker(lat, lon, routes):
     Pour un point (lat, lon) en EPSG:4326, retourne le nom de la route la plus proche,
     si celle-ci se trouve dans un seuil défini (sinon "Route inconnue").
     """
-    marker_point = Point(lon, lat)  # Note : Point(longitude, latitude)
+    marker_point = Point(lon, lat)  # Point(longitude, latitude)
     min_distance = float('inf')
     closest_route = "Route inconnue"
     for route in routes:
@@ -129,23 +129,28 @@ def normalize_data(data):
     return norm_data
 
 def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
-               hide_osm=False, tiff_opacity=1, tiff_show=True, tiff_control=True):
+               hide_osm=False, tiff_opacity=1, tiff_show=True, tiff_control=True,
+               draw_routes=True):
+    """
+    Création de la carte avec option d'afficher ou non les routes.
+    """
     if hide_osm:
         m = folium.Map(location=[center_lat, center_lon], tiles=None)
     else:
         m = folium.Map(location=[center_lat, center_lon])
     add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=tiff_opacity,
                       show=tiff_show, control=tiff_control)
-    # Ajout des routes sur la carte de suivi
-    for route in routes_ci:
-        poly_coords = [(lat, lon) for lon, lat in route["coords"]]
-        folium.PolyLine(
-            locations=poly_coords,
-            color="blue",
-            weight=3,
-            opacity=0.7,
-            tooltip=route["nom"]
-        ).add_to(m)
+    # Affichage conditionnel des routes
+    if draw_routes:
+        for route in routes_ci:
+            poly_coords = [(lat, lon) for lon, lat in route["coords"]]
+            folium.PolyLine(
+                locations=poly_coords,
+                color="blue",
+                weight=3,
+                opacity=0.7,
+                tooltip=route["nom"]
+            ).add_to(m)
     draw = Draw(
         draw_options={
             'marker': True,
@@ -238,7 +243,7 @@ if uploaded_files_grand and uploaded_files_petit:
         ##############################################
         # Navigation entre paires
         ##############################################
-        col_nav1, col_nav2, col_nav3 = st.columns([1,2,1])
+        col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
         prev_pressed = col_nav1.button("← Précédent")
         next_pressed = col_nav3.button("Suivant →")
         if prev_pressed and st.session_state.current_pair_index > 0:
@@ -289,7 +294,7 @@ if uploaded_files_grand and uploaded_files_petit:
         image_petit.save(temp_png_petit)
         display_path_petit = temp_png_petit
 
-        # Masquage de l'affichage des bornes TIFF
+        # Les bornes ne sont pas affichées dans Streamlit
 
         center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
         center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
@@ -301,12 +306,12 @@ if uploaded_files_grand and uploaded_files_petit:
         utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"
 
         ##############################################
-        # Carte 1 : TIFF GRAND (OSM masqué) pour dessin des marqueurs
+        # Carte 1 : TIFF GRAND (OSM masqué) pour dessin des marqueurs (routes non affichées)
         ##############################################
         st.subheader("Carte 1 : TIFF GRAND (pour dessin des marqueurs)")
         map_placeholder_grand = st.empty()
         m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
-                             marker_data=None, hide_osm=True)
+                             marker_data=None, hide_osm=True, draw_routes=False)
         result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
 
         ##############################################
@@ -377,7 +382,6 @@ if uploaded_files_grand and uploaded_files_petit:
         ##############################################
         # Carte 2 : TIFF PETIT avec TOUS les marqueurs et affichage des routes
         ##############################################
-        # On agrège tous les marqueurs enregistrés pour les afficher sur la carte PETIT.
         global_markers = []
         for markers in st.session_state.markers_by_pair.values():
             global_markers.extend(markers)
@@ -386,7 +390,7 @@ if uploaded_files_grand and uploaded_files_petit:
         map_placeholder_petit = st.empty()
         # Pour la carte PETIT, l'overlay TIFF est rendu transparent (tiff_opacity=0) et est retiré du gestionnaire de couche (tiff_control=False)
         m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds, display_path_petit,
-                             marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False)
+                             marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True)
         st_folium(m_petit, width=700, height=500, key="folium_map_petit")
 
         ##############################################
