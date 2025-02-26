@@ -103,16 +103,11 @@ def apply_color_gradient(tiff_path, output_png_path):
         plt.imsave(output_png_path, colored_image)
         plt.close()
 
-def add_image_overlay(map_object, image_data, bounds, layer_name, opacity=1, show=True, control=True):
-    # Si image_data est déjà des bytes, on les utilise directement
-    if isinstance(image_data, bytes):
-        image_base64 = base64.b64encode(image_data).decode("utf-8")
-        img_data_url = f"data:image/png;base64,{image_base64}"
-    else:
-        with open(image_data, "rb") as f:
-            content = f.read()
-        image_base64 = base64.b64encode(content).decode("utf-8")
-        img_data_url = f"data:image/png;base64,{image_base64}"
+def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1, show=True, control=True):
+    with open(image_path, "rb") as f:
+        image_data = f.read()
+    image_base64 = base64.b64encode(image_data).decode("utf-8")
+    img_data_url = f"data:image/png;base64,{image_base64}"
     folium.raster_layers.ImageOverlay(
         image=img_data_url,
         bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
@@ -206,7 +201,7 @@ def get_reprojected_and_center(uploaded_file, group):
     return {"path": reproj_path, "center": (center_lon, center_lat), "bounds": bounds, "temp_original": temp_path}
 
 ##############################################
-# INITIALISATION DU SESSION STATE
+# INITIALISATION DE LA SESSION STATE
 ##############################################
 if "current_pair_index" not in st.session_state:
     st.session_state.current_pair_index = 0
@@ -249,7 +244,6 @@ with tab_manuel:
             for file in uploaded_files_petit:
                 file.seek(0)
                 petit_list.append(get_reprojected_and_center(file, "petit"))
-            # Tri par centre (attention, ici le centre est un tuple (lon, lat))
             grand_list = sorted(grand_list, key=lambda d: d["center"])
             petit_list = sorted(petit_list, key=lambda d: d["center"])
             pair_count = len(grand_list)
@@ -262,58 +256,71 @@ with tab_manuel:
             # Navigation entre paires
             ##############################################
             col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
-            if col_nav1.button("← Précédent"):
-                if st.session_state.current_pair_index > 0:
-                    st.session_state.current_pair_index -= 1
-            if col_nav3.button("Suivant →"):
-                if st.session_state.current_pair_index < pair_count - 1:
-                    st.session_state.current_pair_index += 1
+            prev_pressed = col_nav1.button("← Précédent")
+            next_pressed = col_nav3.button("Suivant →")
+            if prev_pressed and st.session_state.current_pair_index > 0:
+                st.session_state.current_pair_index -= 1
+            if next_pressed and st.session_state.current_pair_index < pair_count - 1:
+                st.session_state.current_pair_index += 1
             st.write(f"Affichage de la paire {st.session_state.current_pair_index + 1} sur {pair_count}")
             current_index = st.session_state.current_pair_index
             current_pair = st.session_state.pairs[current_index]
 
             ##############################################
-            # Traitement de la paire courante : génération des PNG en mémoire
+            # Traitement de la paire courante : génération des PNG
             ##############################################
-            # Pour le TIFF GRAND
             reproj_grand_path = current_pair["grand"]["path"]
-            with open(reproj_grand_path, "rb") as f:
-                tiff_bytes_grand = f.read()
-            png_grand = tiff_to_png(tiff_bytes_grand)
             with rasterio.open(reproj_grand_path) as src:
                 grand_bounds = src.bounds
+                data = src.read()
+                if data.shape[0] >= 3:
+                    r = normalize_data(data[0])
+                    g = normalize_data(data[1])
+                    b = normalize_data(data[2])
+                    rgb_norm = np.dstack((r, g, b))
+                    image_grand = Image.fromarray(rgb_norm)
+                else:
+                    band = data[0]
+                    band_norm = normalize_data(band)
+                    image_grand = Image.fromarray(band_norm, mode="L")
+            unique_id = str(uuid.uuid4())[:8]
+            temp_png_grand = f"converted_grand_{unique_id}.png"
+            image_grand.save(temp_png_grand)
+            display_path_grand = temp_png_grand
 
-            # Pour le TIFF PETIT
             reproj_petit_path = current_pair["petit"]["path"]
-            with open(reproj_petit_path, "rb") as f:
-                tiff_bytes_petit = f.read()
-            png_petit = tiff_to_png(tiff_bytes_petit)
             with rasterio.open(reproj_petit_path) as src:
                 petit_bounds = src.bounds
+                data = src.read()
+                if data.shape[0] >= 3:
+                    r = normalize_data(data[0])
+                    g = normalize_data(data[1])
+                    b = normalize_data(data[2])
+                    rgb_norm = np.dstack((r, g, b))
+                    image_petit = Image.fromarray(rgb_norm)
+                else:
+                    band = data[0]
+                    band_norm = normalize_data(band)
+                    image_petit = Image.fromarray(band_norm, mode="L")
+            temp_png_petit = f"converted_{unique_id}.png"
+            image_petit.save(temp_png_petit)
+            display_path_petit = temp_png_petit
+
+            center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
+            center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
+            utm_zone_grand = int((center_lon_grand + 180) / 6) + 1
+            center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
+            center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
+            utm_zone_petit = int((center_lon_petit + 180) / 6) + 1
+            utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"
 
             ##############################################
-            # Affichage de la carte de dessin (à partir du TIFF GRAND)
+            # Carte de dessin : TIFF GRAND (OSM masqué) pour dessin des marqueurs (routes non affichées)
             ##############################################
-            st.subheader("Carte de dessin (TIFF GRAND)")
-            m_grand = folium.Map(
-                location=[(grand_bounds.bottom + grand_bounds.top)/2, (grand_bounds.left + grand_bounds.right)/2],
-                zoom_start=18, tiles=None
-            )
-            # On utilise ici le PNG en mémoire (bytes) pour l'overlay
-            add_image_overlay(m_grand, png_grand, grand_bounds, "TIFF GRAND Overlay", opacity=1)
-            draw = Draw(
-                draw_options={
-                    'marker': True,
-                    'polyline': False,
-                    'polygon': False,
-                    'rectangle': False,
-                    'circle': False,
-                    'circlemarker': False,
-                },
-                edit_options={'edit': True}
-            )
-            draw.add_to(m_grand)
-            folium.LayerControl().add_to(m_grand)
+            st.subheader("Carte de dessin")
+            map_placeholder_grand = st.empty()
+            m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
+                                 marker_data=None, hide_osm=True, draw_routes=False, add_draw_tool=True)
             result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
 
             ##############################################
@@ -340,8 +347,11 @@ with tab_manuel:
                             percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
                             new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
                             new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
+                            utm_x_petit, utm_y_petit = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
+                            utm_coords_petit = (round(utm_x_petit[0], 2), round(utm_y_petit[0], 2))
                         else:
                             new_lon = new_lat = None
+                            utm_coords_petit = "Inconnues"
                         assigned_route = assign_route_to_marker(new_lat, new_lon, routes_ci) if new_lat and new_lon else "Route inconnue"
                         st.markdown(f"**ID {global_count + i + 1}**")
                         col1, col2 = st.columns(2)
@@ -353,11 +363,11 @@ with tab_manuel:
                             "ID": global_count + i + 1,
                             "classe": selected_class,
                             "gravite": selected_gravity,
-                            "coordonnees UTM": "Calculées",  # Vous pouvez calculer et afficher ces coordonnées
+                            "coordonnees UTM": utm_coords_petit,
                             "lat": new_lat,
                             "long": new_lon,
                             "routes": assigned_route,
-                            "detection": "Manuelle",
+                            "detection": "Manuelle",  # Marqueur placé manuellement
                             "couleur": class_color.get(selected_class, "#000000"),
                             "radius": gravity_sizes.get(selected_gravity, 5)
                         })
@@ -366,46 +376,27 @@ with tab_manuel:
                 st.write("Aucun marqueur n'a été détecté.")
 
             ##############################################
-            # Carte de suivi (fond basé sur le TIFF PETIT)
+            # Nettoyage des fichiers temporaires (pour cette paire)
+            # NB : Bloc commenté pour conserver les fichiers pour la carte de suivi.
             ##############################################
-            st.subheader("Carte de suivi")
-            global_markers = []
-            for markers in st.session_state.markers_by_pair.values():
-                global_markers.extend(markers)
-            m_petit = folium.Map(
-                location=[(petit_bounds.bottom + petit_bounds.top)/2, (petit_bounds.left + petit_bounds.right)/2],
-                zoom_start=18
-            )
-            add_image_overlay(m_petit, png_petit, petit_bounds, "TIFF PETIT Overlay", opacity=0.7)
-            for marker in global_markers:
-                folium.CircleMarker(
-                    location=[marker["lat"], marker["long"]],
-                    radius=marker["radius"],
-                    color=marker["couleur"],
-                    fill=True,
-                    fill_color=marker["couleur"],
-                    fill_opacity=0.7,
-                    tooltip=f'{marker["classe"]} (Gravité {marker["gravite"]})'
-                ).add_to(m_petit)
-            folium.LayerControl().add_to(m_petit)
-            st_folium(m_petit, width=700, height=500, key="folium_map_petit")
-            st.markdown("### Récapitulatif global des défauts")
-            if global_markers:
-                st.table(global_markers)
-            else:
-                st.write("Aucun marqueur global n'a été enregistré.")
+            # for file_path in [current_pair["grand"]["temp_original"], current_pair["petit"]["temp_original"],
+            #                   reproj_grand_path, reproj_petit_path, temp_png_grand, temp_png_petit]:
+            #     if os.path.exists(file_path):
+            #         os.remove(file_path)
     else:
         st.info("Veuillez téléverser les fichiers TIFF pour lancer la détection manuelle.")
 
 ##############################################
-# Section commune : Carte de suivi par défaut si aucun TIFF n'est téléversé
+# Section commune : Carte de suivi et récapitulatif global
 ##############################################
+
 st.subheader("Carte de suivi")
 global_markers = []
 for markers in st.session_state.markers_by_pair.values():
     global_markers.extend(markers)
 
 if st.session_state.pairs:
+    # Utilisation de la première paire comme référence pour la carte PETIT
     first_pair = st.session_state.pairs[0]
     try:
         with rasterio.open(first_pair["petit"]["path"]) as src:
@@ -418,15 +409,41 @@ if st.session_state.pairs:
     if petit_bounds:
         center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
         center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
-        m_default = create_map(center_lat_petit, center_lon_petit, petit_bounds,
-                               display_path="", marker_data=global_markers,
-                               tiff_opacity=0, tiff_show=True, tiff_control=False,
-                               draw_routes=True, add_draw_tool=False)
-        st_folium(m_default, width=700, height=500, key="folium_map_default")
+        # Pour la carte de suivi, on n'ajoute pas l'outil de dessin (add_draw_tool=False)
+        m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds,
+                             display_path_petit if 'display_path_petit' in locals() else "",
+                             marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True,
+                             add_draw_tool=False)
+        st_folium(m_petit, width=700, height=500, key="folium_map_petit")
     else:
         st.info("Impossible d'afficher la carte de suivi à cause d'un problème avec le TIFF PETIT.")
 else:
-    st.info("Aucune donnée TIFF téléversée pour afficher la carte de suivi.")
+    # Aucune donnée TIFF téléversée : affichage d'une carte par défaut avec les routes
+    all_lons = []
+    all_lats = []
+    for route in routes_ci:
+        for lon, lat in route["coords"]:
+            all_lons.append(lon)
+            all_lats.append(lat)
+    if all_lons and all_lats:
+        min_lon, max_lon = min(all_lons), max(all_lons)
+        min_lat, max_lat = min(all_lats), max(all_lats)
+        # Création d'un objet "bounds" simple
+        class Bounds:
+            pass
+        route_bounds = Bounds()
+        route_bounds.left = min_lon
+        route_bounds.right = max_lon
+        route_bounds.bottom = min_lat
+        route_bounds.top = max_lat
+        center_lat_default = (min_lat + max_lat) / 2
+        center_lon_default = (min_lon + max_lon) / 2
+        m_default = create_map(center_lat_default, center_lon_default, route_bounds, display_path="",
+                               marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True,
+                               add_draw_tool=False)
+        st_folium(m_default, width=700, height=500, key="folium_map_default")
+    else:
+        st.info("Aucune donnée de route disponible pour afficher la carte de suivi.")
 
 st.markdown("### Récapitulatif global des défauts")
 if global_markers:
