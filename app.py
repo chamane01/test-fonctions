@@ -391,7 +391,6 @@ global_markers = []
 for markers in st.session_state.markers_by_pair.values():
     global_markers.extend(markers)
 
-# Affichage de la carte de suivi
 if st.session_state.pairs:
     # Utilisation de la première paire comme référence pour la carte PETIT
     first_pair = st.session_state.pairs[0]
@@ -406,7 +405,6 @@ if st.session_state.pairs:
     if petit_bounds:
         center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
         center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
-        # Pour la carte PETIT, l'overlay TIFF est rendu transparent
         m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds,
                              display_path_petit if 'display_path_petit' in locals() else "",
                              marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True)
@@ -414,9 +412,31 @@ if st.session_state.pairs:
     else:
         st.info("Impossible d'afficher la carte de suivi à cause d'un problème avec le TIFF PETIT.")
 else:
-    st.info("Aucune donnée TIFF disponible pour afficher la carte de suivi. Affichage d'une carte par défaut.")
-    m_default = folium.Map(location=[0, 0], zoom_start=2)
-    st_folium(m_default, width=700, height=500, key="folium_map_default")
+    # Aucune donnée TIFF téléversée : on affiche une carte par défaut avec les routes
+    all_lons = []
+    all_lats = []
+    for route in routes_ci:
+        for lon, lat in route["coords"]:
+            all_lons.append(lon)
+            all_lats.append(lat)
+    if all_lons and all_lats:
+        min_lon, max_lon = min(all_lons), max(all_lons)
+        min_lat, max_lat = min(all_lats), max(all_lats)
+        # Création d'un objet "bounds" simple
+        class Bounds:
+            pass
+        route_bounds = Bounds()
+        route_bounds.left = min_lon
+        route_bounds.right = max_lon
+        route_bounds.bottom = min_lat
+        route_bounds.top = max_lat
+        center_lat_default = (min_lat + max_lat) / 2
+        center_lon_default = (min_lon + max_lon) / 2
+        m_default = create_map(center_lat_default, center_lon_default, route_bounds, display_path="",
+                               marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True)
+        st_folium(m_default, width=700, height=500, key="folium_map_default")
+    else:
+        st.info("Aucune donnée de route disponible pour afficher la carte de suivi.")
 
 st.markdown("### Récapitulatif global des défauts")
 if global_markers:
