@@ -363,11 +363,12 @@ with tab_manuel:
 
             ##############################################
             # Nettoyage des fichiers temporaires (pour cette paire)
+            # NB : Ce bloc est commenté pour que les fichiers restent disponibles pour la carte de suivi.
             ##############################################
-            for file_path in [current_pair["grand"]["temp_original"], current_pair["petit"]["temp_original"],
-                              reproj_grand_path, reproj_petit_path, temp_png_grand, temp_png_petit]:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
+            # for file_path in [current_pair["grand"]["temp_original"], current_pair["petit"]["temp_original"],
+            #                   reproj_grand_path, reproj_petit_path, temp_png_grand, temp_png_petit]:
+            #     if os.path.exists(file_path):
+            #         os.remove(file_path)
     else:
         st.info("Veuillez téléverser les fichiers TIFF pour lancer la détection manuelle.")
 
@@ -392,16 +393,26 @@ for markers in st.session_state.markers_by_pair.values():
 
 # Affichage de la carte de suivi
 if st.session_state.pairs:
-    # On utilise ici la première paire comme référence pour la carte PETIT
+    # Utilisation de la première paire comme référence pour la carte PETIT
     first_pair = st.session_state.pairs[0]
-    with rasterio.open(first_pair["petit"]["path"]) as src:
-        petit_bounds = src.bounds
-    center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
-    center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
-    # Pour la carte PETIT, l'overlay TIFF est rendu transparent
-    m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds, display_path_petit if 'display_path_petit' in locals() else "",
-                          marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True)
-    st_folium(m_petit, width=700, height=500, key="folium_map_petit")
+    try:
+        with rasterio.open(first_pair["petit"]["path"]) as src:
+            petit_bounds = src.bounds
+    except Exception as e:
+        st.error("Erreur lors de l'ouverture du TIFF PETIT pour la carte de suivi.")
+        st.error(e)
+        petit_bounds = None
+
+    if petit_bounds:
+        center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
+        center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
+        # Pour la carte PETIT, l'overlay TIFF est rendu transparent
+        m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds,
+                             display_path_petit if 'display_path_petit' in locals() else "",
+                             marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True)
+        st_folium(m_petit, width=700, height=500, key="folium_map_petit")
+    else:
+        st.info("Impossible d'afficher la carte de suivi à cause d'un problème avec le TIFF PETIT.")
 else:
     st.info("Aucune donnée TIFF disponible pour afficher la carte de suivi. Affichage d'une carte par défaut.")
     m_default = folium.Map(location=[0, 0], zoom_start=2)
