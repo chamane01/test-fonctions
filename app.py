@@ -163,7 +163,7 @@ if "markers_by_pair" not in st.session_state:
 ###############################################
 # UPLOAD MULTIPLE DES FICHIERS
 ###############################################
-st.title("Affichage par paire de TIFF avec jumelage par centre, navigation et récapitulatif global")
+st.title("detection manuelle")
 
 uploaded_files_grand = st.file_uploader("TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True)
 uploaded_files_petit = st.file_uploader("TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True)
