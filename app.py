@@ -15,19 +15,20 @@ import matplotlib.pyplot as plt
 # Paramètres et dictionnaires
 ###############################
 class_color = {
-    "Classe 1": "#FF0000",
-    "Classe 2": "#00FF00",
-    "Classe 3": "#0000FF",
-    "Classe 4": "#FFFF00",
-    "Classe 5": "#FF00FF",
-    "Classe 6": "#00FFFF",
-    "Classe 7": "#FFA500",
-    "Classe 8": "#800080",
-    "Classe 9": "#008000",
-    "Classe 10": "#000080",
-    "Classe 11": "#FFC0CB",
-    "Classe 12": "#A52A2A",
-    "Classe 13": "#808080"
+    "deformations ornierage": "#FF0000",
+    "fissurations": "#00FF00",
+    "Faiençage": "#0000FF",
+    "fissure de retrait": "#FFFF00",
+    "fissure anarchique": "#FF00FF",
+    "reparations": "#00FFFF",
+    "nid de poule": "#FFA500",
+    "arrachements": "#800080",
+    "fluage": "#008000",
+    "denivellement accotement": "#000080",
+    "chaussée detruite": "#FFC0CB",
+    "envahissement vegetations": "#A52A2A",
+    "assainissements": "#808080",
+    "depot de terre": "#8B4513"
 }
 gravity_sizes = {1: 5, 2: 10, 3: 15}
 
@@ -116,9 +117,9 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None, h
     if marker_data:
         for marker in marker_data:
             lat = marker["lat"]
-            lon = marker["lon"]
-            color = marker.get("color", "#000000")
-            radius = marker.get("radius", 5)
+            lon = marker["long"]
+            color = class_color.get(marker["classe"], "#000000")
+            radius = gravity_sizes.get(marker["gravite"], 5)
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=radius,
@@ -224,34 +225,25 @@ if uploaded_files_grand and uploaded_files_petit:
         display_path_grand = temp_png_grand
 
         reproj_petit_path = current_pair["petit"]["path"]
-        apply_gradient = st.checkbox("Appliquer un gradient de couleur pour le TIFF PETIT", value=False)
-        if apply_gradient:
-            temp_png_petit = f"colored_{unique_id}.png"
-            apply_color_gradient(reproj_petit_path, temp_png_petit)
-        else:
-            with rasterio.open(reproj_petit_path) as src:
-                petit_bounds = src.bounds
-                data = src.read()
-                if data.shape[0] >= 3:
-                    r = normalize_data(data[0])
-                    g = normalize_data(data[1])
-                    b = normalize_data(data[2])
-                    rgb_norm = np.dstack((r, g, b))
-                    image_petit = Image.fromarray(rgb_norm)
-                else:
-                    band = data[0]
-                    band_norm = normalize_data(band)
-                    image_petit = Image.fromarray(band_norm, mode="L")
-            temp_png_petit = f"converted_{unique_id}.png"
-            image_petit.save(temp_png_petit)
-        display_path_petit = temp_png_petit
-
-        with rasterio.open(reproj_grand_path) as src:
-            grand_bounds = src.bounds
         with rasterio.open(reproj_petit_path) as src:
             petit_bounds = src.bounds
-        st.write("Bornes TIFF GRAND (EPSG:4326) :", grand_bounds)
-        st.write("Bornes TIFF PETIT (EPSG:4326) :", petit_bounds)
+            data = src.read()
+            if data.shape[0] >= 3:
+                r = normalize_data(data[0])
+                g = normalize_data(data[1])
+                b = normalize_data(data[2])
+                rgb_norm = np.dstack((r, g, b))
+                image_petit = Image.fromarray(rgb_norm)
+            else:
+                band = data[0]
+                band_norm = normalize_data(band)
+                image_petit = Image.fromarray(band_norm, mode="L")
+        temp_png_petit = f"converted_{unique_id}.png"
+        image_petit.save(temp_png_petit)
+        display_path_petit = temp_png_petit
+
+        # Masquage de l'affichage des bornes TIFF GRAND et TIFF PETIT
+        # (Les lignes d'affichage des bornes ont été supprimées)
 
         center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
         center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
@@ -299,22 +291,34 @@ if uploaded_files_grand and uploaded_files_petit:
                     else:
                         new_lon = new_lat = None
                         utm_coords_petit = "Inconnues"
-                    st.markdown(f"**Marqueur {global_count + i + 1}**")
+                    st.markdown(f"**ID {global_count + i + 1}**")
                     col1, col2 = st.columns(2)
                     with col1:
-                        selected_class = st.selectbox("Classe", [f"Classe {j}" for j in range(1, 14)], key=f"class_{current_index}_{i}")
+                        selected_class = st.selectbox("Classe", [
+                            "deformations ornierage",
+                            "fissurations",
+                            "Faiençage",
+                            "fissure de retrait",
+                            "fissure anarchique",
+                            "reparations",
+                            "nid de poule",
+                            "arrachements",
+                            "fluage",
+                            "denivellement accotement",
+                            "chaussée detruite",
+                            "envahissement vegetations",
+                            "assainissements",
+                            "depot de terre"
+                        ], key=f"class_{current_index}_{i}")
                     with col2:
                         selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{current_index}_{i}")
                     new_markers.append({
-                        "Marqueur": global_count + i + 1,
-                        "Coordonnées (EPSG:4326)": (round(new_lon, 4), round(new_lat, 4)) if new_lon and new_lat else "Inconnues",
-                        "Coordonnées UTM": utm_coords_petit,
-                        "Classe": selected_class,
-                        "Gravité": selected_gravity,
+                        "ID": global_count + i + 1,
+                        "classe": selected_class,
+                        "gravite": selected_gravity,
+                        "coordonnees UTM": utm_coords_petit,
                         "lat": new_lat,
-                        "lon": new_lon,
-                        "color": class_color.get(selected_class, "#000000"),
-                        "radius": gravity_sizes.get(selected_gravity, 5)
+                        "long": new_lon
                     })
             st.session_state.markers_by_pair[current_index] = new_markers
         else:
