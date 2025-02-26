@@ -126,9 +126,10 @@ def normalize_data(data):
 
 def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
                hide_osm=False, tiff_opacity=1, tiff_show=True, tiff_control=True,
-               draw_routes=True):
+               draw_routes=True, add_draw_tool=True):
     """
     Création de la carte avec option d'afficher ou non les routes.
+    Le paramètre add_draw_tool contrôle l'ajout de l'outil de dessin (marqueurs).
     """
     if hide_osm:
         m = folium.Map(location=[center_lat, center_lon], tiles=None)
@@ -147,18 +148,19 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
                 opacity=0.7,
                 tooltip=route["nom"]
             ).add_to(m)
-    draw = Draw(
-        draw_options={
-            'marker': True,
-            'polyline': False,
-            'polygon': False,
-            'rectangle': False,
-            'circle': False,
-            'circlemarker': False,
-        },
-        edit_options={'edit': True}
-    )
-    draw.add_to(m)
+    if add_draw_tool:
+        draw = Draw(
+            draw_options={
+                'marker': True,
+                'polyline': False,
+                'polygon': False,
+                'rectangle': False,
+                'circle': False,
+                'circlemarker': False,
+            },
+            edit_options={'edit': True}
+        )
+        draw.add_to(m)
     m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
     folium.LayerControl().add_to(m)
     if marker_data:
@@ -303,12 +305,12 @@ with tab_manuel:
             utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"
 
             ##############################################
-            # Carte 1 : TIFF GRAND (OSM masqué) pour dessin des marqueurs (routes non affichées)
+            # Carte de dessin : TIFF GRAND (OSM masqué) pour dessin des marqueurs (routes non affichées)
             ##############################################
             st.subheader("Carte de dessin")
             map_placeholder_grand = st.empty()
             m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
-                                 marker_data=None, hide_osm=True, draw_routes=False)
+                                 marker_data=None, hide_osm=True, draw_routes=False, add_draw_tool=True)
             result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
 
             ##############################################
@@ -355,7 +357,7 @@ with tab_manuel:
                             "lat": new_lat,
                             "long": new_lon,
                             "routes": assigned_route,
-                            "detection": "Manuelle"  # Indique que ce marqueur a été placé manuellement
+                            "detection": "Manuelle"  # Marqueur placé manuellement
                         })
                 st.session_state.markers_by_pair[current_index] = new_markers
             else:
@@ -363,7 +365,7 @@ with tab_manuel:
 
             ##############################################
             # Nettoyage des fichiers temporaires (pour cette paire)
-            # NB : Ce bloc est commenté pour que les fichiers restent disponibles pour la carte de suivi.
+            # NB : Bloc commenté pour conserver les fichiers pour la carte de suivi.
             ##############################################
             # for file_path in [current_pair["grand"]["temp_original"], current_pair["petit"]["temp_original"],
             #                   reproj_grand_path, reproj_petit_path, temp_png_grand, temp_png_petit]:
@@ -378,7 +380,6 @@ with tab_auto:
     if auto_uploaded_images:
         st.success("Les images ont été bien téléversées.")
         # La logique de détection automatique sera implémentée ultérieurement.
-        # Par exemple, ici vous pourriez analyser les images et ajouter des marqueurs avec "detection": "Automatique"
     else:
         st.info("Aucune image téléversée pour la détection automatique.")
 
@@ -405,14 +406,16 @@ if st.session_state.pairs:
     if petit_bounds:
         center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
         center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
+        # Pour la carte de suivi, on n'ajoute pas l'outil de dessin (add_draw_tool=False)
         m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds,
                              display_path_petit if 'display_path_petit' in locals() else "",
-                             marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True)
+                             marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True,
+                             add_draw_tool=False)
         st_folium(m_petit, width=700, height=500, key="folium_map_petit")
     else:
         st.info("Impossible d'afficher la carte de suivi à cause d'un problème avec le TIFF PETIT.")
 else:
-    # Aucune donnée TIFF téléversée : on affiche une carte par défaut avec les routes
+    # Aucune donnée TIFF téléversée : affichage d'une carte par défaut avec les routes
     all_lons = []
     all_lats = []
     for route in routes_ci:
@@ -433,7 +436,8 @@ else:
         center_lat_default = (min_lat + max_lat) / 2
         center_lon_default = (min_lon + max_lon) / 2
         m_default = create_map(center_lat_default, center_lon_default, route_bounds, display_path="",
-                               marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True)
+                               marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True,
+                               add_draw_tool=False)
         st_folium(m_default, width=700, height=500, key="folium_map_default")
     else:
         st.info("Aucune donnée de route disponible pour afficher la carte de suivi.")
