@@ -206,7 +206,7 @@ if uploaded_files:
         st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
         
         # -------------------------------
-        # configuration 1 : Export groupé en GeoTIFF (facteur de redimensionnement fixé à 1/5)
+        # configuration 1 : Export groupé en GeoTIFF avec facteur de redimensionnement -5 (scaling_factor = 1/5)
         if st.button("configuration 1"):
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -230,7 +230,7 @@ if uploaded_files:
                         utm_center=info["utm"],
                         utm_crs=info["utm_crs"],
                         rotation_angle=-flight_angle_i,
-                        scaling_factor=1/5
+                        scaling_factor=1/5  # correspond à un facteur -5
                     )
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
                     zip_file.writestr(output_filename, tiff_bytes)
@@ -243,7 +243,7 @@ if uploaded_files:
             )
         
         # -------------------------------
-        # configuration 2 : Export groupé en GeoTIFF x2 (facteur de redimensionnement 1/3 et résolution multipliée par 2)
+        # configuration 2 : Export groupé en GeoTIFF x2 avec facteur de redimensionnement -3 (scaling_factor = 1/3 et résolution multipliée par 2)
         if st.button("configuration 2"):
             zip_buffer_geotiff_x2 = io.BytesIO()
             with zipfile.ZipFile(zip_buffer_geotiff_x2, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -267,7 +267,7 @@ if uploaded_files:
                         utm_center=info["utm"],
                         utm_crs=info["utm_crs"],
                         rotation_angle=-flight_angle_i,
-                        scaling_factor=1/3
+                        scaling_factor=1/3  # correspond à un facteur -3
                     )
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
                     zip_file.writestr(output_filename, tiff_bytes_x2)
@@ -280,7 +280,7 @@ if uploaded_files:
             )
         
         # -------------------------------
-        # configuration images : Export groupé en JPEG avec métadonnées de cadre (facteur de redimensionnement fixé à 1)
+        # configuration images : Export groupé en JPEG avec métadonnées de cadre avec facteur de redimensionnement 0 (pas de redimensionnement, scaling_factor = 1)
         if st.button("configuration images"):
             zip_buffer_jpeg = io.BytesIO()
             with zipfile.ZipFile(zip_buffer_jpeg, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -300,7 +300,7 @@ if uploaded_files:
                         flight_angle_i = 0
                     rotation_angle_i = -flight_angle_i
                     
-                    # Pour configuration images, aucun redimensionnement (scaling_factor = 1)
+                    # Pour configuration images, pas de redimensionnement (scaling_factor = 1)
                     scaling_factor = 1
                     img = Image.open(io.BytesIO(info["data"]))
                     img = ImageOps.exif_transpose(img)
