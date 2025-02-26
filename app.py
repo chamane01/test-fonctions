@@ -209,6 +209,8 @@ if "pairs" not in st.session_state:
     st.session_state.pairs = []  # Liste des paires { "grand":..., "petit":... }
 if "markers_by_pair" not in st.session_state:
     st.session_state.markers_by_pair = {}  # Marqueurs par indice de paire
+if "detection_manuelle_active" not in st.session_state:
+    st.session_state.detection_manuelle_active = False
 
 ##############################################
 # Interface en onglets pour détection automatique et manuelle
@@ -225,7 +227,7 @@ with tab_auto:
     if st.button("Lancer la détection automatique"):
         if auto_uploaded_images:
             st.success(f"Détection automatique lancée pour {len(auto_uploaded_images)} image(s).")
-            # La logique de détection automatique sera implémentée ici.
+            # Ici, la logique de détection automatique sera implémentée
         else:
             st.info("Aucune image téléversée pour lancer la détection automatique.")
     else:
@@ -237,11 +239,13 @@ with tab_manuel:
     uploaded_files_grand = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_grand")
     uploaded_files_petit = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_petit")
     
+    # Lancement de la détection manuelle
     if st.button("Lancer la détection manuelle"):
         if uploaded_files_grand and uploaded_files_petit:
             if len(uploaded_files_grand) != len(uploaded_files_petit):
                 st.error("Le nombre de fichiers TIFF GRAND et TIFF PETIT doit être identique.")
             else:
+                st.session_state.detection_manuelle_active = True
                 grand_list = []
                 petit_list = []
                 for file in uploaded_files_grand:
@@ -324,15 +328,15 @@ with tab_manuel:
                 # Carte de dessin : TIFF GRAND (OSM masqué) pour dessin des marqueurs (routes non affichées)
                 ##############################################
                 st.subheader("Carte de dessin")
-                map_placeholder_grand = st.empty()
                 m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
                                      marker_data=None, hide_osm=True, draw_routes=False, add_draw_tool=True)
-                result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
+                st_folium(m_grand, width=700, height=500, key="folium_map_grand")
 
                 ##############################################
                 # Extraction et classification des marqueurs pour la paire courante
                 ##############################################
                 features = []
+                result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand_result")
                 all_drawings = result_grand.get("all_drawings")
                 if all_drawings:
                     if isinstance(all_drawings, dict) and "features" in all_drawings:
@@ -373,7 +377,7 @@ with tab_manuel:
                                 "lat": new_lat,
                                 "long": new_lon,
                                 "routes": assigned_route,
-                                "detection": "Manuelle",  # Marqueur placé manuellement
+                                "detection": "Manuelle",
                                 "couleur": class_color.get(selected_class, "#000000"),
                                 "radius": gravity_sizes.get(selected_gravity, 5)
                             })
@@ -382,7 +386,7 @@ with tab_manuel:
                     st.write("Aucun marqueur n'a été détecté.")
 
                 ##############################################
-                # Nettoyage des fichiers temporaires (pour cette paire)
+                # (Optionnel) Nettoyage des fichiers temporaires pour cette paire
                 ##############################################
                 # for file_path in [current_pair["grand"]["temp_original"], current_pair["petit"]["temp_original"],
                 #                   reproj_grand_path, reproj_petit_path, temp_png_grand, temp_png_petit]:
@@ -393,10 +397,27 @@ with tab_manuel:
     else:
         st.info("Téléversez les fichiers TIFF pour lancer la détection manuelle.")
 
+    # Si la détection manuelle a été lancée précédemment, on affiche la carte de dessin de façon persistante
+    if st.session_state.detection_manuelle_active:
+        st.subheader("Carte de dessin (affichage persistant)")
+        # Pour la persistance, on utilise la dernière paire traitée
+        if st.session_state.pairs:
+            current_index = st.session_state.current_pair_index
+            current_pair = st.session_state.pairs[current_index]
+            reproj_grand_path = current_pair["grand"]["path"]
+            with rasterio.open(reproj_grand_path) as src:
+                grand_bounds = src.bounds
+            center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
+            center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
+            m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
+                                 marker_data=None, hide_osm=True, draw_routes=False, add_draw_tool=True)
+            st_folium(m_grand, width=700, height=500, key="folium_map_grand_persistant")
+        else:
+            st.info("Aucune paire de TIFF n'est disponible pour afficher la carte persistante.")
+
 ##############################################
 # Section commune : Carte de suivi et récapitulatif global
 ##############################################
-
 st.subheader("Carte de suivi")
 global_markers = []
 for markers in st.session_state.markers_by_pair.values():
@@ -416,7 +437,6 @@ if st.session_state.pairs:
     if petit_bounds:
         center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
         center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
-        # Pour la carte de suivi, on n'ajoute pas l'outil de dessin (add_draw_tool=False)
         m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds,
                              display_path_petit if 'display_path_petit' in locals() else "",
                              marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True,
@@ -425,7 +445,7 @@ if st.session_state.pairs:
     else:
         st.info("Impossible d'afficher la carte de suivi à cause d'un problème avec le TIFF PETIT.")
 else:
-    # Aucune donnée TIFF téléversée : affichage d'une carte par défaut avec les routes
+    # Affichage d'une carte par défaut avec les routes en cas de non téléversement de TIFF
     all_lons = []
     all_lats = []
     for route in routes_ci:
@@ -435,7 +455,6 @@ else:
     if all_lons and all_lats:
         min_lon, max_lon = min(all_lons), max(all_lons)
         min_lat, max_lat = min(all_lats), max(all_lats)
-        # Création d'un objet "bounds" simple
         class Bounds:
             pass
         route_bounds = Bounds()
