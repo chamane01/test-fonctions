@@ -13,9 +13,9 @@ import matplotlib.pyplot as plt
 import json
 from shapely.geometry import Point, LineString
 
-###############################
+###############################################
 # Paramètres et dictionnaires
-###############################
+###############################################
 class_color = {
     "deformations ornierage": "#FF0000",
     "fissurations": "#00FF00",
@@ -61,12 +61,8 @@ def assign_route_to_marker(lat, lon, routes):
         if distance < min_distance:
             min_distance = distance
             closest_route = route["nom"]
-    # Seuil en degrés (à ajuster selon vos données)
-    threshold = 0.01  
-    if min_distance <= threshold:
-        return closest_route
-    else:
-        return "Route inconnue"
+    threshold = 0.01  # Seuil en degrés (à ajuster selon vos données)
+    return closest_route if min_distance <= threshold else "Route inconnue"
 
 ##############################################
 # Fonctions de reprojection et d'affichage
@@ -138,9 +134,9 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
         m = folium.Map(location=[center_lat, center_lon], tiles=None)
     else:
         m = folium.Map(location=[center_lat, center_lon])
-    add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=tiff_opacity,
-                      show=tiff_show, control=tiff_control)
-    # Affichage conditionnel des routes
+    if display_path:
+        add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=tiff_opacity,
+                          show=tiff_show, control=tiff_control)
     if draw_routes:
         for route in routes_ci:
             poly_coords = [(lat, lon) for lon, lat in route["coords"]]
@@ -178,7 +174,7 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
                 fill=True,
                 fill_color=color,
                 fill_opacity=0.7,
-                tooltip=f"{marker['classe']} (Gravité {marker['gravite']}) - Route : {marker.get('routes', 'Route inconnue')}"
+                tooltip=f"{marker['classe']} (Gravité {marker['gravite']}) - Route : {marker.get('routes', 'Route inconnue')} - Détection: {marker.get('detection', 'Inconnue')}"
             ).add_to(m)
     return m
 
@@ -213,202 +209,206 @@ if "markers_by_pair" not in st.session_state:
     st.session_state.markers_by_pair = {}  # Marqueurs par indice de paire
 
 ##############################################
-# UPLOAD MULTIPLE DES FICHIERS
+# Interface en onglets pour détection manuelle et automatique
 ##############################################
-st.title("Detection Manuelle")
+st.title("Détection d'anomalies")
 
-uploaded_files_grand = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True)
-uploaded_files_petit = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True)
+tab_manuel, tab_auto = st.tabs(["Détection Manuelle", "Détection Automatique"])
 
-if uploaded_files_grand and uploaded_files_petit:
-    if len(uploaded_files_grand) != len(uploaded_files_petit):
-        st.error("Le nombre de fichiers TIFF GRAND et TIFF PETIT doit être identique.")
+with tab_manuel:
+    st.header("Détection Manuelle")
+    uploaded_files_grand = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_grand")
+    uploaded_files_petit = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_petit")
+    
+    if uploaded_files_grand and uploaded_files_petit:
+        if len(uploaded_files_grand) != len(uploaded_files_petit):
+            st.error("Le nombre de fichiers TIFF GRAND et TIFF PETIT doit être identique.")
+        else:
+            grand_list = []
+            petit_list = []
+            for file in uploaded_files_grand:
+                file.seek(0)
+                grand_list.append(get_reprojected_and_center(file, "grand"))
+            for file in uploaded_files_petit:
+                file.seek(0)
+                petit_list.append(get_reprojected_and_center(file, "petit"))
+            grand_list = sorted(grand_list, key=lambda d: d["center"])
+            petit_list = sorted(petit_list, key=lambda d: d["center"])
+            pair_count = len(grand_list)
+            pairs = []
+            for i in range(pair_count):
+                pairs.append({"grand": grand_list[i], "petit": petit_list[i]})
+            st.session_state.pairs = pairs
+
+            ##############################################
+            # Navigation entre paires
+            ##############################################
+            col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
+            prev_pressed = col_nav1.button("← Précédent")
+            next_pressed = col_nav3.button("Suivant →")
+            if prev_pressed and st.session_state.current_pair_index > 0:
+                st.session_state.current_pair_index -= 1
+            if next_pressed and st.session_state.current_pair_index < pair_count - 1:
+                st.session_state.current_pair_index += 1
+            st.write(f"Affichage de la paire {st.session_state.current_pair_index + 1} sur {pair_count}")
+            current_index = st.session_state.current_pair_index
+            current_pair = st.session_state.pairs[current_index]
+
+            ##############################################
+            # Traitement de la paire courante : génération des PNG
+            ##############################################
+            reproj_grand_path = current_pair["grand"]["path"]
+            with rasterio.open(reproj_grand_path) as src:
+                grand_bounds = src.bounds
+                data = src.read()
+                if data.shape[0] >= 3:
+                    r = normalize_data(data[0])
+                    g = normalize_data(data[1])
+                    b = normalize_data(data[2])
+                    rgb_norm = np.dstack((r, g, b))
+                    image_grand = Image.fromarray(rgb_norm)
+                else:
+                    band = data[0]
+                    band_norm = normalize_data(band)
+                    image_grand = Image.fromarray(band_norm, mode="L")
+            unique_id = str(uuid.uuid4())[:8]
+            temp_png_grand = f"converted_grand_{unique_id}.png"
+            image_grand.save(temp_png_grand)
+            display_path_grand = temp_png_grand
+
+            reproj_petit_path = current_pair["petit"]["path"]
+            with rasterio.open(reproj_petit_path) as src:
+                petit_bounds = src.bounds
+                data = src.read()
+                if data.shape[0] >= 3:
+                    r = normalize_data(data[0])
+                    g = normalize_data(data[1])
+                    b = normalize_data(data[2])
+                    rgb_norm = np.dstack((r, g, b))
+                    image_petit = Image.fromarray(rgb_norm)
+                else:
+                    band = data[0]
+                    band_norm = normalize_data(band)
+                    image_petit = Image.fromarray(band_norm, mode="L")
+            temp_png_petit = f"converted_{unique_id}.png"
+            image_petit.save(temp_png_petit)
+            display_path_petit = temp_png_petit
+
+            center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
+            center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
+            utm_zone_grand = int((center_lon_grand + 180) / 6) + 1
+            center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
+            center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
+            utm_zone_petit = int((center_lon_petit + 180) / 6) + 1
+            utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"
+
+            ##############################################
+            # Carte 1 : TIFF GRAND (OSM masqué) pour dessin des marqueurs (routes non affichées)
+            ##############################################
+            st.subheader("Carte de dessin")
+            map_placeholder_grand = st.empty()
+            m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
+                                 marker_data=None, hide_osm=True, draw_routes=False)
+            result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
+
+            ##############################################
+            # Extraction et classification des marqueurs pour la paire courante
+            ##############################################
+            features = []
+            all_drawings = result_grand.get("all_drawings")
+            if all_drawings:
+                if isinstance(all_drawings, dict) and "features" in all_drawings:
+                    features = all_drawings.get("features", [])
+                elif isinstance(all_drawings, list):
+                    features = all_drawings
+
+            global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values())
+            new_markers = []
+            if features:
+                st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité :")
+                for i, feature in enumerate(features):
+                    if feature.get("geometry", {}).get("type") == "Point":
+                        coords = feature.get("geometry", {}).get("coordinates")
+                        if coords and isinstance(coords, list) and len(coords) >= 2:
+                            lon, lat = coords[0], coords[1]
+                            percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
+                            percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
+                            new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
+                            new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
+                            utm_x_petit, utm_y_petit = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
+                            utm_coords_petit = (round(utm_x_petit[0], 2), round(utm_y_petit[0], 2))
+                        else:
+                            new_lon = new_lat = None
+                            utm_coords_petit = "Inconnues"
+                        assigned_route = assign_route_to_marker(new_lat, new_lon, routes_ci) if new_lat and new_lon else "Route inconnue"
+                        st.markdown(f"**ID {global_count + i + 1}**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            selected_class = st.selectbox("Classe", list(class_color.keys()), key=f"class_{current_index}_{i}")
+                        with col2:
+                            selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{current_index}_{i}")
+                        new_markers.append({
+                            "ID": global_count + i + 1,
+                            "classe": selected_class,
+                            "gravite": selected_gravity,
+                            "coordonnees UTM": utm_coords_petit,
+                            "lat": new_lat,
+                            "long": new_lon,
+                            "routes": assigned_route,
+                            "detection": "Manuelle"  # Indique que ce marqueur a été placé manuellement
+                        })
+                st.session_state.markers_by_pair[current_index] = new_markers
+            else:
+                st.write("Aucun marqueur n'a été détecté.")
+
+            ##############################################
+            # Nettoyage des fichiers temporaires (pour cette paire)
+            ##############################################
+            for file_path in [current_pair["grand"]["temp_original"], current_pair["petit"]["temp_original"],
+                              reproj_grand_path, reproj_petit_path, temp_png_grand, temp_png_petit]:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
     else:
-        grand_list = []
-        petit_list = []
-        for file in uploaded_files_grand:
-            file.seek(0)
-            grand_list.append(get_reprojected_and_center(file, "grand"))
-        for file in uploaded_files_petit:
-            file.seek(0)
-            petit_list.append(get_reprojected_and_center(file, "petit"))
-        grand_list = sorted(grand_list, key=lambda d: d["center"])
-        petit_list = sorted(petit_list, key=lambda d: d["center"])
-        pair_count = len(grand_list)
-        pairs = []
-        for i in range(pair_count):
-            pairs.append({"grand": grand_list[i], "petit": petit_list[i]})
-        st.session_state.pairs = pairs
+        st.info("Veuillez téléverser les fichiers TIFF pour lancer la détection manuelle.")
 
-        ##############################################
-        # Navigation entre paires
-        ##############################################
-        col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
-        prev_pressed = col_nav1.button("← Précédent")
-        next_pressed = col_nav3.button("Suivant →")
-        if prev_pressed and st.session_state.current_pair_index > 0:
-            st.session_state.current_pair_index -= 1
-        if next_pressed and st.session_state.current_pair_index < pair_count - 1:
-            st.session_state.current_pair_index += 1
-        st.write(f"Affichage de la paire {st.session_state.current_pair_index + 1} sur {pair_count}")
-        current_index = st.session_state.current_pair_index
-        current_pair = st.session_state.pairs[current_index]
+with tab_auto:
+    st.header("Détection Automatique")
+    auto_uploaded_images = st.file_uploader("Téléversez vos images JPEG ou PNG", type=["jpeg", "jpg", "png"], accept_multiple_files=True, key="auto_images")
+    if auto_uploaded_images:
+        st.success("Les images ont été bien téléversées.")
+        # La logique de détection automatique sera implémentée ultérieurement.
+        # Par exemple, ici vous pourriez analyser les images et ajouter des marqueurs avec "detection": "Automatique"
+    else:
+        st.info("Aucune image téléversée pour la détection automatique.")
 
-        ##############################################
-        # Traitement de la paire courante : génération des PNG
-        ##############################################
-        reproj_grand_path = current_pair["grand"]["path"]
-        with rasterio.open(reproj_grand_path) as src:
-            grand_bounds = src.bounds
-            data = src.read()
-            if data.shape[0] >= 3:
-                r = normalize_data(data[0])
-                g = normalize_data(data[1])
-                b = normalize_data(data[2])
-                rgb_norm = np.dstack((r, g, b))
-                image_grand = Image.fromarray(rgb_norm)
-            else:
-                band = data[0]
-                band_norm = normalize_data(band)
-                image_grand = Image.fromarray(band_norm, mode="L")
-        unique_id = str(uuid.uuid4())[:8]
-        temp_png_grand = f"converted_grand_{unique_id}.png"
-        image_grand.save(temp_png_grand)
-        display_path_grand = temp_png_grand
+##############################################
+# Section commune : Carte de suivi et récapitulatif global
+##############################################
 
-        reproj_petit_path = current_pair["petit"]["path"]
-        with rasterio.open(reproj_petit_path) as src:
-            petit_bounds = src.bounds
-            data = src.read()
-            if data.shape[0] >= 3:
-                r = normalize_data(data[0])
-                g = normalize_data(data[1])
-                b = normalize_data(data[2])
-                rgb_norm = np.dstack((r, g, b))
-                image_petit = Image.fromarray(rgb_norm)
-            else:
-                band = data[0]
-                band_norm = normalize_data(band)
-                image_petit = Image.fromarray(band_norm, mode="L")
-        temp_png_petit = f"converted_{unique_id}.png"
-        image_petit.save(temp_png_petit)
-        display_path_petit = temp_png_petit
+st.subheader("Carte de suivi")
+global_markers = []
+for markers in st.session_state.markers_by_pair.values():
+    global_markers.extend(markers)
 
-        # Les bornes ne sont pas affichées dans Streamlit
+# Affichage de la carte de suivi
+if st.session_state.pairs:
+    # On utilise ici la première paire comme référence pour la carte PETIT
+    first_pair = st.session_state.pairs[0]
+    with rasterio.open(first_pair["petit"]["path"]) as src:
+        petit_bounds = src.bounds
+    center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
+    center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
+    # Pour la carte PETIT, l'overlay TIFF est rendu transparent
+    m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds, display_path_petit if 'display_path_petit' in locals() else "",
+                          marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True)
+    st_folium(m_petit, width=700, height=500, key="folium_map_petit")
+else:
+    st.info("Aucune donnée TIFF disponible pour afficher la carte de suivi. Affichage d'une carte par défaut.")
+    m_default = folium.Map(location=[0, 0], zoom_start=2)
+    st_folium(m_default, width=700, height=500, key="folium_map_default")
 
-        center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
-        center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
-        utm_zone_grand = int((center_lon_grand + 180) / 6) + 1
-        utm_crs_grand = f"EPSG:326{utm_zone_grand:02d}"
-        center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
-        center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
-        utm_zone_petit = int((center_lon_petit + 180) / 6) + 1
-        utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"
-
-        ##############################################
-        # Carte 1 : TIFF GRAND (OSM masqué) pour dessin des marqueurs (routes non affichées)
-        ##############################################
-        st.subheader("Carte de dessin")
-        map_placeholder_grand = st.empty()
-        m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
-                             marker_data=None, hide_osm=True, draw_routes=False)
-        result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
-
-        ##############################################
-        # Extraction et classification des marqueurs pour la paire courante
-        ##############################################
-        features = []
-        all_drawings = result_grand.get("all_drawings")
-        if all_drawings:
-            if isinstance(all_drawings, dict) and "features" in all_drawings:
-                features = all_drawings.get("features", [])
-            elif isinstance(all_drawings, list):
-                features = all_drawings
-
-        global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values())
-        new_markers = []
-        if features:
-            st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité :")
-            for i, feature in enumerate(features):
-                if feature.get("geometry", {}).get("type") == "Point":
-                    coords = feature.get("geometry", {}).get("coordinates")
-                    if coords and isinstance(coords, list) and len(coords) >= 2:
-                        lon, lat = coords[0], coords[1]
-                        percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
-                        percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
-                        new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
-                        new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
-                        utm_x_petit, utm_y_petit = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
-                        utm_coords_petit = (round(utm_x_petit[0], 2), round(utm_y_petit[0], 2))
-                    else:
-                        new_lon = new_lat = None
-                        utm_coords_petit = "Inconnues"
-                    # Attribution automatique de la route la plus proche
-                    assigned_route = assign_route_to_marker(new_lat, new_lon, routes_ci) if new_lat and new_lon else "Route inconnue"
-                    st.markdown(f"**ID {global_count + i + 1}**")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        selected_class = st.selectbox("Classe", [
-                            "deformations ornierage",
-                            "fissurations",
-                            "Faiençage",
-                            "fissure de retrait",
-                            "fissure anarchique",
-                            "reparations",
-                            "nid de poule",
-                            "arrachements",
-                            "fluage",
-                            "denivellement accotement",
-                            "chaussée detruite",
-                            "envahissement vegetations",
-                            "assainissements",
-                            "depot de terre"
-                        ], key=f"class_{current_index}_{i}")
-                    with col2:
-                        selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{current_index}_{i}")
-                    new_markers.append({
-                        "ID": global_count + i + 1,
-                        "classe": selected_class,
-                        "gravite": selected_gravity,
-                        "coordonnees UTM": utm_coords_petit,
-                        "lat": new_lat,
-                        "long": new_lon,
-                        "routes": assigned_route
-                    })
-            st.session_state.markers_by_pair[current_index] = new_markers
-        else:
-            st.write("Aucun marqueur n'a été détecté.")
-
-        ##############################################
-        # Carte 2 : TIFF PETIT avec TOUS les marqueurs et affichage des routes
-        ##############################################
-        global_markers = []
-        for markers in st.session_state.markers_by_pair.values():
-            global_markers.extend(markers)
-
-        st.subheader("Carte de suivi")
-        map_placeholder_petit = st.empty()
-        # Pour la carte PETIT, l'overlay TIFF est rendu transparent (tiff_opacity=0) et est retiré du gestionnaire de couche (tiff_control=False)
-        m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds, display_path_petit,
-                             marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True)
-        st_folium(m_petit, width=700, height=500, key="folium_map_petit")
-
-        ##############################################
-        # Récapitulatif global unique des marqueurs (incluant la colonne "routes")
-        ##############################################
-        global_markers_table = []
-        for idx in sorted(st.session_state.markers_by_pair.keys()):
-            global_markers_table.extend(st.session_state.markers_by_pair[idx])
-        if global_markers_table:
-            st.markdown("### Récapitulatif global des défauts")
-            st.table(global_markers_table)
-        else:
-            st.write("Aucun marqueur global n'a été enregistré.")
-
-        ##############################################
-        # Nettoyage des fichiers temporaires (pour cette paire)
-        ##############################################
-        for file_path in [current_pair["grand"]["temp_original"], current_pair["petit"]["temp_original"],
-                          reproj_grand_path, reproj_petit_path, temp_png_grand, temp_png_petit]:
-            if os.path.exists(file_path):
-                os.remove(file_path)
+st.markdown("### Récapitulatif global des défauts")
+if global_markers:
+    st.table(global_markers)
+else:
+    st.write("Aucun marqueur global n'a été enregistré.")
