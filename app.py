@@ -211,11 +211,21 @@ if "markers_by_pair" not in st.session_state:
     st.session_state.markers_by_pair = {}  # Marqueurs par indice de paire
 
 ##############################################
-# Interface en onglets pour détection manuelle et automatique
+# Interface en onglets pour détection automatique et manuelle
 ##############################################
 st.title("Détection d'anomalies")
 
-tab_manuel, tab_auto = st.tabs(["Détection Manuelle", "Détection Automatique"])
+# Inversion des onglets : Détection Automatique en premier, Détection Manuelle en deuxième
+tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
+
+with tab_auto:
+    st.header("Détection Automatique")
+    auto_uploaded_images = st.file_uploader("Téléversez vos images JPEG ou PNG", type=["jpeg", "jpg", "png"], accept_multiple_files=True, key="auto_images")
+    if auto_uploaded_images:
+        st.success("Les images ont été bien téléversées.")
+        # La logique de détection automatique sera implémentée ultérieurement.
+    else:
+        st.info("Aucune image téléversée pour la détection automatique.")
 
 with tab_manuel:
     st.header("Détection Manuelle")
@@ -373,15 +383,6 @@ with tab_manuel:
             #         os.remove(file_path)
     else:
         st.info("Veuillez téléverser les fichiers TIFF pour lancer la détection manuelle.")
-
-with tab_auto:
-    st.header("Détection Automatique")
-    auto_uploaded_images = st.file_uploader("Téléversez vos images JPEG ou PNG", type=["jpeg", "jpg", "png"], accept_multiple_files=True, key="auto_images")
-    if auto_uploaded_images:
-        st.success("Les images ont été bien téléversées.")
-        # La logique de détection automatique sera implémentée ultérieurement.
-    else:
-        st.info("Aucune image téléversée pour la détection automatique.")
 
 ##############################################
 # Section commune : Carte de suivi et récapitulatif global
