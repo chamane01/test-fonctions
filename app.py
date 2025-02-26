@@ -367,7 +367,9 @@ with tab_manuel:
                             "lat": new_lat,
                             "long": new_lon,
                             "routes": assigned_route,
-                            "detection": "Manuelle"  # Marqueur placé manuellement
+                            "detection": "Manuelle",  # Marqueur placé manuellement
+                            "couleur": class_color.get(selected_class, "#000000"),
+                            "radius": gravity_sizes.get(selected_gravity, 5)
                         })
                 st.session_state.markers_by_pair[current_index] = new_markers
             else:
