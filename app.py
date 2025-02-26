@@ -209,6 +209,8 @@ if "pairs" not in st.session_state:
     st.session_state.pairs = []  # Liste des paires { "grand":..., "petit":... }
 if "markers_by_pair" not in st.session_state:
     st.session_state.markers_by_pair = {}  # Marqueurs par indice de paire
+if "manual_detection_done" not in st.session_state:
+    st.session_state.manual_detection_done = False
 
 ##############################################
 # Interface en onglets pour détection automatique et manuelle
@@ -234,10 +236,13 @@ with tab_auto:
 
 with tab_manuel:
     st.header("Détection Manuelle")
-    uploaded_files_grand = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_grand")
-    uploaded_files_petit = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_petit")
+    # Utilisation d'un formulaire pour éviter les réexécutions intempestives
+    with st.form("manual_detection_form"):
+        uploaded_files_grand = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_grand")
+        uploaded_files_petit = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_petit")
+        submit_manual = st.form_submit_button("Lancer la détection manuelle")
     
-    if st.button("Lancer la détection manuelle"):
+    if submit_manual:
         if uploaded_files_grand and uploaded_files_petit:
             if len(uploaded_files_grand) != len(uploaded_files_petit):
                 st.error("Le nombre de fichiers TIFF GRAND et TIFF PETIT doit être identique.")
@@ -257,10 +262,9 @@ with tab_manuel:
                 for i in range(pair_count):
                     pairs.append({"grand": grand_list[i], "petit": petit_list[i]})
                 st.session_state.pairs = pairs
-
-                ##############################################
+                st.session_state.manual_detection_done = True
+                
                 # Navigation entre paires
-                ##############################################
                 col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
                 prev_pressed = col_nav1.button("← Précédent")
                 next_pressed = col_nav3.button("Suivant →")
@@ -272,9 +276,7 @@ with tab_manuel:
                 current_index = st.session_state.current_pair_index
                 current_pair = st.session_state.pairs[current_index]
 
-                ##############################################
                 # Traitement de la paire courante : génération des PNG
-                ##############################################
                 reproj_grand_path = current_pair["grand"]["path"]
                 with rasterio.open(reproj_grand_path) as src:
                     grand_bounds = src.bounds
@@ -320,18 +322,14 @@ with tab_manuel:
                 utm_zone_petit = int((center_lon_petit + 180) / 6) + 1
                 utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"
 
-                ##############################################
                 # Carte de dessin : TIFF GRAND (OSM masqué) pour dessin des marqueurs (routes non affichées)
-                ##############################################
                 st.subheader("Carte de dessin")
                 map_placeholder_grand = st.empty()
                 m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
                                      marker_data=None, hide_osm=True, draw_routes=False, add_draw_tool=True)
                 result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
 
-                ##############################################
                 # Extraction et classification des marqueurs pour la paire courante
-                ##############################################
                 features = []
                 all_drawings = result_grand.get("all_drawings")
                 if all_drawings:
@@ -380,14 +378,6 @@ with tab_manuel:
                     st.session_state.markers_by_pair[current_index] = new_markers
                 else:
                     st.write("Aucun marqueur n'a été détecté.")
-
-                ##############################################
-                # Nettoyage des fichiers temporaires (pour cette paire)
-                ##############################################
-                # for file_path in [current_pair["grand"]["temp_original"], current_pair["petit"]["temp_original"],
-                #                   reproj_grand_path, reproj_petit_path, temp_png_grand, temp_png_petit]:
-                #     if os.path.exists(file_path):
-                #         os.remove(file_path)
         else:
             st.info("Veuillez téléverser les fichiers TIFF pour lancer la détection manuelle.")
     else:
@@ -396,7 +386,6 @@ with tab_manuel:
 ##############################################
 # Section commune : Carte de suivi et récapitulatif global
 ##############################################
-
 st.subheader("Carte de suivi")
 global_markers = []
 for markers in st.session_state.markers_by_pair.values():
