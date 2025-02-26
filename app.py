@@ -1,8 +1,8 @@
-import streamlit as st 
+import streamlit as st
 import rasterio
 from rasterio.transform import from_origin
 from rasterio.io import MemoryFile
-from PIL import Image, ImageOps, ImageDraw, ImageFont
+from PIL import Image, ImageOps
 import exifread
 import numpy as np
 import os
@@ -206,7 +206,48 @@ if uploaded_files:
     if len(images_info) == 0:
         st.error("Aucune image exploitable (avec coordonnées GPS) n'a été trouvée.")
     else:
-        # Saisie de la résolution spatiale souhaitée (m/pixel)
+        # Sélection d'une image pour conversion GeoTIFF individuelle
+        selected_filename = st.selectbox(
+            "Sélectionnez l'image à convertir en GeoTIFF",
+            options=[info["filename"] for info in images_info]
+        )
+        selected_image_info = next(info for info in images_info if info["filename"] == selected_filename)
+        
+        # Calcul de l'angle de trajectoire (si plusieurs images)
+        if len(images_info) >= 2:
+            idx = next(i for i, info in enumerate(images_info) if info["filename"] == selected_filename)
+            if idx == 0:
+                dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
+                dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
+            elif idx == len(images_info) - 1:
+                dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
+                dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
+            else:
+                dx = images_info[idx+1]["utm"][0] - images_info[idx-1]["utm"][0]
+                dy = images_info[idx+1]["utm"][1] - images_info[idx-1]["utm"][1]
+            flight_angle = math.degrees(math.atan2(dx, dy))
+            st.info(f"Angle de trajectoire local calculé : {flight_angle:.1f}° (0° = nord)")
+        else:
+            flight_angle = 0
+            st.info("Angle de trajectoire non calculable (une seule image) → 0°")
+        
+        # Calcul du GSD si possible
+        if (selected_image_info["altitude"] is not None and 
+            selected_image_info["focal_length"] is not None and 
+            selected_image_info["sensor_width"] is not None):
+            pixel_size_calc = compute_gsd(
+                altitude=selected_image_info["altitude"],
+                focal_length_mm=selected_image_info["focal_length"],
+                sensor_width_mm=selected_image_info["sensor_width"],
+                image_width_px=selected_image_info["img_width"]
+            )
+            st.success(
+                f"Image sélectionnée : {selected_image_info['filename']}\n\n"
+                f"GSD calculé = {pixel_size_calc:.4f} m/pixel"
+            )
+        else:
+            st.warning("L'image sélectionnée ne possède pas toutes les métadonnées nécessaires pour calculer automatiquement le GSD.")
+        
         pixel_size = st.number_input(
             "Choisissez la résolution spatiale (m/pixel) :", 
             min_value=0.001, 
@@ -215,10 +256,61 @@ if uploaded_files:
             format="%.3f"
         )
         st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
-
-        # --- Bouton 1 : Configuration 1
-        # - Conversion en GeoTIFF avec facteur de redimensionnement fixé à 1/5 (-5)
-        if st.button("configuration 1"):
+        
+        # Sélecteur élargi pour le facteur de redimensionnement (utilisé pour la conversion standard)
+        scale_options = ["/50", "/20", "/10", "/5", "/2", "0", "*2", "*5", "*10", "*20", "*50"]
+        selected_scale = st.select_slider("Choisissez le facteur de redimensionnement de l'image", options=scale_options, value="0")
+        mapping = {
+            "/50": 1/50,
+            "/20": 1/20,
+            "/10": 1/10,
+            "/5": 1/5,
+            "/2": 1/2,
+            "0": 1,
+            "*2": 2,
+            "*5": 5,
+            "*10": 10,
+            "*20": 20,
+            "*50": 50
+        }
+        scaling_factor = mapping[selected_scale]
+        st.info(f"Facteur de redimensionnement sélectionné : {scaling_factor}")
+        
+        effective_pixel_size = pixel_size / scaling_factor
+        st.info(f"Résolution spatiale effective après redimensionnement : {effective_pixel_size*100:.1f} cm/pixel")
+        
+        rotation_correction = -flight_angle
+        st.info(f"Correction d'orientation appliquée : {rotation_correction:.1f}°")
+        
+        # Conversion et téléchargement de l'image GeoTIFF sélectionnée
+        output_path = "output.tif"
+        convert_to_tiff(
+            image_file=io.BytesIO(selected_image_info["data"]),
+            output_path=output_path,
+            utm_center=selected_image_info["utm"],
+            pixel_size=pixel_size,
+            utm_crs=selected_image_info["utm_crs"],
+            rotation_angle=rotation_correction,
+            scaling_factor=scaling_factor
+        )
+        
+        st.success(f"Image {selected_image_info['filename']} convertie en GeoTIFF.")
+        with rasterio.open(output_path) as src:
+            st.write("**Méta-données GeoTIFF**")
+            st.write("CRS :", src.crs)
+            st.write("Transform :", src.transform)
+        
+        with open(output_path, "rb") as f:
+            st.download_button(
+                label="Télécharger le GeoTIFF",
+                data=f,
+                file_name="image_geotiff.tif",
+                mime="image/tiff"
+            )
+        os.remove(output_path)
+        
+        # Téléchargement groupé de toutes les images en GeoTIFF
+        if st.button("Convertir et télécharger **toutes** les images en GeoTIFF"):
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
@@ -241,21 +333,23 @@ if uploaded_files:
                         utm_center=info["utm"],
                         utm_crs=info["utm_crs"],
                         rotation_angle=-flight_angle_i,
-                        scaling_factor=1/5  # Facteur fixe : division par 5
+                        scaling_factor=scaling_factor
                     )
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
                     zip_file.writestr(output_filename, tiff_bytes)
             zip_buffer.seek(0)
             st.download_button(
-                label="Télécharger configuration 1 (ZIP)",
+                label="Télécharger toutes les images GeoTIFF (ZIP)",
                 data=zip_buffer,
-                file_name="configuration1.zip",
+                file_name="images_geotiff.zip",
                 mime="application/zip"
             )
         
-        # --- Bouton 2 : Configuration 2
-        # - Conversion en GeoTIFF x2 avec facteur de redimensionnement fixé à 1/3 (-3)
-        if st.button("configuration 2"):
+        # -------------------------------
+        # Option supplémentaire GeoTIFF x2 :
+        # Pour cet export, le redimensionnement n'est plus soumis au sélecteur,
+        # le facteur de redimensionnement est fixé à 1/3 et la résolution spatiale est multipliée par 2.
+        if st.button("Convertir et télécharger **toutes** les images en GeoTIFF x2"):
             zip_buffer_geotiff_x2 = io.BytesIO()
             with zipfile.ZipFile(zip_buffer_geotiff_x2, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
@@ -274,29 +368,28 @@ if uploaded_files:
                         flight_angle_i = 0
                     tiff_bytes_x2 = convert_to_tiff_in_memory(
                         image_file=io.BytesIO(info["data"]),
-                        pixel_size=pixel_size * 2,  # Double la résolution spatiale
+                        pixel_size=pixel_size * 2,  # Application d'un facteur 2 sur la résolution spatiale
                         utm_center=info["utm"],
                         utm_crs=info["utm_crs"],
                         rotation_angle=-flight_angle_i,
-                        scaling_factor=1/3  # Facteur fixe : division par 3
+                        scaling_factor=1/3        # Facteur constant : division par 3
                     )
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
                     zip_file.writestr(output_filename, tiff_bytes_x2)
             zip_buffer_geotiff_x2.seek(0)
             st.download_button(
-                label="Télécharger configuration 2 (ZIP)",
+                label="Télécharger toutes les images GeoTIFF x2 (ZIP)",
                 data=zip_buffer_geotiff_x2,
-                file_name="configuration2.zip",
+                file_name="images_geotiff_x2.zip",
                 mime="application/zip"
             )
         
-        # --- Bouton 3 : Configuration images
-        # - Export groupé en JPEG avec métadonnées de cadre,
-        #   avec facteur de redimensionnement fixé à 1 (résolution inchangée)
-        if st.button("configuration images"):
+        # --- Export groupé de toutes les images en JPEG avec métadonnées de cadre ---
+        if st.button("Convertir et télécharger **toutes** les images en JPEG avec métadonnées de cadre"):
             zip_buffer_jpeg = io.BytesIO()
             with zipfile.ZipFile(zip_buffer_jpeg, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
+                    # Calcul de l'angle de trajectoire pour cette image
                     if len(images_info) >= 2:
                         if i == 0:
                             dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
@@ -310,46 +403,71 @@ if uploaded_files:
                         flight_angle_i = math.degrees(math.atan2(dx, dy))
                     else:
                         flight_angle_i = 0
+                    rotation_angle_i = -flight_angle_i
                     
-                    # Ouvrir l'image JPEG originale
-                    jpeg_img = Image.open(io.BytesIO(info["data"]))
-                    jpeg_img = ImageOps.exif_transpose(jpeg_img)
+                    # Traitement de l'image avec redimensionnement et rotation
+                    img = Image.open(io.BytesIO(info["data"]))
+                    img = ImageOps.exif_transpose(img)
+                    orig_width, orig_height = img.size
+                    new_width = int(orig_width * scaling_factor)
+                    new_height = int(orig_height * scaling_factor)
+                    img = img.resize((new_width, new_height), Image.LANCZOS)
                     
-                    # Préparer les métadonnées à afficher sur le cadre
-                    metadata_text = (
-                        f"Fichier: {info['filename']}\n"
-                        f"Lat: {info['lat']:.6f}\n"
-                        f"Lon: {info['lon']:.6f}\n"
-                        f"Altitude: {info['altitude']:.2f} m\n"
-                        f"Angle: {flight_angle_i:.2f}°"
-                    )
+                    effective_pixel_size = pixel_size / scaling_factor
+                    center_x, center_y = info["utm"]
+                    T1 = Affine.translation(-new_width/2, -new_height/2)
+                    T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
+                    T3 = Affine.rotation(rotation_angle_i)
+                    T4 = Affine.translation(center_x, center_y)
+                    transform = T4 * T3 * T2 * T1
                     
-                    # Dessiner le texte sur l'image
-                    draw = ImageDraw.Draw(jpeg_img)
-                    font = ImageFont.load_default()
-                    # Calculer la taille du texte
-                    text_w, text_h = draw.multiline_textsize(metadata_text, font=font)
-                    padding = 10
-                    # Dessiner un rectangle semi-transparent en fond du texte
-                    rectangle_coords = (0, 0, text_w + 2*padding, text_h + 2*padding)
-                    overlay = Image.new('RGBA', jpeg_img.size, (255, 255, 255, 0))
-                    overlay_draw = ImageDraw.Draw(overlay)
-                    overlay_draw.rectangle(rectangle_coords, fill=(255, 255, 255, 180))
-                    jpeg_img = Image.alpha_composite(jpeg_img.convert('RGBA'), overlay)
-                    draw = ImageDraw.Draw(jpeg_img)
-                    draw.multiline_text((padding, padding), metadata_text, fill="black", font=font)
+                    # Calcul des coordonnées des 4 coins du cadre
+                    corners = [
+                        (-new_width/2, -new_height/2),
+                        (new_width/2, -new_height/2),
+                        (new_width/2, new_height/2),
+                        (-new_width/2, new_height/2)
+                    ]
+                    corner_coords = []
+                    for corner in corners:
+                        x, y = transform * corner
+                        corner_coords.append((x, y))
                     
-                    # Sauvegarder l'image modifiée en JPEG dans un buffer
-                    buf = io.BytesIO()
-                    jpeg_img = jpeg_img.convert("RGB")
-                    jpeg_img.save(buf, format="JPEG")
-                    buf.seek(0)
-                    output_filename = info["filename"].rsplit(".", 1)[0] + "_cadre.jpg"
-                    zip_file.writestr(output_filename, buf.read())
+                    metadata_str = f"Frame Coordinates: {corner_coords}"
+                    
+                    # Injection des métadonnées dans l'EXIF via piexif
+                    try:
+                        import piexif
+                        if "exif" in img.info:
+                            exif_dict = piexif.load(img.info["exif"])
+                        else:
+                            exif_dict = {"0th":{}, "Exif":{}, "GPS":{}, "1st":{}, "thumbnail":None}
+                        user_comment = metadata_str
+                        try:
+                            # On essaie d'utiliser piexif.helper.dump
+                            exif_dict["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.dump(user_comment, encoding="unicode")
+                        except AttributeError:
+                            # Fonction de repli si helper.dump n'est pas disponible
+                            prefix = b"UNICODE\0"
+                            encoded_comment = user_comment.encode("utf-16")
+                            exif_dict["Exif"][piexif.ExifIFD.UserComment] = prefix + encoded_comment
+                        exif_bytes = piexif.dump(exif_dict)
+                    except ImportError:
+                        st.error("La librairie piexif est requise pour ajouter des métadonnées JPEG. Veuillez l'installer.")
+                        exif_bytes = None
+                    
+                    jpeg_buffer = io.BytesIO()
+                    if exif_bytes:
+                        img.save(jpeg_buffer, format="JPEG", exif=exif_bytes)
+                    else:
+                        img.save(jpeg_buffer, format="JPEG")
+                    jpeg_bytes = jpeg_buffer.getvalue()
+                    output_filename = info["filename"].rsplit(".", 1)[0] + "_with_frame_coords.jpg"
+                    zip_file.writestr(output_filename, jpeg_bytes)
             zip_buffer_jpeg.seek(0)
             st.download_button(
-                label="Télécharger configuration images (ZIP)",
+                label="Télécharger toutes les images JPEG avec métadonnées de cadre (ZIP)",
                 data=zip_buffer_jpeg,
-                file_name="configuration_images.zip",
+                file_name="images_with_frame_coords.zip",
                 mime="application/zip"
             )
