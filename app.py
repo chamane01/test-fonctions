@@ -400,7 +400,7 @@ if uploaded_files_grand and uploaded_files_petit:
         for idx in sorted(st.session_state.markers_by_pair.keys()):
             global_markers_table.extend(st.session_state.markers_by_pair[idx])
         if global_markers_table:
-            st.markdown("### Récapitulatif global des marqueurs")
+            st.markdown("### Récapitulatif global des défauts")
             st.table(global_markers_table)
         else:
             st.write("Aucun marqueur global n'a été enregistré.")
