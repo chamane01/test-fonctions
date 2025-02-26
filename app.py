@@ -22,7 +22,6 @@ import matplotlib.pyplot as plt
 # FONCTIONS UTILITAIRES
 ###############################################
 
-# Extraction des métadonnées EXIF (pour JPEG uniquement)
 def extract_exif_info(image_file):
     image_file.seek(0)
     tags = exifread.process_file(image_file)
@@ -66,7 +65,6 @@ def extract_exif_info(image_file):
     
     return lat, lon, altitude, focal_length, fp_x_res, fp_unit
 
-# Conversion lat/lon en UTM
 def latlon_to_utm(lat, lon):
     zone = int((lon + 180) / 6) + 1
     if lat >= 0:
@@ -77,7 +75,6 @@ def latlon_to_utm(lat, lon):
     utm_x, utm_y = transformer.transform(lon, lat)
     return utm_x, utm_y, utm_crs
 
-# Conversion d'une image en GeoTIFF en mémoire (retourne des bytes)
 def convert_to_tiff_in_memory(image_file, pixel_size, utm_center, utm_crs, rotation_angle=0, scaling_factor=1):
     img = Image.open(image_file)
     img = ImageOps.exif_transpose(img)
@@ -115,7 +112,6 @@ def convert_to_tiff_in_memory(image_file, pixel_size, utm_center, utm_crs, rotat
         tiff_bytes = mem.read()
     return tiff_bytes
 
-# Extraction des métadonnées d'un TIFF (bounds, transform, etc.)
 def get_tiff_metadata(tiff_bytes):
     with rasterio.MemoryFile(tiff_bytes) as memfile:
         with memfile.open() as src:
@@ -126,7 +122,6 @@ def get_tiff_metadata(tiff_bytes):
             height = src.height
     return {"bounds": bounds, "center": center, "transform": transform, "width": width, "height": height}
 
-# Normalisation des données d'image pour affichage (extraction des percentiles)
 def normalize_data(data):
     lower = np.percentile(data, 2)
     upper = np.percentile(data, 98)
@@ -134,7 +129,6 @@ def normalize_data(data):
     norm_data = (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
     return norm_data
 
-# Conversion d'un TIFF (en bytes) en PNG (en bytes)
 def tiff_to_png(tiff_bytes):
     with rasterio.MemoryFile(tiff_bytes) as memfile:
         with memfile.open() as src:
@@ -153,7 +147,6 @@ def tiff_to_png(tiff_bytes):
             img.save(png_buffer, format="PNG")
             return png_buffer.getvalue()
 
-# Ajout d'un overlay image sur une carte Folium
 def add_image_overlay(map_object, image_data, bounds, layer_name, opacity=1, show=True, control=True):
     if isinstance(image_data, bytes):
         image_base64 = base64.b64encode(image_data).decode("utf-8")
@@ -172,7 +165,6 @@ def add_image_overlay(map_object, image_data, bounds, layer_name, opacity=1, sho
         control=control
     ).add_to(map_object)
 
-# Reprojection d'un TIFF sur disque vers EPSG:4326 (si nécessaire)
 def reproject_tiff(input_path, target_crs="EPSG:4326"):
     with rasterio.open(input_path) as src:
         transform_, width, height = calculate_default_transform(
@@ -200,7 +192,6 @@ def reproject_tiff(input_path, target_crs="EPSG:4326"):
                 )
     return output_tiff
 
-# Pour les fichiers TIFF manuels : reprojeter si besoin et extraire le centre et les bornes
 def get_reprojected_and_center(uploaded_file, group):
     unique_id = str(uuid.uuid4())[:8]
     temp_path = f"uploaded_{group}_{unique_id}.tif"
@@ -219,21 +210,20 @@ def get_reprojected_and_center(uploaded_file, group):
     return {"path": reproj_path, "center": (center_lat, center_lon), "bounds": bounds, "temp_original": temp_path}
 
 ###############################################
-# FONCTIONS DE TRAITEMENT
+# FONCTION DE TRAITEMENT UNIQUE
 ###############################################
+def process_images(uploaded_files, pixel_size):
+    auto_images = []       # Pour détection automatique (JPEG avec métadonnées de cadre)
+    tiff_petit_list = []   # Pour configuration manuelle (TIFF PETIT)
+    tiff_grand_list = []   # Pour configuration manuelle (TIFF GRAND)
+    images_info = []       # Informations et métadonnées pour chaque image
 
-# Traitement pour la détection automatique (conversion en JPEG avec métadonnées de cadre)
-def process_auto_images(uploaded_files, pixel_size):
-    auto_images = []
-    images_info = []
-    
-    # Extraction des informations et conversion
     for file in uploaded_files:
         file_bytes = file.read()
         file_buffer = io.BytesIO(file_bytes)
         lat, lon, altitude, focal_length, fp_x_res, fp_unit = extract_exif_info(file_buffer)
         if lat is None or lon is None:
-            st.warning(f"{file.name} n'a pas de coordonnées GPS. Image ignorée.")
+            st.warning(f"{file.name} n'a pas de coordonnées GPS et sera ignoré.")
             continue
         img = Image.open(io.BytesIO(file_bytes))
         img_width, img_height = img.size
@@ -251,7 +241,7 @@ def process_auto_images(uploaded_files, pixel_size):
             "utm_crs": utm_crs
         })
     if len(images_info) == 0:
-        st.error("Aucune image exploitable avec coordonnées GPS n'a été trouvée.")
+        st.error("Aucune image exploitable n'a été trouvée.")
         return
 
     # Calcul de l'angle de vol pour chaque image
@@ -271,9 +261,9 @@ def process_auto_images(uploaded_files, pixel_size):
             flight_angle = 0
         info["flight_angle"] = flight_angle
 
-        # Conversion en JPEG avec ajout de métadonnées de cadre
+        # --- Conversion pour détection automatique (JPEG avec métadonnées de cadre) ---
         scaling_factor = 1
-        rotation_angle = -flight_angle
+        rotation_angle = -info["flight_angle"]
         pil_img = Image.open(io.BytesIO(info["data"]))
         pil_img = ImageOps.exif_transpose(pil_img)
         orig_width, orig_height = pil_img.size
@@ -287,7 +277,6 @@ def process_auto_images(uploaded_files, pixel_size):
         T3 = Affine.rotation(rotation_angle)
         T4 = Affine.translation(center_x, center_y)
         transform = T4 * T3 * T2 * T1
-
         # Calcul des coins du cadre
         corners = [(-new_width/2, -new_height/2),
                    (new_width/2, -new_height/2),
@@ -295,8 +284,6 @@ def process_auto_images(uploaded_files, pixel_size):
                    (-new_width/2, new_height/2)]
         corner_coords = [transform * corner for corner in corners]
         metadata_str = f"Frame Coordinates: {corner_coords}"
-        
-        # Ajout de métadonnées EXIF si possible
         try:
             import piexif
             if "exif" in pil_img.info:
@@ -312,7 +299,6 @@ def process_auto_images(uploaded_files, pixel_size):
             exif_bytes = piexif.dump(exif_dict)
         except ImportError:
             exif_bytes = None
-        
         jpeg_buffer = io.BytesIO()
         if exif_bytes:
             pil_img.save(jpeg_buffer, format="JPEG", exif=exif_bytes)
@@ -322,62 +308,46 @@ def process_auto_images(uploaded_files, pixel_size):
             "filename": info["filename"],
             "image_bytes": jpeg_buffer.getvalue()
         })
+
+        # --- Conversion pour TIFF PETIT (scaling 1/5) ---
+        tiff_petit_bytes = convert_to_tiff_in_memory(
+            image_file=io.BytesIO(info["data"]),
+            pixel_size=pixel_size,
+            utm_center=info["utm"],
+            utm_crs=info["utm_crs"],
+            rotation_angle=-info["flight_angle"],
+            scaling_factor=1/5
+        )
+        tiff_petit_list.append(tiff_petit_bytes)
+
+        # --- Conversion pour TIFF GRAND (scaling 1/3, résolution multipliée par 2) ---
+        tiff_grand_bytes = convert_to_tiff_in_memory(
+            image_file=io.BytesIO(info["data"]),
+            pixel_size=pixel_size * 2,
+            utm_center=info["utm"],
+            utm_crs=info["utm_crs"],
+            rotation_angle=-info["flight_angle"],
+            scaling_factor=1/3
+        )
+        tiff_grand_list.append(tiff_grand_bytes)
+    
     st.session_state.auto_images = auto_images
     st.session_state.images_info = images_info
+    st.session_state.tiff_petit = tiff_petit_list
+    st.session_state.tiff_grand = tiff_grand_list
 
-# Traitement pour la détection manuelle (fusion de paires TIFF GRAND et TIFF PETIT)
-def process_manual_images(uploaded_files_grand, uploaded_files_petit, pixel_size):
-    if len(uploaded_files_grand) != len(uploaded_files_petit):
-        st.error("Le nombre de fichiers TIFF GRAND et TIFF PETIT doit être identique.")
-        return
+    # Création des paires pour la détection manuelle (conversion des TIFF en PNG)
     pairs = []
-    for i in range(len(uploaded_files_grand)):
-        # Remettre le curseur au début de chaque fichier
-        uploaded_files_grand[i].seek(0)
-        uploaded_files_petit[i].seek(0)
-        grand_info = get_reprojected_and_center(uploaded_files_grand[i], "grand")
-        petit_info = get_reprojected_and_center(uploaded_files_petit[i], "petit")
-        
-        # Conversion en PNG pour affichage (TIFF GRAND)
-        with rasterio.open(grand_info["path"]) as src:
-            grand_bounds = src.bounds
-            data = src.read()
-            if data.shape[0] >= 3:
-                r = normalize_data(data[0])
-                g = normalize_data(data[1])
-                b = normalize_data(data[2])
-                rgb = np.dstack((r, g, b))
-                img_grand = Image.fromarray(rgb)
-            else:
-                band = data[0]
-                band_norm = normalize_data(band)
-                img_grand = Image.fromarray(band_norm, mode="L")
-            png_buffer_grand = io.BytesIO()
-            img_grand.save(png_buffer_grand, format="PNG")
-            png_grand = png_buffer_grand.getvalue()
-        
-        # Conversion en PNG pour affichage (TIFF PETIT)
-        with rasterio.open(petit_info["path"]) as src:
-            petit_bounds = src.bounds
-            data = src.read()
-            if data.shape[0] >= 3:
-                r = normalize_data(data[0])
-                g = normalize_data(data[1])
-                b = normalize_data(data[2])
-                rgb = np.dstack((r, g, b))
-                img_petit = Image.fromarray(rgb)
-            else:
-                band = data[0]
-                band_norm = normalize_data(band)
-                img_petit = Image.fromarray(band_norm, mode="L")
-            png_buffer_petit = io.BytesIO()
-            img_petit.save(png_buffer_petit, format="PNG")
-            png_petit = png_buffer_petit.getvalue()
-        
-        pairs.append({
-            "grand": {"info": grand_info, "png": png_grand},
-            "petit": {"info": petit_info, "png": png_petit}
-        })
+    if st.session_state.tiff_grand and st.session_state.tiff_petit:
+        for i in range(len(st.session_state.tiff_grand)):
+            meta_grand = get_tiff_metadata(st.session_state.tiff_grand[i])
+            meta_petit = get_tiff_metadata(st.session_state.tiff_petit[i])
+            png_grand = tiff_to_png(st.session_state.tiff_grand[i])
+            png_petit = tiff_to_png(st.session_state.tiff_petit[i])
+            pairs.append({
+                "grand": {"info": meta_grand, "png": png_grand},
+                "petit": {"info": meta_petit, "png": png_petit}
+            })
     st.session_state.pairs = pairs
 
 ###############################################
@@ -397,32 +367,27 @@ if "markers_by_pair" not in st.session_state:
 ###############################################
 
 st.title("Détection d'anomalies & Conversion d'images")
+st.markdown("### Téléversez vos images JPEG (uniquement)")
+uploaded_files = st.file_uploader("Sélectionnez vos images JPEG", type=["jpg", "jpeg"], accept_multiple_files=True)
+pixel_size = st.number_input("Résolution spatiale (m/pixel) :", min_value=0.001, value=0.03, step=0.001, format="%.3f")
 
-# Création des onglets
+if uploaded_files and st.button("Commencer la détection"):
+    process_images(uploaded_files, pixel_size)
+
+# Création des onglets pour affichage des résultats
 tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
 
-# Onglet Détection Automatique
 with tab_auto:
     st.header("Détection Automatique")
-    auto_uploaded_files = st.file_uploader("Téléversez vos images JPEG", type=["jpg", "jpeg"], accept_multiple_files=True, key="auto_upload")
-    pixel_size_auto = st.number_input("Résolution spatiale (m/pixel) :", min_value=0.001, value=0.03, step=0.001, format="%.3f", key="pixel_size_auto")
-    if auto_uploaded_files and st.button("Lancer la détection automatique", key="btn_auto"):
-        process_auto_images(auto_uploaded_files, pixel_size_auto)
     if st.session_state.auto_images:
-        st.markdown("### Images traitées pour détection automatique")
+        st.markdown("### Images converties pour détection automatique")
         for img_info in st.session_state.auto_images:
             st.image(img_info["image_bytes"], caption=img_info["filename"], use_column_width=True)
     else:
-        st.info("Les images traitées s'afficheront ici après le traitement.")
+        st.info("Les images converties s'afficheront ici après le traitement.")
 
-# Onglet Détection Manuelle
 with tab_manuel:
     st.header("Détection Manuelle")
-    tiff_grand_files = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_grand")
-    tiff_petit_files = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_petit")
-    pixel_size_manual = st.number_input("Résolution spatiale pour TIFF (m/pixel) :", min_value=0.001, value=0.03, step=0.001, format="%.3f", key="pixel_size_manual")
-    if tiff_grand_files and tiff_petit_files and st.button("Lancer la détection manuelle", key="btn_manual"):
-        process_manual_images(tiff_grand_files, tiff_petit_files, pixel_size_manual)
     if st.session_state.pairs:
         pair_count = len(st.session_state.pairs)
         col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
@@ -436,15 +401,13 @@ with tab_manuel:
         current_pair = st.session_state.pairs[st.session_state.current_pair_index]
         
         # Affichage de la carte de dessin à partir du TIFF GRAND
-        st.subheader("Carte de dessin (TIFF GRAND)")
-        with rasterio.open(current_pair["grand"]["info"]["path"]) as src:
-            meta_grand = {"bounds": src.bounds}
+        st.subheader("Carte de dessin (à partir du TIFF GRAND)")
+        meta_grand = current_pair["grand"]["info"]["bounds"]
         m_grand = folium.Map(
-            location=[(meta_grand["bounds"].bottom + meta_grand["bounds"].top)/2,
-                      (meta_grand["bounds"].left + meta_grand["bounds"].right)/2],
+            location=[(meta_grand.bottom + meta_grand.top)/2, (meta_grand.left + meta_grand.right)/2],
             zoom_start=18, tiles=None
         )
-        add_image_overlay(m_grand, current_pair["grand"]["png"], meta_grand["bounds"], "TIFF GRAND Overlay", opacity=1)
+        add_image_overlay(m_grand, current_pair["grand"]["png"], meta_grand, "TIFF GRAND Overlay", opacity=1)
         draw = Draw(
             draw_options={
                 'marker': True,
@@ -460,7 +423,7 @@ with tab_manuel:
         folium.LayerControl().add_to(m_grand)
         result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
         
-        # Extraction et classification des marqueurs dessinés
+        # Extraction des marqueurs dessinés
         features = []
         all_drawings = result_grand.get("all_drawings")
         if all_drawings:
@@ -468,6 +431,7 @@ with tab_manuel:
                 features = all_drawings.get("features", [])
             elif isinstance(all_drawings, list):
                 features = all_drawings
+        global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values()) if st.session_state.markers_by_pair else 0
         new_markers = []
         if features:
             st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité :")
@@ -488,16 +452,14 @@ with tab_manuel:
                 "depot de terre": "#8B4513"
             }
             gravity_sizes = {1: 5, 2: 10, 3: 15}
-            global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values()) if st.session_state.markers_by_pair else 0
             for i, feature in enumerate(features):
                 if feature.get("geometry", {}).get("type") == "Point":
                     coords = feature.get("geometry", {}).get("coordinates")
                     if coords and isinstance(coords, list) and len(coords) >= 2:
                         lon, lat = coords[0], coords[1]
-                        # Conversion relative du point du TIFF GRAND vers le TIFF PETIT
-                        bounds_grand = meta_grand["bounds"]
-                        with rasterio.open(current_pair["petit"]["info"]["path"]) as src:
-                            petit_bounds = src.bounds
+                        # Conversion des coordonnées du TIFF GRAND vers celles du TIFF PETIT
+                        bounds_grand = meta_grand
+                        petit_bounds = st.session_state.pairs[st.session_state.current_pair_index]["petit"]["info"]["bounds"]
                         percent_x = (lon - bounds_grand.left) / (bounds_grand.right - bounds_grand.left)
                         percent_y = (lat - bounds_grand.bottom) / (bounds_grand.top - bounds_grand.bottom)
                         new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
@@ -523,18 +485,17 @@ with tab_manuel:
             st.session_state.markers_by_pair[st.session_state.current_pair_index] = new_markers
         else:
             st.write("Aucun marqueur dessiné détecté.")
-        
-        # Carte de suivi avec les marqueurs globaux (overlay à partir du TIFF PETIT)
+
+        # Carte de suivi (affichage du TIFF PETIT en fond)
         st.subheader("Carte de suivi")
         global_markers = []
         for markers in st.session_state.markers_by_pair.values():
             global_markers.extend(markers)
-        with rasterio.open(current_pair["petit"]["info"]["path"]) as src:
-            petit_meta = {"bounds": src.bounds}
-        center_lat = (petit_meta["bounds"].bottom + petit_meta["bounds"].top) / 2
-        center_lon = (petit_meta["bounds"].left + petit_meta["bounds"].right) / 2
+        petit_bounds = st.session_state.pairs[st.session_state.current_pair_index]["petit"]["info"]["bounds"]
+        center_lat = (petit_bounds.bottom + petit_bounds.top) / 2
+        center_lon = (petit_bounds.left + petit_bounds.right) / 2
         m_petit = folium.Map(location=[center_lat, center_lon], zoom_start=18)
-        add_image_overlay(m_petit, current_pair["petit"]["png"], petit_meta["bounds"], "TIFF PETIT Overlay", opacity=0.7)
+        add_image_overlay(m_petit, st.session_state.pairs[st.session_state.current_pair_index]["petit"]["png"], petit_bounds, "TIFF PETIT Overlay", opacity=0.7)
         for marker in global_markers:
             folium.CircleMarker(
                 location=[marker["lat"], marker["long"]],
@@ -553,4 +514,4 @@ with tab_manuel:
         else:
             st.write("Aucun marqueur global enregistré.")
     else:
-        st.info("Les paires d'images converties s'afficheront ici après le traitement manuel.")
+        st.info("Les images converties s'afficheront ici après le traitement manuel.")
