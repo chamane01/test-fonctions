@@ -215,7 +215,7 @@ if "markers_by_pair" not in st.session_state:
 ##############################################
 # UPLOAD MULTIPLE DES FICHIERS
 ##############################################
-st.title("Affichage par paire de TIFF avec jumelage par centre, navigation et récapitulatif global")
+st.title("Detection Manuelle")
 
 uploaded_files_grand = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True)
 uploaded_files_petit = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True)
@@ -308,7 +308,7 @@ if uploaded_files_grand and uploaded_files_petit:
         ##############################################
         # Carte 1 : TIFF GRAND (OSM masqué) pour dessin des marqueurs (routes non affichées)
         ##############################################
-        st.subheader("Carte 1 : TIFF GRAND (pour dessin des marqueurs)")
+        st.subheader("Carte de dessin")
         map_placeholder_grand = st.empty()
         m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
                              marker_data=None, hide_osm=True, draw_routes=False)
@@ -386,7 +386,7 @@ if uploaded_files_grand and uploaded_files_petit:
         for markers in st.session_state.markers_by_pair.values():
             global_markers.extend(markers)
 
-        st.subheader("Carte 2 : TIFF PETIT (avec tous les marqueurs reprojetés)")
+        st.subheader("Carte de suivi")
         map_placeholder_petit = st.empty()
         # Pour la carte PETIT, l'overlay TIFF est rendu transparent (tiff_opacity=0) et est retiré du gestionnaire de couche (tiff_control=False)
         m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds, display_path_petit,
