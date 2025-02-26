@@ -2,7 +2,7 @@ import streamlit as st
 import rasterio
 from rasterio.transform import from_origin
 from rasterio.io import MemoryFile
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageDraw, ImageFont
 import exifread
 import numpy as np
 import os
@@ -206,9 +206,6 @@ if uploaded_files:
     if len(images_info) == 0:
         st.error("Aucune image exploitable (avec coordonnées GPS) n'a été trouvée.")
     else:
-        # Suppression de la sélection d'une image individuelle et de son téléchargement
-        # (toute la conversion se fait désormais de façon groupée)
-
         # Saisie de la résolution spatiale souhaitée (m/pixel)
         pixel_size = st.number_input(
             "Choisissez la résolution spatiale (m/pixel) :", 
@@ -219,8 +216,7 @@ if uploaded_files:
         )
         st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
 
-        # ---
-        # Bouton 1 : Configuration 1
+        # --- Bouton 1 : Configuration 1
         # - Conversion en GeoTIFF avec facteur de redimensionnement fixé à 1/5 (-5)
         if st.button("configuration 1"):
             zip_buffer = io.BytesIO()
@@ -257,8 +253,7 @@ if uploaded_files:
                 mime="application/zip"
             )
         
-        # ---
-        # Bouton 2 : Configuration 2
+        # --- Bouton 2 : Configuration 2
         # - Conversion en GeoTIFF x2 avec facteur de redimensionnement fixé à 1/3 (-3)
         if st.button("configuration 2"):
             zip_buffer_geotiff_x2 = io.BytesIO()
@@ -295,9 +290,9 @@ if uploaded_files:
                 mime="application/zip"
             )
         
-        # ---
-        # Bouton 3 : Configuration images
-        # - Export groupé en JPEG avec métadonnées de cadre, avec aucun redimensionnement (scaling_factor = 1)
+        # --- Bouton 3 : Configuration images
+        # - Export groupé en JPEG avec métadonnées de cadre,
+        #   avec facteur de redimensionnement fixé à 1 (résolution inchangée)
         if st.button("configuration images"):
             zip_buffer_jpeg = io.BytesIO()
             with zipfile.ZipFile(zip_buffer_jpeg, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -315,66 +310,42 @@ if uploaded_files:
                         flight_angle_i = math.degrees(math.atan2(dx, dy))
                     else:
                         flight_angle_i = 0
-                    rotation_angle_i = -flight_angle_i
                     
-                    # Aucun redimensionnement (scaling_factor = 1)
-                    scaling_factor = 1
-                    img = Image.open(io.BytesIO(info["data"]))
-                    img = ImageOps.exif_transpose(img)
-                    orig_width, orig_height = img.size
-                    new_width = int(orig_width * scaling_factor)
-                    new_height = int(orig_height * scaling_factor)
-                    img = img.resize((new_width, new_height), Image.LANCZOS)
+                    # Ouvrir l'image JPEG originale
+                    jpeg_img = Image.open(io.BytesIO(info["data"]))
+                    jpeg_img = ImageOps.exif_transpose(jpeg_img)
                     
-                    effective_pixel_size = pixel_size / scaling_factor
-                    center_x, center_y = info["utm"]
-                    T1 = Affine.translation(-new_width/2, -new_height/2)
-                    T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
-                    T3 = Affine.rotation(rotation_angle_i)
-                    T4 = Affine.translation(center_x, center_y)
-                    transform = T4 * T3 * T2 * T1
+                    # Préparer les métadonnées à afficher sur le cadre
+                    metadata_text = (
+                        f"Fichier: {info['filename']}\n"
+                        f"Lat: {info['lat']:.6f}\n"
+                        f"Lon: {info['lon']:.6f}\n"
+                        f"Altitude: {info['altitude']:.2f} m\n"
+                        f"Angle: {flight_angle_i:.2f}°"
+                    )
                     
-                    # Calcul des coordonnées des 4 coins du cadre
-                    corners = [
-                        (-new_width/2, -new_height/2),
-                        (new_width/2, -new_height/2),
-                        (new_width/2, new_height/2),
-                        (-new_width/2, new_height/2)
-                    ]
-                    corner_coords = []
-                    for corner in corners:
-                        x, y = transform * corner
-                        corner_coords.append((x, y))
+                    # Dessiner le texte sur l'image
+                    draw = ImageDraw.Draw(jpeg_img)
+                    font = ImageFont.load_default()
+                    # Calculer la taille du texte
+                    text_w, text_h = draw.multiline_textsize(metadata_text, font=font)
+                    padding = 10
+                    # Dessiner un rectangle semi-transparent en fond du texte
+                    rectangle_coords = (0, 0, text_w + 2*padding, text_h + 2*padding)
+                    overlay = Image.new('RGBA', jpeg_img.size, (255, 255, 255, 0))
+                    overlay_draw = ImageDraw.Draw(overlay)
+                    overlay_draw.rectangle(rectangle_coords, fill=(255, 255, 255, 180))
+                    jpeg_img = Image.alpha_composite(jpeg_img.convert('RGBA'), overlay)
+                    draw = ImageDraw.Draw(jpeg_img)
+                    draw.multiline_text((padding, padding), metadata_text, fill="black", font=font)
                     
-                    metadata_str = f"Frame Coordinates: {corner_coords}"
-                    
-                    # Injection des métadonnées dans l'EXIF via piexif
-                    try:
-                        import piexif
-                        if "exif" in img.info:
-                            exif_dict = piexif.load(img.info["exif"])
-                        else:
-                            exif_dict = {"0th":{}, "Exif":{}, "GPS":{}, "1st":{}, "thumbnail":None}
-                        user_comment = metadata_str
-                        try:
-                            exif_dict["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.dump(user_comment, encoding="unicode")
-                        except AttributeError:
-                            prefix = b"UNICODE\0"
-                            encoded_comment = user_comment.encode("utf-16")
-                            exif_dict["Exif"][piexif.ExifIFD.UserComment] = prefix + encoded_comment
-                        exif_bytes = piexif.dump(exif_dict)
-                    except ImportError:
-                        st.error("La librairie piexif est requise pour ajouter des métadonnées JPEG. Veuillez l'installer.")
-                        exif_bytes = None
-                    
-                    jpeg_buffer = io.BytesIO()
-                    if exif_bytes:
-                        img.save(jpeg_buffer, format="JPEG", exif=exif_bytes)
-                    else:
-                        img.save(jpeg_buffer, format="JPEG")
-                    jpeg_bytes = jpeg_buffer.getvalue()
-                    output_filename = info["filename"].rsplit(".", 1)[0] + "_with_frame_coords.jpg"
-                    zip_file.writestr(output_filename, jpeg_bytes)
+                    # Sauvegarder l'image modifiée en JPEG dans un buffer
+                    buf = io.BytesIO()
+                    jpeg_img = jpeg_img.convert("RGB")
+                    jpeg_img.save(buf, format="JPEG")
+                    buf.seek(0)
+                    output_filename = info["filename"].rsplit(".", 1)[0] + "_cadre.jpg"
+                    zip_file.writestr(output_filename, buf.read())
             zip_buffer_jpeg.seek(0)
             st.download_button(
                 label="Télécharger configuration images (ZIP)",
