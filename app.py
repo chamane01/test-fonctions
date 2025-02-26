@@ -22,6 +22,76 @@ import json
 from shapely.geometry import Point, LineString
 
 ##############################################
+# Gestion des routes (chargement depuis un fichier)
+##############################################
+routes_ci = []
+if os.path.exists("routeQSD.txt"):
+    with open("routeQSD.txt", "r") as f:
+        routes_data = json.load(f)
+    for feature in routes_data["features"]:
+        if feature["geometry"]["type"] == "LineString":
+            routes_ci.append({
+                "coords": feature["geometry"]["coordinates"],
+                "nom": feature["properties"].get("ID", "Route inconnue")
+            })
+
+##############################################
+# Fonctions utilitaires pour la carte
+##############################################
+def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1, show=True, control=True):
+    with open(image_path, "rb") as f:
+        image_data = f.read()
+    image_base64 = base64.b64encode(image_data).decode("utf-8")
+    img_data_url = f"data:image/png;base64,{image_base64}"
+    folium.raster_layers.ImageOverlay(
+        image=img_data_url,
+        bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
+        name=layer_name,
+        opacity=opacity,
+        show=show,
+        control=control
+    ).add_to(map_object)
+
+def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
+               hide_osm=False, tiff_opacity=1, tiff_show=True, tiff_control=True,
+               draw_routes=True, add_draw_tool=True):
+    if hide_osm:
+        m = folium.Map(location=[center_lat, center_lon], tiles=None)
+    else:
+        m = folium.Map(location=[center_lat, center_lon])
+    if display_path:
+        add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=tiff_opacity,
+                          show=tiff_show, control=tiff_control)
+    if draw_routes:
+        # Ajout des routes
+        for route in routes_ci:
+            # Inversion des coordonnées pour obtenir (lat, lon)
+            poly_coords = [(lat, lon) for lon, lat in route["coords"]]
+            folium.PolyLine(
+                locations=poly_coords,
+                color="blue",
+                weight=3,
+                opacity=0.7,
+                tooltip=route["nom"]
+            ).add_to(m)
+    if add_draw_tool:
+        draw = Draw(
+            draw_options={
+                'marker': True,
+                'polyline': False,
+                'polygon': False,
+                'rectangle': False,
+                'circle': False,
+                'circlemarker': False,
+            },
+            edit_options={'edit': True}
+        )
+        draw.add_to(m)
+    m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
+    folium.LayerControl().add_to(m)
+    return m
+
+##############################################
 # Fonctions d'extraction et conversion
 ##############################################
 def extract_exif_info(image_file):
@@ -115,7 +185,6 @@ def convert_to_tiff_in_memory(image_file, pixel_size, utm_center, utm_crs, rotat
 ##############################################
 # Traitement initial d'une image téléversée
 ##############################################
-# Ici, on effectue un premier traitement (avec flight_angle=0) pour stocker les données de base.
 def process_uploaded_image(uploaded_file, pixel_size):
     file_bytes = uploaded_file.read()
     file_buffer = io.BytesIO(file_bytes)
@@ -138,7 +207,7 @@ def process_uploaded_image(uploaded_file, pixel_size):
     
     utm_x, utm_y, utm_crs = latlon_to_utm(lat, lon)
     
-    # On utilise flight_angle = 0 pour l'instant.
+    # On utilise flight_angle = 0 pour le premier passage.
     flight_angle = 0
 
     # Conversion initiale
@@ -400,11 +469,10 @@ if uploaded_jpeg_files:
             st.warning(f"{up_file.name} : pas de coordonnées GPS, l'image sera ignorée.")
     if new_converted:
         # --- 2. Calcul du flight_angle pour chaque image ---
-        # Ici, on utilise l'ordre de téléversement pour calculer l'angle de trajectoire
         for idx, processed in enumerate(new_converted):
             flight_angle = calculate_flight_angle(idx, new_converted)
             processed["flight_angle"] = flight_angle
-            # --- Mise à jour des conversions avec le flight_angle calculé ---
+            # Mise à jour des conversions avec l'angle calculé
             tiff_petit, tiff_grand, jpeg_image = update_conversions(processed, flight_angle, pixel_size)
             processed["tiff_petit"] = tiff_petit
             processed["tiff_grand"] = tiff_grand
@@ -426,7 +494,7 @@ with tab_auto:
         auto_images = [item["jpeg_image"] for item in st.session_state.converted_images]
         for idx, jpeg_bytes in enumerate(auto_images):
             st.image(jpeg_bytes, caption=f"Image convertie {idx+1}", use_column_width=True)
-        # Ici, insérez la logique de détection automatique en utilisant auto_images
+        # Insérez ici la logique de détection automatique en utilisant auto_images
     else:
         st.info("Aucune image convertie n'est disponible pour la détection automatique.")
 
@@ -457,7 +525,7 @@ with tab_manuel:
         current_index = st.session_state.current_pair_index
         current_pair = st.session_state.pairs[current_index]
 
-        # Affichage du TIFF GRAND converti en PNG pour la carte
+        # Affichage du TIFF GRAND converti en PNG pour la carte de dessin
         reproj_grand_path = current_pair["grand"]["path"]
         with rasterio.open(reproj_grand_path) as src:
             grand_bounds = src.bounds
@@ -477,7 +545,7 @@ with tab_manuel:
         image_grand.save(temp_png_grand)
         display_path_grand = temp_png_grand
 
-        # Affichage du TIFF PETIT converti en PNG pour la carte
+        # Affichage du TIFF PETIT converti en PNG pour la carte de dessin
         reproj_petit_path = current_pair["petit"]["path"]
         with rasterio.open(reproj_petit_path) as src:
             petit_bounds = src.bounds
@@ -496,42 +564,11 @@ with tab_manuel:
         image_petit.save(temp_png_petit)
         display_path_petit = temp_png_petit
 
-        # Pour la carte, on crée une carte Folium basée sur le TIFF PETIT reprojeté
-        center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
-        center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
-
-        # Exemple de carte avec affichage du TIFF PETIT (converti en PNG)
-        def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1, show=True, control=True):
-            with open(image_path, "rb") as f:
-                image_data = f.read()
-            image_base64 = base64.b64encode(image_data).decode("utf-8")
-            img_data_url = f"data:image/png;base64,{image_base64}"
-            folium.raster_layers.ImageOverlay(
-                image=img_data_url,
-                bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
-                name=layer_name,
-                opacity=opacity,
-                show=show,
-                control=control
-            ).add_to(map_object)
-
-        def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
-                       hide_osm=False, tiff_opacity=1, tiff_show=True, tiff_control=True,
-                       draw_routes=True, add_draw_tool=True):
-            if hide_osm:
-                m = folium.Map(location=[center_lat, center_lon], tiles=None)
-            else:
-                m = folium.Map(location=[center_lat, center_lon])
-            if display_path:
-                add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=tiff_opacity,
-                                  show=tiff_show, control=tiff_control)
-            folium.LayerControl().add_to(m)
-            m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
-            return m
-
-        st.subheader("Carte de dessin")
-        m_grand = create_map((grand_bounds.bottom+grand_bounds.top)/2, (grand_bounds.left+grand_bounds.right)/2,
-                             grand_bounds, display_path_grand, hide_osm=True, draw_routes=False, add_draw_tool=True)
+        # Création de la carte de dessin avec routes et outil de dessin activé
+        center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
+        center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
+        m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
+                             marker_data=None, hide_osm=True, draw_routes=True, add_draw_tool=True)
         result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
 
         # Gestion des marqueurs dessinés sur la carte
@@ -547,6 +584,7 @@ with tab_manuel:
         new_markers = []
         if features:
             st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité :")
+            # Définition des couleurs et tailles pour les marqueurs
             class_color = {
                 "deformations ornierage": "#FF0000",
                 "fissurations": "#00FF00",
@@ -602,7 +640,6 @@ for markers in st.session_state.markers_by_pair.values():
     global_markers.extend(markers)
 
 if st.session_state.pairs:
-    # On utilise le TIFF PETIT de la première paire pour obtenir des bounds
     try:
         with rasterio.open(st.session_state.pairs[0]["petit"]["path"]) as src:
             petit_bounds = src.bounds
@@ -614,17 +651,7 @@ if st.session_state.pairs:
         center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
         center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
         m_petit = folium.Map(location=[center_lat_petit, center_lon_petit])
-        def add_overlay(map_object, image_path, bounds):
-            with open(image_path, "rb") as f:
-                image_data = f.read()
-            image_base64 = base64.b64encode(image_data).decode("utf-8")
-            img_data_url = f"data:image/png;base64,{image_base64}"
-            folium.raster_layers.ImageOverlay(
-                image=img_data_url,
-                bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
-                opacity=0.5
-            ).add_to(map_object)
-        add_overlay(m_petit, display_path_petit, petit_bounds)
+        add_image_overlay(m_petit, display_path_petit, petit_bounds, "TIFF PETIT Overlay")
         st_folium(m_petit, width=700, height=500, key="folium_map_petit")
     else:
         st.info("Impossible d'afficher la carte de suivi.")
