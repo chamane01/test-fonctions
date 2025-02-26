@@ -85,7 +85,7 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
                           show=tiff_show, control=tiff_control)
     if draw_routes:
         for route in routes_ci:
-            # Inversion des coordonnées pour obtenir (lat, lon)
+            # Inversion des coordonnées pour passer de [lon, lat] à [lat, lon]
             poly_coords = [(lat, lon) for lon, lat in route["coords"]]
             folium.PolyLine(
                 locations=poly_coords,
@@ -560,7 +560,6 @@ with tab_manuel:
             grand_bounds = src.bounds
             data = src.read()
             if data.shape[0] >= 3:
-                # Normalisation des bandes pour affichage
                 r = np.clip(255 * (data[0] - np.percentile(data[0], 2)) / (np.percentile(data[0], 98) - np.percentile(data[0], 2)), 0, 255).astype(np.uint8)
                 g = np.clip(255 * (data[1] - np.percentile(data[1], 2)) / (np.percentile(data[1], 98) - np.percentile(data[1], 2)), 0, 255).astype(np.uint8)
                 b = np.clip(255 * (data[2] - np.percentile(data[2], 2)) / (np.percentile(data[2], 98) - np.percentile(data[2], 2)), 0, 255).astype(np.uint8)
@@ -618,7 +617,6 @@ with tab_manuel:
                 if feature.get("geometry", {}).get("type") == "Point":
                     coords = feature.get("geometry", {}).get("coordinates")
                     if coords and isinstance(coords, list) and len(coords) >= 2:
-                        # Notez que dans le mode manuel, les coordonnées dessinées sont en EPSG:4326
                         lon_pt, lat_pt = coords[0], coords[1]
                     else:
                         lat_pt = lon_pt = None
@@ -645,7 +643,7 @@ with tab_manuel:
         st.info("Aucune paire d'images converties n'est disponible pour la détection manuelle.")
 
 ##############################################
-# Carte de suivi globale
+# Carte de suivi globale (affichage des routes et des marqueurs, sans outil de dessin)
 ##############################################
 st.subheader("Carte de suivi")
 global_markers = []
@@ -663,15 +661,19 @@ if st.session_state.pairs:
     if petit_bounds:
         center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
         center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
-        m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds,
-                             display_path_petit,  # chemin vers l'image overlay pour le TIFF PETIT
-                             marker_data=global_markers,
-                             hide_osm=False,
-                             tiff_opacity=0,
-                             tiff_show=True,
-                             tiff_control=False,
-                             draw_routes=True,
-                             add_draw_tool=False)
+        m_petit = create_map(
+            center_lat_petit,
+            center_lon_petit,
+            petit_bounds,
+            display_path_petit,       # Overlay du TIFF PETIT
+            marker_data=global_markers, # Ajout des marqueurs globaux
+            hide_osm=False,
+            tiff_opacity=0,
+            tiff_show=True,
+            tiff_control=False,
+            draw_routes=True,          # Affichage des routes
+            add_draw_tool=False        # Pas d'outil de dessin sur la carte de suivi
+        )
         st_folium(m_petit, width=700, height=500, key="folium_map_petit")
     else:
         st.info("Impossible d'afficher la carte de suivi.")
