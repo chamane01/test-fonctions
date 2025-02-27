@@ -284,6 +284,10 @@ if "pairs" not in st.session_state:
 if "markers_by_pair" not in st.session_state:
     st.session_state.markers_by_pair = {}
 
+# Exemple de dictionnaires pour les classes et tailles (à adapter selon vos besoins)
+class_color = {"Classe1": "#FF0000", "Classe2": "#00FF00", "Classe3": "#0000FF"}
+gravity_sizes = {1: 5, 2: 7, 3: 9}
+
 # Chargement des routes
 with open("routeQSD.txt", "r") as f:
     routes_data = json.load(f)
@@ -356,10 +360,12 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
                 format="%.3f"
             )
             st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
-            if st.button("configuration 1"):
+            # Bouton unique pour générer et télécharger le ZIP de prétraitement
+            if st.button("Générer les images prétraitées"):
                 zip_buffer = io.BytesIO()
                 with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                     for i, info in enumerate(images_info):
+                        # Calcul de l'angle de vol
                         if len(images_info) >= 2:
                             if i == 0:
                                 dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
@@ -373,6 +379,7 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
                             flight_angle_i = math.degrees(math.atan2(dx, dy))
                         else:
                             flight_angle_i = 0
+                        # Conversion Configuration 1 (TIFF PETIT)
                         tiff_bytes = convert_to_tiff_in_memory(
                             image_file=io.BytesIO(info["data"]),
                             pixel_size=pixel_size,
@@ -381,33 +388,9 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
                             rotation_angle=-flight_angle_i,
                             scaling_factor=1/5
                         )
-                        output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
-                        zip_file.writestr(output_filename, tiff_bytes)
-                zip_buffer.seek(0)
-                st.session_state["conversion_tiff1"] = zip_buffer.getvalue()
-                st.download_button(
-                    label="Télécharger toutes les images GeoTIFF (ZIP)",
-                    data=zip_buffer,
-                    file_name="images_geotiff.zip",
-                    mime="application/zip"
-                )
-            if st.button("configuration 2"):
-                zip_buffer_geotiff_x2 = io.BytesIO()
-                with zipfile.ZipFile(zip_buffer_geotiff_x2, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                    for i, info in enumerate(images_info):
-                        if len(images_info) >= 2:
-                            if i == 0:
-                                dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
-                                dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
-                            elif i == len(images_info) - 1:
-                                dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
-                                dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
-                            else:
-                                dx = images_info[i+1]["utm"][0] - images_info[i-1]["utm"][0]
-                                dy = images_info[i+1]["utm"][1] - images_info[i-1]["utm"][1]
-                            flight_angle_i = math.degrees(math.atan2(dx, dy))
-                        else:
-                            flight_angle_i = 0
+                        output_filename_tiff1 = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
+                        zip_file.writestr(output_filename_tiff1, tiff_bytes)
+                        # Conversion Configuration 2 (TIFF GRAND)
                         tiff_bytes_x2 = convert_to_tiff_in_memory(
                             image_file=io.BytesIO(info["data"]),
                             pixel_size=pixel_size * 2,
@@ -416,33 +399,9 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
                             rotation_angle=-flight_angle_i,
                             scaling_factor=1/3
                         )
-                        output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
-                        zip_file.writestr(output_filename, tiff_bytes_x2)
-                zip_buffer_geotiff_x2.seek(0)
-                st.session_state["conversion_tiff2"] = zip_buffer_geotiff_x2.getvalue()
-                st.download_button(
-                    label="Télécharger toutes les images GeoTIFF x2 (ZIP)",
-                    data=zip_buffer_geotiff_x2,
-                    file_name="images_geotiff_x2.zip",
-                    mime="application/zip"
-                )
-            if st.button("configuration images"):
-                zip_buffer_jpeg = io.BytesIO()
-                with zipfile.ZipFile(zip_buffer_jpeg, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                    for i, info in enumerate(images_info):
-                        if len(images_info) >= 2:
-                            if i == 0:
-                                dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
-                                dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
-                            elif i == len(images_info) - 1:
-                                dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
-                                dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
-                            else:
-                                dx = images_info[i+1]["utm"][0] - images_info[i-1]["utm"][0]
-                                dy = images_info[i+1]["utm"][1] - images_info[i-1]["utm"][1]
-                            flight_angle_i = math.degrees(math.atan2(dx, dy))
-                        else:
-                            flight_angle_i = 0
+                        output_filename_tiff2 = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
+                        zip_file.writestr(output_filename_tiff2, tiff_bytes_x2)
+                        # Conversion Configuration images (JPEG avec métadonnées)
                         rotation_angle_i = -flight_angle_i
                         scaling_factor = 1
                         img = Image.open(io.BytesIO(info["data"]))
@@ -457,14 +416,14 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
                         T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
                         T3 = Affine.rotation(rotation_angle_i)
                         T4 = Affine.translation(center_x, center_y)
-                        transform = T4 * T3 * T2 * T1
+                        transform_affine = T4 * T3 * T2 * T1
                         corners = [(-new_width/2, -new_height/2),
                                    (new_width/2, -new_height/2),
                                    (new_width/2, new_height/2),
                                    (-new_width/2, new_height/2)]
                         corner_coords = []
                         for corner in corners:
-                            x, y = transform * corner
+                            x, y = transform_affine * corner
                             corner_coords.append((x, y))
                         metadata_str = f"Frame Coordinates: {corner_coords}"
                         try:
@@ -490,14 +449,14 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
                         else:
                             img.save(jpeg_buffer, format="JPEG")
                         jpeg_bytes = jpeg_buffer.getvalue()
-                        output_filename = info["filename"].rsplit(".", 1)[0] + "_with_frame_coords.jpg"
-                        zip_file.writestr(output_filename, jpeg_bytes)
-                zip_buffer_jpeg.seek(0)
-                st.session_state["conversion_images"] = zip_buffer_jpeg.getvalue()
+                        output_filename_jpeg = info["filename"].rsplit(".", 1)[0] + "_with_frame_coords.jpg"
+                        zip_file.writestr(output_filename_jpeg, jpeg_bytes)
+                zip_buffer.seek(0)
+                st.session_state["preprocessed_zip"] = zip_buffer.getvalue()
                 st.download_button(
-                    label="Télécharger toutes les images JPEG avec métadonnées de cadre (ZIP)",
-                    data=zip_buffer_jpeg,
-                    file_name="images_with_frame_coords.zip",
+                    label="Télécharger les images prétraitées (ZIP)",
+                    data=zip_buffer,
+                    file_name="images_pretraitees.zip",
                     mime="application/zip"
                 )
     else:
@@ -512,19 +471,20 @@ else:
     with tab_auto:
         st.header("Détection Automatique")
         if st.button("Utiliser les images converties (configuration images)"):
-            if "conversion_images" in st.session_state:
-                zip_bytes = st.session_state["conversion_images"]
+            if "preprocessed_zip" in st.session_state:
+                zip_bytes = st.session_state["preprocessed_zip"]
                 auto_converted_files = []
                 with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zip_file:
                     for filename in zip_file.namelist():
-                        file_data = zip_file.read(filename)
-                        file_obj = io.BytesIO(file_data)
-                        file_obj.name = filename
-                        auto_converted_files.append(file_obj)
+                        if filename.endswith("_with_frame_coords.jpg"):
+                            file_data = zip_file.read(filename)
+                            file_obj = io.BytesIO(file_data)
+                            file_obj.name = filename
+                            auto_converted_files.append(file_obj)
                 st.session_state["auto_converted_images"] = auto_converted_files
                 st.success(f"{len(auto_converted_files)} images converties chargées.")
             else:
-                st.error("Aucun résultat de conversion (configuration images) n'est disponible.")
+                st.error("Aucun résultat de conversion prétraitée n'est disponible.")
         auto_uploaded_images = st.file_uploader("Téléversez vos images JPEG ou PNG", type=["jpeg", "jpg", "png"], accept_multiple_files=True, key="auto_images")
         if auto_uploaded_images or st.session_state.get("auto_converted_images"):
             st.success("Les images pour la détection automatique sont disponibles.")
@@ -535,34 +495,36 @@ else:
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Utiliser résultats conversion TIFF GRAND (configuration 2)"):
-                if "conversion_tiff2" in st.session_state:
-                    zip_bytes = st.session_state["conversion_tiff2"]
+                if "preprocessed_zip" in st.session_state:
+                    zip_bytes = st.session_state["preprocessed_zip"]
                     manual_grand_files = []
                     with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zip_file:
                         for filename in zip_file.namelist():
-                            file_data = zip_file.read(filename)
-                            file_obj = io.BytesIO(file_data)
-                            file_obj.name = filename
-                            manual_grand_files.append(file_obj)
+                            if filename.endswith("_geotiff_x2.tif"):
+                                file_data = zip_file.read(filename)
+                                file_obj = io.BytesIO(file_data)
+                                file_obj.name = filename
+                                manual_grand_files.append(file_obj)
                     st.session_state["manual_grand_files"] = manual_grand_files
                     st.success(f"{len(manual_grand_files)} fichiers TIFF GRAND chargés depuis conversion.")
                 else:
-                    st.error("Aucun résultat de conversion TIFF GRAND n'est disponible.")
+                    st.error("Aucun résultat de conversion prétraitée n'est disponible.")
         with col2:
             if st.button("Utiliser résultats conversion TIFF PETIT (configuration 1)"):
-                if "conversion_tiff1" in st.session_state:
-                    zip_bytes = st.session_state["conversion_tiff1"]
+                if "preprocessed_zip" in st.session_state:
+                    zip_bytes = st.session_state["preprocessed_zip"]
                     manual_petit_files = []
                     with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zip_file:
                         for filename in zip_file.namelist():
-                            file_data = zip_file.read(filename)
-                            file_obj = io.BytesIO(file_data)
-                            file_obj.name = filename
-                            manual_petit_files.append(file_obj)
+                            if filename.endswith("_geotiff.tif"):
+                                file_data = zip_file.read(filename)
+                                file_obj = io.BytesIO(file_data)
+                                file_obj.name = filename
+                                manual_petit_files.append(file_obj)
                     st.session_state["manual_petit_files"] = manual_petit_files
                     st.success(f"{len(manual_petit_files)} fichiers TIFF PETIT chargés depuis conversion.")
                 else:
-                    st.error("Aucun résultat de conversion TIFF PETIT n'est disponible.")
+                    st.error("Aucun résultat de conversion prétraitée n'est disponible.")
         uploaded_files_grand = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_grand")
         uploaded_files_petit = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_petit")
         if (uploaded_files_grand or st.session_state.get("manual_grand_files")) and (uploaded_files_petit or st.session_state.get("manual_petit_files")):
