@@ -21,14 +21,23 @@ import matplotlib.pyplot as plt
 import json
 from shapely.geometry import Point, LineString
 
+# Helper class to simulate UploadedFile objects from preprocessed images
+class FakeUploadedFile:
+    def __init__(self, name, data):
+        self.name = name
+        self._data = data
+    def read(self):
+        return self._data
+
 # Navigation dans la barre latérale
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.radio("Choisissez l'application", ("Prétraitement", "Traitement"))
 
+##############################################
+# Prétraitement
+##############################################
 if app_mode == "Prétraitement":
-    # ---------------------------
-    # CODE : Prétraitement (anciennement Conversion JPEG → GeoTIFF & Export JPEG)
-    # ---------------------------
+    st.title("Prétraitement")
     
     # Fonctions d'extraction et conversion
     def extract_exif_info(image_file):
@@ -106,7 +115,7 @@ if app_mode == "Prétraitement":
         T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
         T3 = Affine.rotation(rotation_angle)
         T4 = Affine.translation(center_x, center_y)
-        transform = T4 * T3 * T2 * T1
+        transform_affine = T4 * T3 * T2 * T1
 
         with rasterio.open(
             output_path, 'w',
@@ -116,7 +125,7 @@ if app_mode == "Prétraitement":
             count=3 if len(img_array.shape) == 3 else 1,
             dtype=img_array.dtype,
             crs=utm_crs,
-            transform=transform
+            transform=transform_affine
         ) as dst:
             if len(img_array.shape) == 3:
                 for i in range(3):
@@ -140,7 +149,7 @@ if app_mode == "Prétraitement":
         T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
         T3 = Affine.rotation(rotation_angle)
         T4 = Affine.translation(center_x, center_y)
-        transform = T4 * T3 * T2 * T1
+        transform_affine = T4 * T3 * T2 * T1
 
         memfile = MemoryFile()
         with memfile.open(
@@ -150,7 +159,7 @@ if app_mode == "Prétraitement":
             count=3 if len(img_array.shape) == 3 else 1,
             dtype=img_array.dtype,
             crs=utm_crs,
-            transform=transform
+            transform=transform_affine
         ) as dst:
             if len(img_array.shape) == 3:
                 for i in range(3):
@@ -159,8 +168,6 @@ if app_mode == "Prétraitement":
                 dst.write(img_array, 1)
         return memfile.read()
 
-    st.title("Prétraitement")
-    
     uploaded_files = st.file_uploader(
         "Téléversez une ou plusieurs images (JPG/JPEG) avec métadonnées EXIF",
         type=["jpg", "jpeg"],
@@ -219,359 +226,229 @@ if app_mode == "Prétraitement":
             )
             st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
             
-            # Conversion automatique pour la configuration 1
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for i, info in enumerate(images_info):
-                    if len(images_info) >= 2:
-                        if i == 0:
-                            dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
-                            dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
-                        elif i == len(images_info) - 1:
-                            dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
-                            dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
-                        else:
-                            dx = images_info[i+1]["utm"][0] - images_info[i-1]["utm"][0]
-                            dy = images_info[i+1]["utm"][1] - images_info[i-1]["utm"][1]
-                        flight_angle_i = math.degrees(math.atan2(dx, dy))
+            # Prétraitement Config 1 (GeoTIFF config1)
+            config1_files = []
+            for i, info in enumerate(images_info):
+                if len(images_info) >= 2:
+                    if i == 0:
+                        dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
+                        dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
+                    elif i == len(images_info) - 1:
+                        dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
+                        dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
                     else:
-                        flight_angle_i = 0
-                    tiff_bytes = convert_to_tiff_in_memory(
-                        image_file=io.BytesIO(info["data"]),
-                        pixel_size=pixel_size,
-                        utm_center=info["utm"],
-                        utm_crs=info["utm_crs"],
-                        rotation_angle=-flight_angle_i,
-                        scaling_factor=1/5
-                    )
-                    output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
-                    zip_file.writestr(output_filename, tiff_bytes)
-            zip_buffer.seek(0)
+                        dx = images_info[i+1]["utm"][0] - images_info[i-1]["utm"][0]
+                        dy = images_info[i+1]["utm"][1] - images_info[i-1]["utm"][1]
+                    flight_angle_i = math.degrees(math.atan2(dx, dy))
+                else:
+                    flight_angle_i = 0
+                tiff_bytes = convert_to_tiff_in_memory(
+                    image_file=io.BytesIO(info["data"]),
+                    pixel_size=pixel_size,
+                    utm_center=info["utm"],
+                    utm_crs=info["utm_crs"],
+                    rotation_angle=-flight_angle_i,
+                    scaling_factor=1/5
+                )
+                output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
+                config1_files.append({"filename": output_filename, "data": tiff_bytes})
+            # Création du ZIP pour config 1
+            zip_buffer_config1 = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer_config1, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for file_dict in config1_files:
+                    zip_file.writestr(file_dict["filename"], file_dict["data"])
+            zip_buffer_config1.seek(0)
             st.download_button(
                 label="Télécharger toutes les images GeoTIFF (ZIP) - Config 1",
-                data=zip_buffer,
+                data=zip_buffer_config1,
                 file_name="images_geotiff.zip",
                 mime="application/zip"
             )
             
-            # Conversion automatique pour la configuration 2
-            zip_buffer_geotiff_x2 = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer_geotiff_x2, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for i, info in enumerate(images_info):
-                    if len(images_info) >= 2:
-                        if i == 0:
-                            dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
-                            dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
-                        elif i == len(images_info) - 1:
-                            dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
-                            dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
-                        else:
-                            dx = images_info[i+1]["utm"][0] - images_info[i-1]["utm"][0]
-                            dy = images_info[i+1]["utm"][1] - images_info[i-1]["utm"][1]
-                        flight_angle_i = math.degrees(math.atan2(dx, dy))
+            # Prétraitement Config 2 (GeoTIFF x2)
+            config2_files = []
+            for i, info in enumerate(images_info):
+                if len(images_info) >= 2:
+                    if i == 0:
+                        dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
+                        dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
+                    elif i == len(images_info) - 1:
+                        dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
+                        dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
                     else:
-                        flight_angle_i = 0
-                    tiff_bytes_x2 = convert_to_tiff_in_memory(
-                        image_file=io.BytesIO(info["data"]),
-                        pixel_size=pixel_size * 2,
-                        utm_center=info["utm"],
-                        utm_crs=info["utm_crs"],
-                        rotation_angle=-flight_angle_i,
-                        scaling_factor=1/3
-                    )
-                    output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
-                    zip_file.writestr(output_filename, tiff_bytes_x2)
-            zip_buffer_geotiff_x2.seek(0)
+                        dx = images_info[i+1]["utm"][0] - images_info[i-1]["utm"][0]
+                        dy = images_info[i+1]["utm"][1] - images_info[i-1]["utm"][1]
+                    flight_angle_i = math.degrees(math.atan2(dx, dy))
+                else:
+                    flight_angle_i = 0
+                tiff_bytes_x2 = convert_to_tiff_in_memory(
+                    image_file=io.BytesIO(info["data"]),
+                    pixel_size=pixel_size * 2,
+                    utm_center=info["utm"],
+                    utm_crs=info["utm_crs"],
+                    rotation_angle=-flight_angle_i,
+                    scaling_factor=1/3
+                )
+                output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
+                config2_files.append({"filename": output_filename, "data": tiff_bytes_x2})
+            # Création du ZIP pour config 2
+            zip_buffer_config2 = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer_config2, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for file_dict in config2_files:
+                    zip_file.writestr(file_dict["filename"], file_dict["data"])
+            zip_buffer_config2.seek(0)
             st.download_button(
                 label="Télécharger toutes les images GeoTIFF x2 (ZIP) - Config 2",
-                data=zip_buffer_geotiff_x2,
+                data=zip_buffer_config2,
                 file_name="images_geotiff_x2.zip",
                 mime="application/zip"
             )
             
-            # Conversion automatique pour la configuration Images (JPEG avec métadonnées de cadre)
-            zip_buffer_jpeg = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer_jpeg, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for i, info in enumerate(images_info):
-                    if len(images_info) >= 2:
-                        if i == 0:
-                            dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
-                            dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
-                        elif i == len(images_info) - 1:
-                            dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
-                            dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
-                        else:
-                            dx = images_info[i+1]["utm"][0] - images_info[i-1]["utm"][0]
-                            dy = images_info[i+1]["utm"][1] - images_info[i-1]["utm"][1]
-                        flight_angle_i = math.degrees(math.atan2(dx, dy))
+            # Prétraitement Config Images (JPEG avec métadonnées de cadre)
+            config_images_files = []
+            for i, info in enumerate(images_info):
+                if len(images_info) >= 2:
+                    if i == 0:
+                        dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
+                        dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
+                    elif i == len(images_info) - 1:
+                        dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
+                        dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
                     else:
-                        flight_angle_i = 0
-                    rotation_angle_i = -flight_angle_i
-                    
-                    # Aucun redimensionnement pour cette configuration
-                    scaling_factor = 1
-                    img = Image.open(io.BytesIO(info["data"]))
-                    img = ImageOps.exif_transpose(img)
-                    orig_width, orig_height = img.size
-                    new_width = int(orig_width * scaling_factor)
-                    new_height = int(orig_height * scaling_factor)
-                    img = img.resize((new_width, new_height), Image.LANCZOS)
-                    
-                    effective_pixel_size = pixel_size / scaling_factor
-                    center_x, center_y = info["utm"]
-                    T1 = Affine.translation(-new_width/2, -new_height/2)
-                    T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
-                    T3 = Affine.rotation(rotation_angle_i)
-                    T4 = Affine.translation(center_x, center_y)
-                    transform = T4 * T3 * T2 * T1
-                    
-                    # Calcul des coordonnées des 4 coins du cadre
-                    corners = [
-                        (-new_width/2, -new_height/2),
-                        (new_width/2, -new_height/2),
-                        (new_width/2, new_height/2),
-                        (-new_width/2, new_height/2)
-                    ]
-                    corner_coords = []
-                    for corner in corners:
-                        x, y = transform * corner
-                        corner_coords.append((x, y))
-                    
-                    metadata_str = f"Frame Coordinates: {corner_coords}"
-                    
+                        dx = images_info[i+1]["utm"][0] - images_info[i-1]["utm"][0]
+                        dy = images_info[i+1]["utm"][1] - images_info[i-1]["utm"][1]
+                    flight_angle_i = math.degrees(math.atan2(dx, dy))
+                else:
+                    flight_angle_i = 0
+                rotation_angle_i = -flight_angle_i
+                scaling_factor = 1
+                img = Image.open(io.BytesIO(info["data"]))
+                img = ImageOps.exif_transpose(img)
+                orig_width, orig_height = img.size
+                new_width = int(orig_width * scaling_factor)
+                new_height = int(orig_height * scaling_factor)
+                img = img.resize((new_width, new_height), Image.LANCZOS)
+                effective_pixel_size = pixel_size / scaling_factor
+                center_x, center_y = info["utm"]
+                T1 = Affine.translation(-new_width/2, -new_height/2)
+                T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
+                T3 = Affine.rotation(rotation_angle_i)
+                T4 = Affine.translation(center_x, center_y)
+                transform_affine = T4 * T3 * T2 * T1
+                corners = [
+                    (-new_width/2, -new_height/2),
+                    (new_width/2, -new_height/2),
+                    (new_width/2, new_height/2),
+                    (-new_width/2, new_height/2)
+                ]
+                corner_coords = []
+                for corner in corners:
+                    x, y = transform_affine * corner
+                    corner_coords.append((x, y))
+                metadata_str = f"Frame Coordinates: {corner_coords}"
+                try:
+                    import piexif
+                    if "exif" in img.info:
+                        exif_dict = piexif.load(img.info["exif"])
+                    else:
+                        exif_dict = {"0th":{}, "Exif":{}, "GPS":{}, "1st":{}, "thumbnail":None}
+                    user_comment = metadata_str
                     try:
-                        import piexif
-                        if "exif" in img.info:
-                            exif_dict = piexif.load(img.info["exif"])
-                        else:
-                            exif_dict = {"0th":{}, "Exif":{}, "GPS":{}, "1st":{}, "thumbnail":None}
-                        user_comment = metadata_str
-                        try:
-                            exif_dict["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.dump(user_comment, encoding="unicode")
-                        except AttributeError:
-                            prefix = b"UNICODE\0"
-                            encoded_comment = user_comment.encode("utf-16")
-                            exif_dict["Exif"][piexif.ExifIFD.UserComment] = prefix + encoded_comment
-                        exif_bytes = piexif.dump(exif_dict)
-                    except ImportError:
-                        st.error("La librairie piexif est requise pour ajouter des métadonnées JPEG. Veuillez l'installer.")
-                        exif_bytes = None
-                    
-                    jpeg_buffer = io.BytesIO()
-                    if exif_bytes:
-                        img.save(jpeg_buffer, format="JPEG", exif=exif_bytes)
-                    else:
-                        img.save(jpeg_buffer, format="JPEG")
-                    jpeg_bytes = jpeg_buffer.getvalue()
-                    output_filename = info["filename"].rsplit(".", 1)[0] + "_with_frame_coords.jpg"
-                    zip_file.writestr(output_filename, jpeg_bytes)
-            zip_buffer_jpeg.seek(0)
+                        exif_dict["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.dump(user_comment, encoding="unicode")
+                    except AttributeError:
+                        prefix = b"UNICODE\0"
+                        encoded_comment = user_comment.encode("utf-16")
+                        exif_dict["Exif"][piexif.ExifIFD.UserComment] = prefix + encoded_comment
+                    exif_bytes = piexif.dump(exif_dict)
+                except ImportError:
+                    st.error("La librairie piexif est requise pour ajouter des métadonnées JPEG. Veuillez l'installer.")
+                    exif_bytes = None
+                jpeg_buffer = io.BytesIO()
+                if exif_bytes:
+                    img.save(jpeg_buffer, format="JPEG", exif=exif_bytes)
+                else:
+                    img.save(jpeg_buffer, format="JPEG")
+                jpeg_bytes = jpeg_buffer.getvalue()
+                output_filename = info["filename"].rsplit(".", 1)[0] + "_with_frame_coords.jpg"
+                config_images_files.append({"filename": output_filename, "data": jpeg_bytes})
+            # Création du ZIP pour config images
+            zip_buffer_config_images = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer_config_images, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for file_dict in config_images_files:
+                    zip_file.writestr(file_dict["filename"], file_dict["data"])
+            zip_buffer_config_images.seek(0)
             st.download_button(
                 label="Télécharger toutes les images JPEG avec métadonnées de cadre (ZIP) - Config Images",
-                data=zip_buffer_jpeg,
+                data=zip_buffer_config_images,
                 file_name="images_with_frame_coords.zip",
                 mime="application/zip"
             )
+            
+            # Stocker les images prétraitées dans la session pour utilisation ultérieure
+            st.session_state.config1_files = config1_files
+            st.session_state.config2_files = config2_files
+            st.session_state.config_images_files = config_images_files
+
+##############################################
+# Traitement
+##############################################
 else:
-    # ---------------------------
-    # CODE : Traitement (anciennement Détection d'anomalies)
-    # ---------------------------
-    
-    # Définition des paramètres et dictionnaires
-    class_color = {
-        "deformations ornierage": "#FF0000",
-        "fissurations": "#00FF00",
-        "Faiençage": "#0000FF",
-        "fissure de retrait": "#FFFF00",
-        "fissure anarchique": "#FF00FF",
-        "reparations": "#00FFFF",
-        "nid de poule": "#FFA500",
-        "arrachements": "#800080",
-        "fluage": "#008000",
-        "denivellement accotement": "#000080",
-        "chaussée detruite": "#FFC0CB",
-        "envahissement vegetations": "#A52A2A",
-        "assainissements": "#808080",
-        "depot de terre": "#8B4513"
-    }
-    gravity_sizes = {1: 5, 2: 10, 3: 15}
-
-    # Chargement et gestion des routes
-    with open("routeQSD.txt", "r") as f:
-        routes_data = json.load(f)
-    routes_ci = []
-    for feature in routes_data["features"]:
-        if feature["geometry"]["type"] == "LineString":
-            routes_ci.append({
-                "coords": feature["geometry"]["coordinates"],
-                "nom": feature["properties"].get("ID", "Route inconnue")
-            })
-
-    def assign_route_to_marker(lat, lon, routes):
-        marker_point = Point(lon, lat)
-        min_distance = float('inf')
-        closest_route = "Route inconnue"
-        for route in routes:
-            line = LineString(route["coords"])
-            distance = marker_point.distance(line)
-            if distance < min_distance:
-                min_distance = distance
-                closest_route = route["nom"]
-        threshold = 0.01  # Seuil en degrés
-        return closest_route if min_distance <= threshold else "Route inconnue"
-
-    def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
-        with rasterio.open(input_tiff) as src:
-            transform_, width, height = calculate_default_transform(
-                src.crs, target_crs, src.width, src.height, *src.bounds
-            )
-            kwargs = src.meta.copy()
-            kwargs.update({
-                "crs": target_crs,
-                "transform": transform_,
-                "width": width,
-                "height": height,
-            })
-            unique_id = str(uuid.uuid4())[:8]
-            output_tiff = f"reprojected_{unique_id}.tif"
-            with rasterio.open(output_tiff, "w", **kwargs) as dst:
-                for i in range(1, src.count + 1):
-                    reproject(
-                        source=rasterio.band(src, i),
-                        destination=rasterio.band(dst, i),
-                        src_transform=src.transform,
-                        src_crs=src.crs,
-                        dst_transform=transform_,
-                        dst_crs=target_crs,
-                        resampling=Resampling.nearest,
-                    )
-        return output_tiff
-
-    def apply_color_gradient(tiff_path, output_png_path):
-        with rasterio.open(tiff_path) as src:
-            data = src.read(1)
-            cmap = plt.get_cmap("terrain")
-            norm = plt.Normalize(vmin=data.min(), vmax=data.max())
-            colored_image = cmap(norm(data))
-            plt.imsave(output_png_path, colored_image)
-            plt.close()
-
-    def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1, show=True, control=True):
-        with open(image_path, "rb") as f:
-            image_data = f.read()
-        image_base64 = base64.b64encode(image_data).decode("utf-8")
-        img_data_url = f"data:image/png;base64,{image_base64}"
-        folium.raster_layers.ImageOverlay(
-            image=img_data_url,
-            bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
-            name=layer_name,
-            opacity=opacity,
-            show=show,
-            control=control
-        ).add_to(map_object)
-
-    def normalize_data(data):
-        lower = np.percentile(data, 2)
-        upper = np.percentile(data, 98)
-        norm_data = np.clip(data, lower, upper)
-        norm_data = (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
-        return norm_data
-
-    def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
-                   hide_osm=False, tiff_opacity=1, tiff_show=True, tiff_control=True,
-                   draw_routes=True, add_draw_tool=True):
-        if hide_osm:
-            m = folium.Map(location=[center_lat, center_lon], tiles=None)
-        else:
-            m = folium.Map(location=[center_lat, center_lon])
-        if display_path:
-            add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=tiff_opacity,
-                              show=tiff_show, control=tiff_control)
-        if draw_routes:
-            for route in routes_ci:
-                poly_coords = [(lat, lon) for lon, lat in route["coords"]]
-                folium.PolyLine(
-                    locations=poly_coords,
-                    color="blue",
-                    weight=3,
-                    opacity=0.7,
-                    tooltip=route["nom"]
-                ).add_to(m)
-        if add_draw_tool:
-            draw = Draw(
-                draw_options={
-                    'marker': True,
-                    'polyline': False,
-                    'polygon': False,
-                    'rectangle': False,
-                    'circle': False,
-                    'circlemarker': False,
-                },
-                edit_options={'edit': True}
-            )
-            draw.add_to(m)
-        m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
-        folium.LayerControl().add_to(m)
-        if marker_data:
-            for marker in marker_data:
-                lat = marker["lat"]
-                lon = marker["long"]
-                color = class_color.get(marker["classe"], "#000000")
-                radius = gravity_sizes.get(marker["gravite"], 5)
-                folium.CircleMarker(
-                    location=[lat, lon],
-                    radius=radius,
-                    color=color,
-                    fill=True,
-                    fill_color=color,
-                    fill_opacity=0.7,
-                    tooltip=f"{marker['classe']} (Gravité {marker['gravite']}) - Route : {marker.get('routes', 'Route inconnue')} - Détection: {marker.get('detection', 'Inconnue')}"
-                ).add_to(m)
-        return m
-
-    def get_reprojected_and_center(uploaded_file, group):
-        unique_id = str(uuid.uuid4())[:8]
-        temp_path = f"uploaded_{group}_{unique_id}.tif"
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_file.read())
-        with rasterio.open(temp_path) as src:
-            crs_str = src.crs.to_string()
-        if crs_str != "EPSG:4326":
-            reproj_path = reproject_tiff(temp_path, "EPSG:4326")
-        else:
-            reproj_path = temp_path
-        with rasterio.open(reproj_path) as src:
-            bounds = src.bounds
-            center_lon = (bounds.left + bounds.right) / 2
-            center_lat = (bounds.bottom + bounds.top) / 2
-        return {"path": reproj_path, "center": (center_lon, center_lat), "bounds": bounds, "temp_original": temp_path}
-
-    # Initialisation de la session state
-    if "current_pair_index" not in st.session_state:
-        st.session_state.current_pair_index = 0
-    if "pairs" not in st.session_state:
-        st.session_state.pairs = []  # Liste des paires { "grand":..., "petit":... }
-    if "markers_by_pair" not in st.session_state:
-        st.session_state.markers_by_pair = {}  # Marqueurs par indice de paire
-
     st.title("Traitement")
-
-    # Interface en onglets pour détection automatique et manuelle
+    
+    # Boutons de récupération d'images prétraitées
+    with st.expander("Charger images prétraitées"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("Utiliser images prétraitées (Auto)"):
+                if "config_images_files" in st.session_state:
+                    st.session_state.auto_uploaded_images = [FakeUploadedFile(item["filename"], item["data"]) for item in st.session_state.config_images_files]
+                    st.success("Images JPEG prétraitées chargées pour détection automatique.")
+                else:
+                    st.error("Aucune image prétraitée disponible.")
+        with col2:
+            if st.button("Utiliser images x2 (Manuel)"):
+                if "config2_files" in st.session_state:
+                    st.session_state.tiff_grand_files = [FakeUploadedFile(item["filename"], item["data"]) for item in st.session_state.config2_files]
+                    st.success("Images x2 chargées pour TIFF GRAND.")
+                else:
+                    st.error("Aucune image prétraitée x2 disponible.")
+        with col3:
+            if st.button("Utiliser images x1 (Manuel)"):
+                if "config1_files" in st.session_state:
+                    st.session_state.tiff_petit_files = [FakeUploadedFile(item["filename"], item["data"]) for item in st.session_state.config1_files]
+                    st.success("Images x1 chargées pour TIFF PETIT.")
+                else:
+                    st.error("Aucune image prétraitée x1 disponible.")
+    
+    # Onglets pour détection automatique et manuelle
     tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
-
+    
     with tab_auto:
         st.header("Détection Automatique")
-        auto_uploaded_images = st.file_uploader("Téléversez vos images JPEG ou PNG", type=["jpeg", "jpg", "png"], accept_multiple_files=True, key="auto_images")
+        if "auto_uploaded_images" in st.session_state:
+            auto_uploaded_images = st.session_state.auto_uploaded_images
+            st.success("Images prétraitées chargées pour détection automatique.")
+        else:
+            auto_uploaded_images = st.file_uploader("Téléversez vos images JPEG ou PNG", type=["jpeg", "jpg", "png"], accept_multiple_files=True, key="auto_images")
         if auto_uploaded_images:
             st.success("Les images ont été bien téléversées.")
             # La logique de détection automatique sera implémentée ultérieurement.
         else:
             st.info("Aucune image téléversée pour la détection automatique.")
-
+    
     with tab_manuel:
         st.header("Détection Manuelle")
-        uploaded_files_grand = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_grand")
-        uploaded_files_petit = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_petit")
+        # Si des images préchargées existent, les utiliser sinon le téléversement manuel
+        if "tiff_grand_files" in st.session_state:
+            uploaded_files_grand = st.session_state.tiff_grand_files
+            st.info("Images TIFF GRAND préchargées.")
+        else:
+            uploaded_files_grand = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_grand")
+        if "tiff_petit_files" in st.session_state:
+            uploaded_files_petit = st.session_state.tiff_petit_files
+            st.info("Images TIFF PETIT préchargées.")
+        else:
+            uploaded_files_petit = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_petit")
         
         if uploaded_files_grand and uploaded_files_petit:
             if len(uploaded_files_grand) != len(uploaded_files_petit):
@@ -579,6 +456,49 @@ else:
             else:
                 grand_list = []
                 petit_list = []
+                def get_reprojected_and_center(uploaded_file, group):
+                    unique_id = str(uuid.uuid4())[:8]
+                    temp_path = f"uploaded_{group}_{unique_id}.tif"
+                    with open(temp_path, "wb") as f:
+                        f.write(uploaded_file.read())
+                    with rasterio.open(temp_path) as src:
+                        crs_str = src.crs.to_string()
+                    if crs_str != "EPSG:4326":
+                        def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
+                            with rasterio.open(input_tiff) as src:
+                                transform_, width, height = calculate_default_transform(
+                                    src.crs, target_crs, src.width, src.height, *src.bounds
+                                )
+                                kwargs = src.meta.copy()
+                                kwargs.update({
+                                    "crs": target_crs,
+                                    "transform": transform_,
+                                    "width": width,
+                                    "height": height,
+                                })
+                                unique_id_inner = str(uuid.uuid4())[:8]
+                                output_tiff = f"reprojected_{unique_id_inner}.tif"
+                                with rasterio.open(output_tiff, "w", **kwargs) as dst:
+                                    for i in range(1, src.count + 1):
+                                        reproject(
+                                            source=rasterio.band(src, i),
+                                            destination=rasterio.band(dst, i),
+                                            src_transform=src.transform,
+                                            src_crs=src.crs,
+                                            dst_transform=transform_,
+                                            dst_crs=target_crs,
+                                            resampling=Resampling.nearest,
+                                        )
+                            return output_tiff
+                        reproj_path = reproject_tiff(temp_path, "EPSG:4326")
+                    else:
+                        reproj_path = temp_path
+                    with rasterio.open(reproj_path) as src:
+                        bounds = src.bounds
+                        center_lon = (bounds.left + bounds.right) / 2
+                        center_lat = (bounds.bottom + bounds.top) / 2
+                    return {"path": reproj_path, "center": (center_lon, center_lat), "bounds": bounds, "temp_original": temp_path}
+                
                 for file in uploaded_files_grand:
                     file.seek(0)
                     grand_list.append(get_reprojected_and_center(file, "grand"))
@@ -606,10 +526,15 @@ else:
                 current_pair = st.session_state.pairs[current_index]
 
                 # Traitement de la paire courante : génération des PNG
-                reproj_grand_path = current_pair["grand"]["path"]
-                with rasterio.open(reproj_grand_path) as src:
+                with rasterio.open(current_pair["grand"]["path"]) as src:
                     grand_bounds = src.bounds
                     data = src.read()
+                    def normalize_data(data):
+                        lower = np.percentile(data, 2)
+                        upper = np.percentile(data, 98)
+                        norm_data = np.clip(data, lower, upper)
+                        norm_data = (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
+                        return norm_data
                     if data.shape[0] >= 3:
                         r = normalize_data(data[0])
                         g = normalize_data(data[1])
@@ -625,8 +550,7 @@ else:
                 image_grand.save(temp_png_grand)
                 display_path_grand = temp_png_grand
 
-                reproj_petit_path = current_pair["petit"]["path"]
-                with rasterio.open(reproj_petit_path) as src:
+                with rasterio.open(current_pair["petit"]["path"]) as src:
                     petit_bounds = src.bounds
                     data = src.read()
                     if data.shape[0] >= 3:
@@ -653,12 +577,102 @@ else:
 
                 # Carte de dessin pour TIFF GRAND (OSM masqué)
                 st.subheader("Carte de dessin")
-                map_placeholder_grand = st.empty()
+                def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1, show=True, control=True):
+                    with open(image_path, "rb") as f:
+                        image_data = f.read()
+                    image_base64 = base64.b64encode(image_data).decode("utf-8")
+                    img_data_url = f"data:image/png;base64,{image_base64}"
+                    folium.raster_layers.ImageOverlay(
+                        image=img_data_url,
+                        bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
+                        name=layer_name,
+                        opacity=opacity,
+                        show=show,
+                        control=control
+                    ).add_to(map_object)
+                def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
+                               hide_osm=False, tiff_opacity=1, tiff_show=True, tiff_control=True,
+                               draw_routes=True, add_draw_tool=True):
+                    if hide_osm:
+                        m = folium.Map(location=[center_lat, center_lon], tiles=None)
+                    else:
+                        m = folium.Map(location=[center_lat, center_lon])
+                    if display_path:
+                        add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=tiff_opacity,
+                                          show=tiff_show, control=tiff_control)
+                    with open("routeQSD.txt", "r") as f:
+                        routes_data = json.load(f)
+                    routes_ci = []
+                    for feature in routes_data["features"]:
+                        if feature["geometry"]["type"] == "LineString":
+                            routes_ci.append({
+                                "coords": feature["geometry"]["coordinates"],
+                                "nom": feature["properties"].get("ID", "Route inconnue")
+                            })
+                    if draw_routes:
+                        for route in routes_ci:
+                            poly_coords = [(lat, lon) for lon, lat in route["coords"]]
+                            folium.PolyLine(
+                                locations=poly_coords,
+                                color="blue",
+                                weight=3,
+                                opacity=0.7,
+                                tooltip=route["nom"]
+                            ).add_to(m)
+                    if add_draw_tool:
+                        from folium.plugins import Draw
+                        draw = Draw(
+                            draw_options={
+                                'marker': True,
+                                'polyline': False,
+                                'polygon': False,
+                                'rectangle': False,
+                                'circle': False,
+                                'circlemarker': False,
+                            },
+                            edit_options={'edit': True}
+                        )
+                        draw.add_to(m)
+                    m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
+                    folium.LayerControl().add_to(m)
+                    class_color = {
+                        "deformations ornierage": "#FF0000",
+                        "fissurations": "#00FF00",
+                        "Faiençage": "#0000FF",
+                        "fissure de retrait": "#FFFF00",
+                        "fissure anarchique": "#FF00FF",
+                        "reparations": "#00FFFF",
+                        "nid de poule": "#FFA500",
+                        "arrachements": "#800080",
+                        "fluage": "#008000",
+                        "denivellement accotement": "#000080",
+                        "chaussée detruite": "#FFC0CB",
+                        "envahissement vegetations": "#A52A2A",
+                        "assainissements": "#808080",
+                        "depot de terre": "#8B4513"
+                    }
+                    gravity_sizes = {1: 5, 2: 10, 3: 15}
+                    if marker_data:
+                        for marker in marker_data:
+                            lat_m = marker["lat"]
+                            lon_m = marker["long"]
+                            color = class_color.get(marker["classe"], "#000000")
+                            radius = gravity_sizes.get(marker["gravite"], 5)
+                            folium.CircleMarker(
+                                location=[lat_m, lon_m],
+                                radius=radius,
+                                color=color,
+                                fill=True,
+                                fill_color=color,
+                                fill_opacity=0.7,
+                                tooltip=f"{marker['classe']} (Gravité {marker['gravite']}) - Route : {marker.get('routes', 'Route inconnue')} - Détection: {marker.get('detection', 'Inconnue')}"
+                            ).add_to(m)
+                    return m
+                
                 m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
                                      marker_data=None, hide_osm=True, draw_routes=False, add_draw_tool=True)
                 result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
-
-                # Extraction et classification des marqueurs pour la paire courante
+                
                 features = []
                 all_drawings = result_grand.get("all_drawings")
                 if all_drawings:
@@ -666,8 +680,9 @@ else:
                         features = all_drawings.get("features", [])
                     elif isinstance(all_drawings, list):
                         features = all_drawings
-
-                global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values())
+                if "markers_by_pair" not in st.session_state:
+                    st.session_state.markers_by_pair = {}
+                global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values()) if st.session_state.markers_by_pair else 0
                 new_markers = []
                 if features:
                     st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité :")
@@ -675,21 +690,59 @@ else:
                         if feature.get("geometry", {}).get("type") == "Point":
                             coords = feature.get("geometry", {}).get("coordinates")
                             if coords and isinstance(coords, list) and len(coords) >= 2:
-                                lon, lat = coords[0], coords[1]
-                                percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
-                                percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
+                                lon_pt, lat_pt = coords[0], coords[1]
+                                percent_x = (lon_pt - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
+                                percent_y = (lat_pt - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
                                 new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
                                 new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
-                                utm_x_petit, utm_y_petit = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
-                                utm_coords_petit = (round(utm_x_petit[0], 2), round(utm_y_petit[0], 2))
+                                utm_zone_petit = int((new_lon + 180) / 6) + 1
+                                utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"
+                                utm_coords = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
+                                utm_coords_petit = (round(utm_coords[0][0], 2), round(utm_coords[1][0], 2))
                             else:
                                 new_lon = new_lat = None
                                 utm_coords_petit = "Inconnues"
+                            def assign_route_to_marker(lat_val, lon_val, routes):
+                                marker_point = Point(lon_val, lat_val)
+                                min_distance = float('inf')
+                                closest_route = "Route inconnue"
+                                for route in routes:
+                                    line = LineString(route["coords"])
+                                    distance = marker_point.distance(line)
+                                    if distance < min_distance:
+                                        min_distance = distance
+                                        closest_route = route["nom"]
+                                threshold = 0.01
+                                return closest_route if min_distance <= threshold else "Route inconnue"
+                            with open("routeQSD.txt", "r") as f:
+                                routes_data = json.load(f)
+                            routes_ci = []
+                            for feature_route in routes_data["features"]:
+                                if feature_route["geometry"]["type"] == "LineString":
+                                    routes_ci.append({
+                                        "coords": feature_route["geometry"]["coordinates"],
+                                        "nom": feature_route["properties"].get("ID", "Route inconnue")
+                                    })
                             assigned_route = assign_route_to_marker(new_lat, new_lon, routes_ci) if new_lat and new_lon else "Route inconnue"
                             st.markdown(f"**ID {global_count + i + 1}**")
                             col1, col2 = st.columns(2)
                             with col1:
-                                selected_class = st.selectbox("Classe", list(class_color.keys()), key=f"class_{current_index}_{i}")
+                                selected_class = st.selectbox("Classe", list({
+                                    "deformations ornierage": "#FF0000",
+                                    "fissurations": "#00FF00",
+                                    "Faiençage": "#0000FF",
+                                    "fissure de retrait": "#FFFF00",
+                                    "fissure anarchique": "#FF00FF",
+                                    "reparations": "#00FFFF",
+                                    "nid de poule": "#FFA500",
+                                    "arrachements": "#800080",
+                                    "fluage": "#008000",
+                                    "denivellement accotement": "#000080",
+                                    "chaussée detruite": "#FFC0CB",
+                                    "envahissement vegetations": "#A52A2A",
+                                    "assainissements": "#808080",
+                                    "depot de terre": "#8B4513"
+                                }.keys()), key=f"class_{current_index}_{i}")
                             with col2:
                                 selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{current_index}_{i}")
                             new_markers.append({
@@ -701,70 +754,87 @@ else:
                                 "long": new_lon,
                                 "routes": assigned_route,
                                 "detection": "Manuelle",
-                                "couleur": class_color.get(selected_class, "#000000"),
-                                "radius": gravity_sizes.get(selected_gravity, 5)
+                                "couleur": {
+                                    "deformations ornierage": "#FF0000",
+                                    "fissurations": "#00FF00",
+                                    "Faiençage": "#0000FF",
+                                    "fissure de retrait": "#FFFF00",
+                                    "fissure anarchique": "#FF00FF",
+                                    "reparations": "#00FFFF",
+                                    "nid de poule": "#FFA500",
+                                    "arrachements": "#800080",
+                                    "fluage": "#008000",
+                                    "denivellement accotement": "#000080",
+                                    "chaussée detruite": "#FFC0CB",
+                                    "envahissement vegetations": "#A52A2A",
+                                    "assainissements": "#808080",
+                                    "depot de terre": "#8B4513"
+                                }.get(selected_class, "#000000"),
+                                "radius": {1: 5, 2: 10, 3: 15}.get(selected_gravity, 5)
                             })
                     st.session_state.markers_by_pair[current_index] = new_markers
                 else:
                     st.write("Aucun marqueur n'a été détecté.")
-
-                # (Optionnel) Nettoyage des fichiers temporaires peut être réalisé ici.
         else:
             st.info("Veuillez téléverser les fichiers TIFF pour lancer la détection manuelle.")
-
-    st.subheader("Carte de suivi")
-    global_markers = []
-    for markers in st.session_state.markers_by_pair.values():
-        global_markers.extend(markers)
-
-    if st.session_state.pairs:
-        first_pair = st.session_state.pairs[0]
-        try:
-            with rasterio.open(first_pair["petit"]["path"]) as src:
-                petit_bounds = src.bounds
-        except Exception as e:
-            st.error("Erreur lors de l'ouverture du TIFF PETIT pour la carte de suivi.")
-            st.error(e)
-            petit_bounds = None
-
-        if petit_bounds:
-            center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
-            center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
-            m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds,
-                                 display_path_petit if 'display_path_petit' in locals() else "",
-                                 marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True,
-                                 add_draw_tool=False)
-            st_folium(m_petit, width=700, height=500, key="folium_map_petit")
+    
+        st.subheader("Carte de suivi")
+        global_markers = []
+        if "markers_by_pair" in st.session_state:
+            for markers in st.session_state.markers_by_pair.values():
+                global_markers.extend(markers)
+    
+        if st.session_state.get("pairs"):
+            first_pair = st.session_state.pairs[0]
+            try:
+                with rasterio.open(first_pair["petit"]["path"]) as src:
+                    petit_bounds = src.bounds
+            except Exception as e:
+                st.error("Erreur lors de l'ouverture du TIFF PETIT pour la carte de suivi.")
+                st.error(e)
+                petit_bounds = None
+            if petit_bounds:
+                center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
+                center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
+                m_petit = create_map(center_lat_petit, center_lon_petit, petit_bounds,
+                                     display_path_petit if 'display_path_petit' in locals() else "",
+                                     marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True,
+                                     add_draw_tool=False)
+                st_folium(m_petit, width=700, height=500, key="folium_map_petit")
+            else:
+                st.info("Impossible d'afficher la carte de suivi à cause d'un problème avec le TIFF PETIT.")
         else:
-            st.info("Impossible d'afficher la carte de suivi à cause d'un problème avec le TIFF PETIT.")
-    else:
-        all_lons = []
-        all_lats = []
-        for route in routes_ci:
-            for lon, lat in route["coords"]:
-                all_lons.append(lon)
-                all_lats.append(lat)
-        if all_lons and all_lats:
-            min_lon, max_lon = min(all_lons), max(all_lons)
-            min_lat, max_lat = min(all_lats), max(all_lats)
-            class Bounds:
-                pass
-            route_bounds = Bounds()
-            route_bounds.left = min_lon
-            route_bounds.right = max_lon
-            route_bounds.bottom = min_lat
-            route_bounds.top = max_lat
-            center_lat_default = (min_lat + max_lat) / 2
-            center_lon_default = (min_lon + max_lon) / 2
-            m_default = create_map(center_lat_default, center_lon_default, route_bounds, display_path="",
-                                   marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True,
-                                   add_draw_tool=False)
-            st_folium(m_default, width=700, height=500, key="folium_map_default")
+            all_lons = []
+            all_lats = []
+            with open("routeQSD.txt", "r") as f:
+                routes_data = json.load(f)
+            routes_ci = []
+            for feature in routes_data["features"]:
+                if feature["geometry"]["type"] == "LineString":
+                    for lon, lat in feature["geometry"]["coordinates"]:
+                        all_lons.append(lon)
+                        all_lats.append(lat)
+            if all_lons and all_lats:
+                min_lon, max_lon = min(all_lons), max(all_lons)
+                min_lat, max_lat = min(all_lats), max(all_lats)
+                class Bounds:
+                    pass
+                route_bounds = Bounds()
+                route_bounds.left = min_lon
+                route_bounds.right = max_lon
+                route_bounds.bottom = min_lat
+                route_bounds.top = max_lat
+                center_lat_default = (min_lat + max_lat) / 2
+                center_lon_default = (min_lon + max_lon) / 2
+                m_default = create_map(center_lat_default, center_lon_default, route_bounds, display_path="",
+                                       marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True,
+                                       add_draw_tool=False)
+                st_folium(m_default, width=700, height=500, key="folium_map_default")
+            else:
+                st.info("Aucune donnée de route disponible pour afficher la carte de suivi.")
+    
+        st.markdown("### Récapitulatif global des défauts")
+        if global_markers:
+            st.table(global_markers)
         else:
-            st.info("Aucune donnée de route disponible pour afficher la carte de suivi.")
-
-    st.markdown("### Récapitulatif global des défauts")
-    if global_markers:
-        st.table(global_markers)
-    else:
-        st.write("Aucun marqueur global n'a été enregistré.")
+            st.write("Aucun marqueur global n'a été enregistré.")
