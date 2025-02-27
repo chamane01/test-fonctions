@@ -22,6 +22,7 @@ import json
 from shapely.geometry import Point, LineString
 import csv
 import random, string
+import pandas as pd  # Pour la création du tableau Excel
 
 #########################################
 # Fonctions et définitions communes
@@ -369,9 +370,54 @@ if st.session_state.missions:
 else:
     st.sidebar.info("Aucune mission disponible. Créez-en une.")
 
+# Calcul des global_markers à partir des marqueurs détectés
+global_markers = []
+for markers in st.session_state.get("markers_by_pair", {}).values():
+    global_markers.extend(markers)
+
 st.sidebar.subheader("Historique des missions sauvegardées")
 if st.session_state.mission_history:
-    st.sidebar.table(st.session_state.mission_history)
+    # Pour chaque mission sauvegardée, ajouter une colonne "Données Défauts" regroupant les marqueurs associés
+    mission_markers_map = {}
+    for marker in global_markers:
+        mission_id = marker.get("mission", "N/A")
+        if mission_id not in mission_markers_map:
+            mission_markers_map[mission_id] = []
+        mission_markers_map[mission_id].append(marker)
+    mission_history_display = []
+    for mission in st.session_state.mission_history:
+        m = mission.copy()
+        markers_for_mission = mission_markers_map.get(m["id"], [])
+        m["Données Défauts"] = str(markers_for_mission)
+        mission_history_display.append(m)
+    df_missions = pd.DataFrame(mission_history_display)
+    st.sidebar.table(df_missions)
+    
+    # Préparation des fichiers Excel, CSV et TXT pour le téléchargement
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+        df_missions.to_excel(writer, index=False)
+    excel_data = excel_buffer.getvalue()
+    
+    csv_buffer = io.StringIO()
+    df_missions.to_csv(csv_buffer, index=False, sep=";")
+    csv_data = csv_buffer.getvalue().encode("utf-8")
+    
+    txt_data = df_missions.to_string(index=False)
+    txt_data = txt_data.encode("utf-8")
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("mission_history.xlsx", excel_data)
+        zip_file.writestr("mission_history.csv", csv_data)
+        zip_file.writestr("mission_history.txt", txt_data)
+    zip_buffer.seek(0)
+    st.sidebar.download_button(
+        label="Télécharger l'historique des missions (ZIP)",
+        data=zip_buffer,
+        file_name="mission_history.zip",
+        mime="application/zip"
+    )
 else:
     st.sidebar.info("Aucune mission sauvegardée.")
 
