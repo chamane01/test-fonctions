@@ -380,14 +380,14 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
                         else:
                             flight_angle_i = 0
                         # Conversion Configuration 1 (TIFF PETIT)
-                        # Facteur de redimensionnement pour configuration 1 : 1/5 (réduction par un facteur de 5)
+                        # Facteur de redimensionnement pour configuration 1 : -5
                         tiff_bytes = convert_to_tiff_in_memory(
                             image_file=io.BytesIO(info["data"]),
                             pixel_size=pixel_size,
                             utm_center=info["utm"],
                             utm_crs=info["utm_crs"],
                             rotation_angle=-flight_angle_i,
-                            scaling_factor=1/5
+                            scaling_factor=-5
                         )
                         output_filename_tiff1 = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
                         zip_file.writestr(output_filename_tiff1, tiff_bytes)
@@ -464,7 +464,7 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
         st.info("Veuillez téléverser des images JPEG pour lancer la conversion.")
 
 #########################################
-# Mode Détection d'anomalies (modifié)
+# Mode Détection d'anomalies
 #########################################
 else:
     st.title("Détection d'anomalies")
