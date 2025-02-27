@@ -379,7 +379,7 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
                             flight_angle_i = math.degrees(math.atan2(dx, dy))
                         else:
                             flight_angle_i = 0
-                        # Conversion Configuration 1 (TIFF PETIT)
+                        # Conversion Configuration 1 (TIFF PETIT) avec scaling_factor = 1/5
                         tiff_bytes = convert_to_tiff_in_memory(
                             image_file=io.BytesIO(info["data"]),
                             pixel_size=pixel_size,
@@ -390,7 +390,7 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
                         )
                         output_filename_tiff1 = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
                         zip_file.writestr(output_filename_tiff1, tiff_bytes)
-                        # Conversion Configuration 2 (TIFF GRAND)
+                        # Conversion Configuration 2 (TIFF GRAND) avec scaling_factor = 1/3
                         tiff_bytes_x2 = convert_to_tiff_in_memory(
                             image_file=io.BytesIO(info["data"]),
                             pixel_size=pixel_size * 2,
@@ -468,8 +468,10 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
 else:
     st.title("Détection d'anomalies")
     tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
+    
     with tab_auto:
         st.header("Détection Automatique")
+        # On utilise uniquement les images issues de la conversion prétraitée
         if st.button("Utiliser les images converties (configuration images)"):
             if "preprocessed_zip" in st.session_state:
                 zip_bytes = st.session_state["preprocessed_zip"]
@@ -485,11 +487,8 @@ else:
                 st.success(f"{len(auto_converted_files)} images converties chargées.")
             else:
                 st.error("Aucun résultat de conversion prétraitée n'est disponible.")
-        auto_uploaded_images = st.file_uploader("Téléversez vos images JPEG ou PNG", type=["jpeg", "jpg", "png"], accept_multiple_files=True, key="auto_images")
-        if auto_uploaded_images or st.session_state.get("auto_converted_images"):
-            st.success("Les images pour la détection automatique sont disponibles.")
-        else:
-            st.info("Aucune image n'a été fournie pour la détection automatique.")
+        # Le téléversement manuel est supprimé dans cette interface.
+
     with tab_manuel:
         st.header("Détection Manuelle")
         col1, col2 = st.columns(2)
@@ -525,135 +524,128 @@ else:
                     st.success(f"{len(manual_petit_files)} fichiers TIFF PETIT chargés depuis conversion.")
                 else:
                     st.error("Aucun résultat de conversion prétraitée n'est disponible.")
-        uploaded_files_grand = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_grand")
-        uploaded_files_petit = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_petit")
-        if (uploaded_files_grand or st.session_state.get("manual_grand_files")) and (uploaded_files_petit or st.session_state.get("manual_petit_files")):
-            if not uploaded_files_grand:
-                uploaded_files_grand = st.session_state.get("manual_grand_files")
-            if not uploaded_files_petit:
-                uploaded_files_petit = st.session_state.get("manual_petit_files")
-            if len(uploaded_files_grand) != len(uploaded_files_petit):
-                st.error("Le nombre de fichiers TIFF GRAND et TIFF PETIT doit être identique.")
-            else:
-                grand_list = []
-                petit_list = []
-                for file in uploaded_files_grand:
-                    file.seek(0)
-                    grand_list.append(get_reprojected_and_center(file, "grand"))
-                for file in uploaded_files_petit:
-                    file.seek(0)
-                    petit_list.append(get_reprojected_and_center(file, "petit"))
-                grand_list = sorted(grand_list, key=lambda d: d["center"])
-                petit_list = sorted(petit_list, key=lambda d: d["center"])
-                pair_count = len(grand_list)
-                pairs = []
-                for i in range(pair_count):
-                    pairs.append({"grand": grand_list[i], "petit": petit_list[i]})
-                st.session_state.pairs = pairs
-                col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
-                prev_pressed = col_nav1.button("← Précédent")
-                next_pressed = col_nav3.button("Suivant →")
-                if prev_pressed and st.session_state.current_pair_index > 0:
-                    st.session_state.current_pair_index -= 1
-                if next_pressed and st.session_state.current_pair_index < pair_count - 1:
-                    st.session_state.current_pair_index += 1
-                st.write(f"Affichage de la paire {st.session_state.current_pair_index + 1} sur {pair_count}")
-                current_index = st.session_state.current_pair_index
-                current_pair = st.session_state.pairs[current_index]
-                reproj_grand_path = current_pair["grand"]["path"]
-                with rasterio.open(reproj_grand_path) as src:
-                    grand_bounds = src.bounds
-                    data = src.read()
-                    if data.shape[0] >= 3:
-                        r = normalize_data(data[0])
-                        g = normalize_data(data[1])
-                        b = normalize_data(data[2])
-                        rgb_norm = np.dstack((r, g, b))
-                        image_grand = Image.fromarray(rgb_norm)
-                    else:
-                        band = data[0]
-                        band_norm = normalize_data(band)
-                        image_grand = Image.fromarray(band_norm, mode="L")
-                unique_id = str(uuid.uuid4())[:8]
-                temp_png_grand = f"converted_grand_{unique_id}.png"
-                image_grand.save(temp_png_grand)
-                display_path_grand = temp_png_grand
-                reproj_petit_path = current_pair["petit"]["path"]
-                with rasterio.open(reproj_petit_path) as src:
-                    petit_bounds = src.bounds
-                    data = src.read()
-                    if data.shape[0] >= 3:
-                        r = normalize_data(data[0])
-                        g = normalize_data(data[1])
-                        b = normalize_data(data[2])
-                        rgb_norm = np.dstack((r, g, b))
-                        image_petit = Image.fromarray(rgb_norm)
-                    else:
-                        band = data[0]
-                        band_norm = normalize_data(band)
-                        image_petit = Image.fromarray(band_norm, mode="L")
-                temp_png_petit = f"converted_{unique_id}.png"
-                image_petit.save(temp_png_petit)
-                display_path_petit = temp_png_petit
-                center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
-                center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
-                center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
-                center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
-                utm_zone_petit = int((center_lon_petit + 180) / 6) + 1
-                utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"
-                st.subheader("Carte de dessin")
-                m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
-                                     marker_data=None, hide_osm=True, draw_routes=False, add_draw_tool=True)
-                result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
-                features = []
-                all_drawings = result_grand.get("all_drawings")
-                if all_drawings:
-                    if isinstance(all_drawings, dict) and "features" in all_drawings:
-                        features = all_drawings.get("features", [])
-                    elif isinstance(all_drawings, list):
-                        features = all_drawings
-                global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values())
-                new_markers = []
-                if features:
-                    st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité :")
-                    for i, feature in enumerate(features):
-                        if feature.get("geometry", {}).get("type") == "Point":
-                            coords = feature.get("geometry", {}).get("coordinates")
-                            if coords and isinstance(coords, list) and len(coords) >= 2:
-                                lon, lat = coords[0], coords[1]
-                                percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
-                                percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
-                                new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
-                                new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
-                                utm_x_petit, utm_y_petit = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
-                                utm_coords_petit = (round(utm_x_petit[0], 2), round(utm_y_petit[0], 2))
-                            else:
-                                new_lon = new_lat = None
-                                utm_coords_petit = "Inconnues"
-                            assigned_route = assign_route_to_marker(new_lat, new_lon, routes_ci) if new_lat and new_lon else "Route inconnue"
-                            st.markdown(f"**ID {global_count + i + 1}**")
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                selected_class = st.selectbox("Classe", list(class_color.keys()), key=f"class_{current_index}_{i}")
-                            with col2:
-                                selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{current_index}_{i}")
-                            new_markers.append({
-                                "ID": global_count + i + 1,
-                                "classe": selected_class,
-                                "gravite": selected_gravity,
-                                "coordonnees UTM": utm_coords_petit,
-                                "lat": new_lat,
-                                "long": new_lon,
-                                "routes": assigned_route,
-                                "detection": "Manuelle",
-                                "couleur": class_color.get(selected_class, "#000000"),
-                                "radius": gravity_sizes.get(selected_gravity, 5)
-                            })
-                    st.session_state.markers_by_pair[current_index] = new_markers
+        # Les téléversements manuels sont supprimés dans cette interface.
+        if st.session_state.get("manual_grand_files") and st.session_state.get("manual_petit_files"):
+            grand_list = []
+            petit_list = []
+            for file in st.session_state["manual_grand_files"]:
+                file.seek(0)
+                grand_list.append(get_reprojected_and_center(file, "grand"))
+            for file in st.session_state["manual_petit_files"]:
+                file.seek(0)
+                petit_list.append(get_reprojected_and_center(file, "petit"))
+            grand_list = sorted(grand_list, key=lambda d: d["center"])
+            petit_list = sorted(petit_list, key=lambda d: d["center"])
+            pair_count = len(grand_list)
+            pairs = []
+            for i in range(pair_count):
+                pairs.append({"grand": grand_list[i], "petit": petit_list[i]})
+            st.session_state.pairs = pairs
+            col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
+            prev_pressed = col_nav1.button("← Précédent")
+            next_pressed = col_nav3.button("Suivant →")
+            if prev_pressed and st.session_state.current_pair_index > 0:
+                st.session_state.current_pair_index -= 1
+            if next_pressed and st.session_state.current_pair_index < pair_count - 1:
+                st.session_state.current_pair_index += 1
+            st.write(f"Affichage de la paire {st.session_state.current_pair_index + 1} sur {pair_count}")
+            current_index = st.session_state.current_pair_index
+            current_pair = st.session_state.pairs[current_index]
+            reproj_grand_path = current_pair["grand"]["path"]
+            with rasterio.open(reproj_grand_path) as src:
+                grand_bounds = src.bounds
+                data = src.read()
+                if data.shape[0] >= 3:
+                    r = normalize_data(data[0])
+                    g = normalize_data(data[1])
+                    b = normalize_data(data[2])
+                    rgb_norm = np.dstack((r, g, b))
+                    image_grand = Image.fromarray(rgb_norm)
                 else:
-                    st.write("Aucun marqueur n'a été détecté.")
+                    band = data[0]
+                    band_norm = normalize_data(band)
+                    image_grand = Image.fromarray(band_norm, mode="L")
+            unique_id = str(uuid.uuid4())[:8]
+            temp_png_grand = f"converted_grand_{unique_id}.png"
+            image_grand.save(temp_png_grand)
+            display_path_grand = temp_png_grand
+            reproj_petit_path = current_pair["petit"]["path"]
+            with rasterio.open(reproj_petit_path) as src:
+                petit_bounds = src.bounds
+                data = src.read()
+                if data.shape[0] >= 3:
+                    r = normalize_data(data[0])
+                    g = normalize_data(data[1])
+                    b = normalize_data(data[2])
+                    rgb_norm = np.dstack((r, g, b))
+                    image_petit = Image.fromarray(rgb_norm)
+                else:
+                    band = data[0]
+                    band_norm = normalize_data(band)
+                    image_petit = Image.fromarray(band_norm, mode="L")
+            temp_png_petit = f"converted_{unique_id}.png"
+            image_petit.save(temp_png_petit)
+            display_path_petit = temp_png_petit
+            center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
+            center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
+            center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
+            center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
+            utm_zone_petit = int((center_lon_petit + 180) / 6) + 1
+            utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"
+            st.subheader("Carte de dessin")
+            m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
+                                 marker_data=None, hide_osm=True, draw_routes=False, add_draw_tool=True)
+            result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
+            features = []
+            all_drawings = result_grand.get("all_drawings")
+            if all_drawings:
+                if isinstance(all_drawings, dict) and "features" in all_drawings:
+                    features = all_drawings.get("features", [])
+                elif isinstance(all_drawings, list):
+                    features = all_drawings
+            global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values())
+            new_markers = []
+            if features:
+                st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité :")
+                for i, feature in enumerate(features):
+                    if feature.get("geometry", {}).get("type") == "Point":
+                        coords = feature.get("geometry", {}).get("coordinates")
+                        if coords and isinstance(coords, list) and len(coords) >= 2:
+                            lon, lat = coords[0], coords[1]
+                            percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
+                            percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
+                            new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
+                            new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
+                            utm_x_petit, utm_y_petit = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
+                            utm_coords_petit = (round(utm_x_petit[0], 2), round(utm_y_petit[0], 2))
+                        else:
+                            new_lon = new_lat = None
+                            utm_coords_petit = "Inconnues"
+                        assigned_route = assign_route_to_marker(new_lat, new_lon, routes_ci) if new_lat and new_lon else "Route inconnue"
+                        st.markdown(f"**ID {global_count + i + 1}**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            selected_class = st.selectbox("Classe", list(class_color.keys()), key=f"class_{current_index}_{i}")
+                        with col2:
+                            selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{current_index}_{i}")
+                        new_markers.append({
+                            "ID": global_count + i + 1,
+                            "classe": selected_class,
+                            "gravite": selected_gravity,
+                            "coordonnees UTM": utm_coords_petit,
+                            "lat": new_lat,
+                            "long": new_lon,
+                            "routes": assigned_route,
+                            "detection": "Manuelle",
+                            "couleur": class_color.get(selected_class, "#000000"),
+                            "radius": gravity_sizes.get(selected_gravity, 5)
+                        })
+                st.session_state.markers_by_pair[current_index] = new_markers
+            else:
+                st.write("Aucun marqueur n'a été détecté.")
         else:
-            st.info("Veuillez téléverser ou utiliser les fichiers TIFF pour lancer la détection manuelle.")
+            st.info("Aucun fichier TIFF converti n'est disponible pour lancer la détection manuelle.")
+    
     st.subheader("Carte de suivi")
     global_markers = []
     for markers in st.session_state.markers_by_pair.values():
