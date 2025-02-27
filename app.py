@@ -219,10 +219,9 @@ if app_mode == "Prétraitement":
             )
             st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
             
-            # Création d'un fichier ZIP combiné pour toutes les configurations
-            combined_zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(combined_zip_buffer, "w", zipfile.ZIP_DEFLATED) as combined_zip:
-                # Configuration 1: GeoTIFF Config 1
+            # Conversion automatique pour la configuration 1
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
                     if len(images_info) >= 2:
                         if i == 0:
@@ -246,9 +245,18 @@ if app_mode == "Prétraitement":
                         scaling_factor=1/5
                     )
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
-                    combined_zip.writestr("Config1/" + output_filename, tiff_bytes)
-                
-                # Configuration 2: GeoTIFF x2 Config
+                    zip_file.writestr(output_filename, tiff_bytes)
+            zip_buffer.seek(0)
+            st.download_button(
+                label="Télécharger toutes les images GeoTIFF (ZIP) - Config 1",
+                data=zip_buffer,
+                file_name="images_geotiff.zip",
+                mime="application/zip"
+            )
+            
+            # Conversion automatique pour la configuration 2
+            zip_buffer_geotiff_x2 = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer_geotiff_x2, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
                     if len(images_info) >= 2:
                         if i == 0:
@@ -272,9 +280,18 @@ if app_mode == "Prétraitement":
                         scaling_factor=1/3
                     )
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
-                    combined_zip.writestr("Config2/" + output_filename, tiff_bytes_x2)
-                
-                # Configuration Images: JPEG avec métadonnées de cadre
+                    zip_file.writestr(output_filename, tiff_bytes_x2)
+            zip_buffer_geotiff_x2.seek(0)
+            st.download_button(
+                label="Télécharger toutes les images GeoTIFF x2 (ZIP) - Config 2",
+                data=zip_buffer_geotiff_x2,
+                file_name="images_geotiff_x2.zip",
+                mime="application/zip"
+            )
+            
+            # Conversion automatique pour la configuration Images (JPEG avec métadonnées de cadre)
+            zip_buffer_jpeg = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer_jpeg, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
                     if len(images_info) >= 2:
                         if i == 0:
@@ -291,6 +308,7 @@ if app_mode == "Prétraitement":
                         flight_angle_i = 0
                     rotation_angle_i = -flight_angle_i
                     
+                    # Aucun redimensionnement pour cette configuration
                     scaling_factor = 1
                     img = Image.open(io.BytesIO(info["data"]))
                     img = ImageOps.exif_transpose(img)
@@ -307,6 +325,7 @@ if app_mode == "Prétraitement":
                     T4 = Affine.translation(center_x, center_y)
                     transform = T4 * T3 * T2 * T1
                     
+                    # Calcul des coordonnées des 4 coins du cadre
                     corners = [
                         (-new_width/2, -new_height/2),
                         (new_width/2, -new_height/2),
@@ -345,15 +364,12 @@ if app_mode == "Prétraitement":
                         img.save(jpeg_buffer, format="JPEG")
                     jpeg_bytes = jpeg_buffer.getvalue()
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_with_frame_coords.jpg"
-                    combined_zip.writestr("ConfigImages/" + output_filename, jpeg_bytes)
-            combined_zip_buffer.seek(0)
-            # Stockage persistant des données de prétraitement
-            st.session_state.preprocessed_zip = combined_zip_buffer.getvalue()
-            
+                    zip_file.writestr(output_filename, jpeg_bytes)
+            zip_buffer_jpeg.seek(0)
             st.download_button(
-                label="Télécharger les images prétraitées (ZIP)",
-                data=st.session_state.preprocessed_zip,
-                file_name="images_pretraitees.zip",
+                label="Télécharger toutes les images JPEG avec métadonnées de cadre (ZIP) - Config Images",
+                data=zip_buffer_jpeg,
+                file_name="images_with_frame_coords.zip",
                 mime="application/zip"
             )
 else:
@@ -539,15 +555,6 @@ else:
         st.session_state.markers_by_pair = {}  # Marqueurs par indice de paire
 
     st.title("Traitement")
-
-    # Affichage du bouton pour télécharger les images prétraitées s'il existe
-    if "preprocessed_zip" in st.session_state:
-        st.download_button(
-            label="Télécharger les images prétraitées (ZIP)",
-            data=st.session_state.preprocessed_zip,
-            file_name="images_pretraitees.zip",
-            mime="application/zip"
-        )
 
     # Interface en onglets pour détection automatique et manuelle
     tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
