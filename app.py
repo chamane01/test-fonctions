@@ -20,6 +20,7 @@ import uuid
 import matplotlib.pyplot as plt
 import json
 from shapely.geometry import Point, LineString
+import csv
 
 #########################################
 # Fonctions et définitions communes
@@ -255,7 +256,7 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
                 fill=True,
                 fill_color=color,
                 fill_opacity=0.7,
-                tooltip=f"{marker['classe']} (Gravité {marker['gravite']}) - Route : {marker.get('routes', 'Route inconnue')} - Détection: {marker.get('detection', 'Inconnue')}"
+                tooltip=f"{marker['ID']} - {marker['classe']} (Gravité {marker['gravite']}) - Route : {marker.get('routes', 'Route inconnue')} - Détection: {marker.get('detection', 'Inconnue')} - Mission: {marker.get('mission', 'N/A')}"
             ).add_to(m)
     return m
 
@@ -286,8 +287,9 @@ if "pairs" not in st.session_state:
     st.session_state.pairs = []
 if "markers_by_pair" not in st.session_state:
     st.session_state.markers_by_pair = {}
-if "next_marker_id" not in st.session_state:
-    st.session_state.next_marker_id = 1
+# Gestion du compteur global pour les marqueurs par mission
+if "mission_marker_counter" not in st.session_state:
+    st.session_state.mission_marker_counter = {}
 
 # Dictionnaire des 14 classes et des tailles de gravité
 class_color = {
@@ -320,14 +322,35 @@ for feature in routes_data["features"]:
         })
 
 #########################################
+# Gestionnaire de missions (dans la sidebar)
+#########################################
+st.sidebar.header("Gestionnaire de missions")
+if "missions" not in st.session_state:
+    st.session_state.missions = {}
+
+if st.sidebar.button("Créer une nouvelle mission"):
+    new_mission_id = str(uuid.uuid4())[:8]
+    st.session_state.missions[new_mission_id] = {"id": new_mission_id}
+    st.session_state.current_mission = new_mission_id
+
+if st.session_state.missions:
+    mission_list = list(st.session_state.missions.keys())
+    if "current_mission" not in st.session_state or st.session_state.current_mission not in mission_list:
+        st.session_state.current_mission = mission_list[0]
+    current_mission = st.sidebar.selectbox("Sélectionnez la mission", mission_list, index=mission_list.index(st.session_state.current_mission))
+    st.session_state.current_mission = current_mission
+else:
+    st.sidebar.info("Aucune mission disponible. Créez-en une.")
+
+#########################################
 # Affichage sur une seule page
 #########################################
-st.title("Prétraitements et detections d'anomalies par traitements")
+st.title("traitements")
 
 #########################
-# Section Prétraitements
+# Section Post-traitements des images
 #########################
-st.header("Prétraitements")
+st.header("post-traitements des images")
 uploaded_files = st.file_uploader(
     "Téléversez une ou plusieurs images (JPG/JPEG) avec métadonnées EXIF",
     type=["jpg", "jpeg"],
@@ -475,14 +498,15 @@ if uploaded_files:
                 file_name="images_pretraitees.zip",
                 mime="application/zip"
             )
+            st.success("Vos images ont été post-traitées, vous pouvez les utilisés.")
 else:
-    st.info("Veuillez téléverser des images JPEG pour lancer le prétraitement.")
+    st.info("Veuillez téléverser des images JPEG pour lancer le post-traitement.")
 
 #####################
-# Section Traitements
+# Section Detections
 #####################
 st.markdown("---")
-st.header("Traitements")
+st.header("detections")
 # Onglets pour détection automatique et détection manuelle
 tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
 
@@ -612,7 +636,10 @@ with tab_manuel:
                 features = all_drawings.get("features", [])
             elif isinstance(all_drawings, list):
                 features = all_drawings
-        # Conserver des ID de marqueurs constants via un compteur global
+        # Gestion des IDs des marqueurs avec référence de mission
+        current_mission = st.session_state.get("current_mission", "N/A")
+        if current_mission not in st.session_state.mission_marker_counter:
+            st.session_state.mission_marker_counter[current_mission] = 1
         existing_markers = st.session_state.markers_by_pair.get(current_index, [])
         updated_markers = []
         if features:
@@ -621,9 +648,9 @@ with tab_manuel:
                 if feature.get("geometry", {}).get("type") == "Point":
                     coords = feature.get("geometry", {}).get("coordinates")
                     if coords and isinstance(coords, list) and len(coords) >= 2:
-                        lon, lat = coords[0], coords[1]
-                        percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
-                        percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
+                        lon_pt, lat_pt = coords[0], coords[1]
+                        percent_x = (lon_pt - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
+                        percent_y = (lat_pt - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
                         new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
                         new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
                         utm_x_petit, utm_y_petit = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
@@ -635,8 +662,8 @@ with tab_manuel:
                     if i < len(existing_markers):
                         marker_id = existing_markers[i]["ID"]
                     else:
-                        marker_id = st.session_state.next_marker_id
-                        st.session_state.next_marker_id += 1
+                        marker_id = f"{current_mission}-{st.session_state.mission_marker_counter[current_mission]}"
+                        st.session_state.mission_marker_counter[current_mission] += 1
                     st.markdown(f"**ID {marker_id}**")
                     col1, col2 = st.columns(2)
                     with col1:
@@ -652,6 +679,7 @@ with tab_manuel:
                         "long": new_lon,
                         "routes": assigned_route,
                         "detection": "Manuelle",
+                        "mission": current_mission,
                         "couleur": class_color.get(selected_class, "#000000"),
                         "radius": gravity_sizes.get(selected_gravity, 5)
                     })
@@ -714,3 +742,47 @@ if global_markers:
     st.table(global_markers)
 else:
     st.write("Aucun marqueur global n'a été enregistré.")
+
+#########################################
+# Gestionnaire de missions : Export CSV
+#########################################
+st.markdown("---")
+st.subheader("Export des résultats de la mission")
+if st.button("Exporter les résultats de la mission en CSV"):
+    current_mission = st.session_state.get("current_mission", None)
+    if current_mission:
+        # Collecter tous les marqueurs appartenant à la mission courante
+        mission_markers = []
+        for markers in st.session_state.markers_by_pair.values():
+            for marker in markers:
+                if marker.get("mission") == current_mission:
+                    mission_markers.append(marker)
+        if mission_markers:
+            output = io.StringIO()
+            writer = csv.writer(output, delimiter=';')
+            # Ecrire l'en-tête
+            writer.writerow(["ID", "Classe", "Gravité", "Coordonnées UTM", "Latitude", "Longitude", "Route", "Détection", "Mission"])
+            # Ecrire les lignes
+            for marker in mission_markers:
+                writer.writerow([
+                    marker.get("ID"),
+                    marker.get("classe"),
+                    marker.get("gravite"),
+                    marker.get("coordonnees UTM"),
+                    marker.get("lat"),
+                    marker.get("long"),
+                    marker.get("routes"),
+                    marker.get("detection"),
+                    marker.get("mission")
+                ])
+            csv_data = output.getvalue().encode('utf-8')
+            st.download_button(
+                label="Télécharger CSV de la mission",
+                data=csv_data,
+                file_name=f"mission_{current_mission}_resultats.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("Aucun marqueur n'est associé à la mission courante.")
+    else:
+        st.info("Aucune mission sélectionnée.")
