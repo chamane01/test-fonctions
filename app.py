@@ -281,6 +281,26 @@ def get_reprojected_and_center(uploaded_file, group):
 #########################################
 # Variables globales
 #########################################
+# Définition des routes (exemple, à adapter selon vos données)
+routes_ci = [
+    {"nom": "Route 1", "coords": [(2.3522, 48.8566), (2.3622, 48.8666)]},
+    {"nom": "Route 2", "coords": [(2.3422, 48.8466), (2.3522, 48.8566)]}
+]
+
+# Définition des couleurs par classe (exemple)
+class_color = {
+    "Classe A": "#FF0000",
+    "Classe B": "#00FF00",
+    "Classe C": "#0000FF",
+}
+
+# Définition des tailles par gravité (exemple)
+gravity_sizes = {
+    1: 5,
+    2: 7,
+    3: 9,
+}
+
 # Pour la détection, on conserve les marqueurs par paire
 if "current_pair_index" not in st.session_state:
     st.session_state.current_pair_index = 0
