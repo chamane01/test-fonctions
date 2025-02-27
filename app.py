@@ -13,7 +13,7 @@ import math
 from affine import Affine
 import zipfile
 import folium
-from folium.plugins import Draw  # Pour dessiner sur la carte
+from folium.plugins import Draw  # Plugin pour dessiner sur la carte
 from streamlit_folium import st_folium
 import base64
 import uuid
@@ -21,19 +21,22 @@ import matplotlib.pyplot as plt
 import json
 from shapely.geometry import Point, LineString
 
-# ===============================
-# FONCTIONS POUR LA CONVERSION
-# ===============================
+# ---------------------------
+# FONCTIONS DE LA PARTIE CONVERSION
+# ---------------------------
 def extract_exif_info(image_file):
     image_file.seek(0)
     tags = exifread.process_file(image_file)
+    
     lat = lon = altitude = focal_length = None
     fp_x_res = fp_unit = None
+    
     if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
         lat_vals = tags['GPS GPSLatitude'].values
         lon_vals = tags['GPS GPSLongitude'].values
         lat_ref = tags.get('GPS GPSLatitudeRef', None)
         lon_ref = tags.get('GPS GPSLongitudeRef', None)
+        
         if lat_vals and lon_vals and lat_ref and lon_ref:
             lat = (float(lat_vals[0].num) / lat_vals[0].den +
                    float(lat_vals[1].num) / lat_vals[1].den / 60 +
@@ -41,21 +44,27 @@ def extract_exif_info(image_file):
             lon = (float(lon_vals[0].num) / lon_vals[0].den +
                    float(lon_vals[1].num) / lon_vals[1].den / 60 +
                    float(lon_vals[2].num) / lon_vals[2].den / 3600)
+            
             if lat_ref.printable.strip().upper() == 'S':
                 lat = -lat
             if lon_ref.printable.strip().upper() == 'W':
                 lon = -lon
+    
     if 'GPS GPSAltitude' in tags:
         alt_tag = tags['GPS GPSAltitude']
         altitude = float(alt_tag.values[0].num) / alt_tag.values[0].den
+        
     if 'EXIF FocalLength' in tags:
         focal_tag = tags['EXIF FocalLength']
         focal_length = float(focal_tag.values[0].num) / focal_tag.values[0].den
+        
     if 'EXIF FocalPlaneXResolution' in tags and 'EXIF FocalPlaneResolutionUnit' in tags:
         fp_res_tag = tags['EXIF FocalPlaneXResolution']
         fp_unit_tag = tags['EXIF FocalPlaneResolutionUnit']
+        
         fp_x_res = float(fp_res_tag.values[0].num) / fp_res_tag.values[0].den
         fp_unit = int(fp_unit_tag.values[0])
+    
     return lat, lon, altitude, focal_length, fp_x_res, fp_unit
 
 def latlon_to_utm(lat, lon):
@@ -68,6 +77,46 @@ def latlon_to_utm(lat, lon):
     utm_x, utm_y = transformer.transform(lon, lat)
     return utm_x, utm_y, utm_crs
 
+def compute_gsd(altitude, focal_length_mm, sensor_width_mm, image_width_px):
+    focal_length_m = focal_length_mm / 1000.0
+    sensor_width_m = sensor_width_mm / 1000.0
+    gsd = (altitude * sensor_width_m) / (focal_length_m * image_width_px)
+    return gsd
+
+def convert_to_tiff(image_file, output_path, utm_center, pixel_size, utm_crs, rotation_angle=0, scaling_factor=1):
+    img = Image.open(image_file)
+    img = ImageOps.exif_transpose(img)
+    orig_width, orig_height = img.size
+    new_width = int(orig_width * scaling_factor)
+    new_height = int(orig_height * scaling_factor)
+    img = img.resize((new_width, new_height), Image.LANCZOS)
+    img_array = np.array(img)
+    height, width = img_array.shape[:2]
+    effective_pixel_size = pixel_size / scaling_factor
+
+    center_x, center_y = utm_center
+    T1 = Affine.translation(-width/2, -height/2)
+    T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
+    T3 = Affine.rotation(rotation_angle)
+    T4 = Affine.translation(center_x, center_y)
+    transform_affine = T4 * T3 * T2 * T1
+
+    with rasterio.open(
+        output_path, 'w',
+        driver='GTiff',
+        height=height,
+        width=width,
+        count=3 if len(img_array.shape) == 3 else 1,
+        dtype=img_array.dtype,
+        crs=utm_crs,
+        transform=transform_affine
+    ) as dst:
+        if len(img_array.shape) == 3:
+            for i in range(3):
+                dst.write(img_array[:, :, i], i + 1)
+        else:
+            dst.write(img_array, 1)
+
 def convert_to_tiff_in_memory(image_file, pixel_size, utm_center, utm_crs, rotation_angle=0, scaling_factor=1):
     img = Image.open(image_file)
     img = ImageOps.exif_transpose(img)
@@ -78,6 +127,7 @@ def convert_to_tiff_in_memory(image_file, pixel_size, utm_center, utm_crs, rotat
     img_array = np.array(img)
     height, width = img_array.shape[:2]
     effective_pixel_size = pixel_size / scaling_factor
+
     center_x, center_y = utm_center
     T1 = Affine.translation(-width/2, -height/2)
     T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
@@ -102,7 +152,6 @@ def convert_to_tiff_in_memory(image_file, pixel_size, utm_center, utm_crs, rotat
             dst.write(img_array, 1)
     return memfile.read()
 
-# Pour configuration images (export JPEG avec métadonnées de cadre)
 def convert_to_jpeg_with_frame(image_bytes, pixel_size, utm_center, utm_crs, rotation_angle=0):
     try:
         import piexif
@@ -135,7 +184,9 @@ def convert_to_jpeg_with_frame(image_bytes, pixel_size, utm_center, utm_crs, rot
     for corner in corners:
         x, y = transform_affine * corner
         corner_coords.append((x, y))
+    
     metadata_str = f"Frame Coordinates: {corner_coords}"
+    
     try:
         if "exif" in img.info:
             exif_dict = piexif.load(img.info["exif"])
@@ -151,6 +202,7 @@ def convert_to_jpeg_with_frame(image_bytes, pixel_size, utm_center, utm_crs, rot
     except Exception as e:
         st.error("Erreur lors de l'ajout des métadonnées : " + str(e))
         exif_bytes = None
+    
     jpeg_buffer = io.BytesIO()
     if exif_bytes:
         img.save(jpeg_buffer, format="JPEG", exif=exif_bytes)
@@ -158,9 +210,9 @@ def convert_to_jpeg_with_frame(image_bytes, pixel_size, utm_center, utm_crs, rot
         img.save(jpeg_buffer, format="JPEG")
     return jpeg_buffer.getvalue()
 
-# ===============================
+# ---------------------------
 # SECTION 1 – CONVERSION
-# ===============================
+# ---------------------------
 st.title("Application Intégrée: Conversion et Détection d'anomalies")
 st.header("1. Conversion JPEG → GeoTIFF & Export JPEG avec métadonnées")
 
@@ -174,6 +226,7 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
     images_info = []
+    
     for up_file in uploaded_files:
         file_bytes = up_file.read()
         file_buffer = io.BytesIO(file_bytes)
@@ -181,8 +234,10 @@ if uploaded_files:
         if lat is None or lon is None:
             st.warning(f"{up_file.name} : pas de coordonnées GPS, l'image sera ignorée.")
             continue
+        
         img = Image.open(io.BytesIO(file_bytes))
         img_width, img_height = img.size
+        
         sensor_width_mm = None
         if fp_x_res and fp_unit:
             if fp_unit == 2:   # pouces
@@ -191,7 +246,9 @@ if uploaded_files:
                 sensor_width_mm = (img_width / fp_x_res) * 10
             elif fp_unit == 4: # mm
                 sensor_width_mm = (img_width / fp_x_res)
+        
         utm_x, utm_y, utm_crs = latlon_to_utm(lat, lon)
+        
         images_info.append({
             "filename": up_file.name,
             "data": file_bytes,
@@ -205,6 +262,7 @@ if uploaded_files:
             "img_width": img_width,
             "img_height": img_height
         })
+    
     if len(images_info) == 0:
         st.error("Aucune image exploitable (avec coordonnées GPS) n'a été trouvée.")
     else:
@@ -217,14 +275,15 @@ if uploaded_files:
             format="%.3f"
         )
         st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
-
-        # --- Configuration 1 : pour Carte de suivi (scaling_factor = 1/5) ---
+        
+        # -------------------------------
+        # Configuration 1 : Export groupé en GeoTIFF (facteur de redimensionnement fixé à 1/5)
         if st.button("Configuration 1 (Carte de suivi)"):
             conv_config1 = []  # Stockera les GeoTIFF en mémoire
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for info in images_info:
-                    # Calcul de l'angle de vol (ici simplifié si 1 seule image)
+                    # Si plusieurs images, calcul d'un angle de vol (simplifié ici)
                     flight_angle = 0  
                     tiff_bytes = convert_to_tiff_in_memory(
                         image_file=io.BytesIO(info["data"]),
@@ -248,7 +307,8 @@ if uploaded_files:
             )
             st.session_state["conv_config1"] = conv_config1
 
-        # --- Configuration 2 : pour Carte de dessin (scaling_factor = 1/3 et résolution x2) ---
+        # -------------------------------
+        # Configuration 2 : Export groupé en GeoTIFF x2 (facteur de redimensionnement 1/3 et résolution multipliée par 2)
         if st.button("Configuration 2 (Carte de dessin)"):
             conv_config2 = []
             zip_buffer = io.BytesIO()
@@ -277,7 +337,8 @@ if uploaded_files:
             )
             st.session_state["conv_config2"] = conv_config2
 
-        # --- Configuration images : pour Détection automatique (export JPEG avec métadonnées) ---
+        # -------------------------------
+        # Configuration images : Export groupé en JPEG avec métadonnées de cadre
         if st.button("Configuration images (Détection automatique)"):
             conv_images = []
             zip_buffer = io.BytesIO()
@@ -306,45 +367,23 @@ if uploaded_files:
             )
             st.session_state["conv_images"] = conv_images
 
-# ===============================
-# SECTION 2 – DÉTECTION D'ANOMALIES
-# ===============================
-st.header("2. Détection d'anomalies")
-
-# --- Paramètres communs à la détection ---
-class_color = {
-    "deformations ornierage": "#FF0000",
-    "fissurations": "#00FF00",
-    "Faiençage": "#0000FF",
-    "fissure de retrait": "#FFFF00",
-    "fissure anarchique": "#FF00FF",
-    "reparations": "#00FFFF",
-    "nid de poule": "#FFA500",
-    "arrachements": "#800080",
-    "fluage": "#008000",
-    "denivellement accotement": "#000080",
-    "chaussée detruite": "#FFC0CB",
-    "envahissement vegetations": "#A52A2A",
-    "assainissements": "#808080",
-    "depot de terre": "#8B4513"
-}
-gravity_sizes = {1: 5, 2: 10, 3: 15}
-
-# Pour les routes (données fictives ou chargées depuis un fichier JSON)
-if os.path.exists("routeQSD.txt"):
-    with open("routeQSD.txt", "r") as f:
-        routes_data = json.load(f)
-else:
-    routes_data = {"features": []}
-routes_ci = []
-for feature in routes_data.get("features", []):
-    if feature["geometry"]["type"] == "LineString":
-        routes_ci.append({
-            "coords": feature["geometry"]["coordinates"],
-            "nom": feature["properties"].get("ID", "Route inconnue")
-        })
+# ---------------------------
+# FONCTIONS DE LA PARTIE DÉTECTION
+# ---------------------------
+def apply_color_gradient(tiff_path, output_png_path):
+    with rasterio.open(tiff_path) as src:
+        data = src.read(1)
+        cmap = plt.get_cmap("terrain")
+        norm = plt.Normalize(vmin=data.min(), vmax=data.max())
+        colored_image = cmap(norm(data))
+        plt.imsave(output_png_path, colored_image)
+        plt.close()
 
 def assign_route_to_marker(lat, lon, routes):
+    """
+    Pour un point (lat, lon) en EPSG:4326, retourne le nom de la route la plus proche,
+    si celle-ci se trouve dans un seuil défini (sinon "Route inconnue").
+    """
     marker_point = Point(lon, lat)
     min_distance = float('inf')
     closest_route = "Route inconnue"
@@ -354,7 +393,7 @@ def assign_route_to_marker(lat, lon, routes):
         if distance < min_distance:
             min_distance = distance
             closest_route = route["nom"]
-    threshold = 0.01
+    threshold = 0.01  # Seuil en degrés (à ajuster selon vos données)
     return closest_route if min_distance <= threshold else "Route inconnue"
 
 def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
@@ -474,6 +513,44 @@ def get_reprojected_and_center(uploaded_file, group):
         center_lat = (bounds.bottom + bounds.top) / 2
     return {"path": reproj_path, "center": (center_lon, center_lat), "bounds": bounds, "temp_original": temp_path}
 
+# Chargement des routes depuis routeQSD.txt
+if os.path.exists("routeQSD.txt"):
+    with open("routeQSD.txt", "r") as f:
+        routes_data = json.load(f)
+else:
+    routes_data = {"features": []}
+routes_ci = []
+for feature in routes_data.get("features", []):
+    if feature["geometry"]["type"] == "LineString":
+        routes_ci.append({
+            "coords": feature["geometry"]["coordinates"],
+            "nom": feature["properties"].get("ID", "Route inconnue")
+        })
+
+# Paramètres pour l'affichage des classes et gravités
+class_color = {
+    "deformations ornierage": "#FF0000",
+    "fissurations": "#00FF00",
+    "Faiençage": "#0000FF",
+    "fissure de retrait": "#FFFF00",
+    "fissure anarchique": "#FF00FF",
+    "reparations": "#00FFFF",
+    "nid de poule": "#FFA500",
+    "arrachements": "#800080",
+    "fluage": "#008000",
+    "denivellement accotement": "#000080",
+    "chaussée detruite": "#FFC0CB",
+    "envahissement vegetations": "#A52A2A",
+    "assainissements": "#808080",
+    "depot de terre": "#8B4513"
+}
+gravity_sizes = {1: 5, 2: 10, 3: 15}
+
+# ---------------------------
+# SECTION 2 – DÉTECTION D'ANOMALIES
+# ---------------------------
+st.header("2. Détection d'anomalies")
+
 # Initialisation de la session state pour la détection
 if "current_pair_index" not in st.session_state:
     st.session_state.current_pair_index = 0
@@ -482,183 +559,172 @@ if "pairs" not in st.session_state:
 if "markers_by_pair" not in st.session_state:
     st.session_state.markers_by_pair = {}  # Marqueurs par indice de paire
 
-# --- Détection automatique ---
-st.subheader("Détection Automatique")
-# Si des images issues de la configuration images existent, on les utilise sinon on propose un uploader
-if "conv_images" in st.session_state and st.session_state.conv_images:
-    auto_uploaded_images = []
-    for img in st.session_state.conv_images:
-        auto_uploaded_images.append(io.BytesIO(img["bytes"]))
-    st.success("Images issues de la conversion disponibles pour la détection automatique.")
-else:
-    auto_uploaded_images = st.file_uploader("Téléversez vos images JPEG ou PNG", type=["jpeg", "jpg", "png"], accept_multiple_files=True, key="auto_images")
-    if auto_uploaded_images:
-        st.success("Les images ont été bien téléversées.")
+# Interface en onglets pour détection automatique et manuelle
+tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
+
+with tab_auto:
+    st.header("Détection Automatique")
+    # Si des images issues de la configuration images existent, on les utilise sinon on propose un uploader
+    if "conv_images" in st.session_state and st.session_state.conv_images:
+        auto_uploaded_images = []
+        for img in st.session_state.conv_images:
+            auto_uploaded_images.append(io.BytesIO(img["bytes"]))
+        st.success("Images issues de la conversion disponibles pour la détection automatique.")
     else:
-        st.info("Aucune image téléversée pour la détection automatique.")
-
-# (La logique de détection automatique pourra être implémentée ultérieurement)
-
-# --- Détection manuelle ---
-st.subheader("Détection Manuelle")
-# Pour la détection manuelle, nous utiliserons les fichiers issus de la conversion:
-# - Configuration 2 pour les TIFF GRAND (carte de dessin)
-# - Configuration 1 pour les TIFF PETIT (carte de suivi)
-uploaded_files_grand = []
-uploaded_files_petit = []
-
-if "conv_config2" in st.session_state and st.session_state.conv_config2:
-    for file_dict in st.session_state.conv_config2:
-        uploaded_files_grand.append(io.BytesIO(file_dict["bytes"]))
-if "conv_config1" in st.session_state and st.session_state.conv_config1:
-    for file_dict in st.session_state.conv_config1:
-        uploaded_files_petit.append(io.BytesIO(file_dict["bytes"]))
-
-if not uploaded_files_grand or not uploaded_files_petit:
-    st.info("Les fichiers issus de la conversion ne sont pas encore disponibles pour la détection manuelle.")
-else:
-    if len(uploaded_files_grand) != len(uploaded_files_petit):
-        st.error("Le nombre de fichiers TIFF GRAND et TIFF PETIT doit être identique.")
-    else:
-        grand_list = []
-        petit_list = []
-        for file in uploaded_files_grand:
-            file.seek(0)
-            grand_list.append(get_reprojected_and_center(file, "grand"))
-        for file in uploaded_files_petit:
-            file.seek(0)
-            petit_list.append(get_reprojected_and_center(file, "petit"))
-        # On trie les listes pour tenter de jumeler les images
-        grand_list = sorted(grand_list, key=lambda d: d["center"])
-        petit_list = sorted(petit_list, key=lambda d: d["center"])
-        pair_count = len(grand_list)
-        pairs = []
-        for i in range(pair_count):
-            pairs.append({"grand": grand_list[i], "petit": petit_list[i]})
-        st.session_state.pairs = pairs
-
-        # Navigation entre paires
-        col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
-        if col_nav1.button("← Précédent") and st.session_state.current_pair_index > 0:
-            st.session_state.current_pair_index -= 1
-        if col_nav3.button("Suivant →") and st.session_state.current_pair_index < pair_count - 1:
-            st.session_state.current_pair_index += 1
-        st.write(f"Affichage de la paire {st.session_state.current_pair_index + 1} sur {pair_count}")
-        current_index = st.session_state.current_pair_index
-        current_pair = st.session_state.pairs[current_index]
-
-        # Traitement de la paire courante : génération des PNG pour affichage
-        reproj_grand_path = current_pair["grand"]["path"]
-        with rasterio.open(reproj_grand_path) as src:
-            grand_bounds = src.bounds
-            data = src.read()
-            if data.shape[0] >= 3:
-                r = normalize_data(data[0])
-                g = normalize_data(data[1])
-                b = normalize_data(data[2])
-                rgb_norm = np.dstack((r, g, b))
-                image_grand = Image.fromarray(rgb_norm)
-            else:
-                band = data[0]
-                band_norm = normalize_data(band)
-                image_grand = Image.fromarray(band_norm, mode="L")
-        unique_id = str(uuid.uuid4())[:8]
-        temp_png_grand = f"converted_grand_{unique_id}.png"
-        image_grand.save(temp_png_grand)
-        display_path_grand = temp_png_grand
-
-        reproj_petit_path = current_pair["petit"]["path"]
-        with rasterio.open(reproj_petit_path) as src:
-            petit_bounds = src.bounds
-            data = src.read()
-            if data.shape[0] >= 3:
-                r = normalize_data(data[0])
-                g = normalize_data(data[1])
-                b = normalize_data(data[2])
-                rgb_norm = np.dstack((r, g, b))
-                image_petit = Image.fromarray(rgb_norm)
-            else:
-                band = data[0]
-                band_norm = normalize_data(band)
-                image_petit = Image.fromarray(band_norm, mode="L")
-        temp_png_petit = f"converted_{unique_id}.png"
-        image_petit.save(temp_png_petit)
-        display_path_petit = temp_png_petit
-
-        # Carte de dessin : TIFF GRAND (OSM masqué) pour dessiner les marqueurs
-        st.subheader("Carte de dessin")
-        map_placeholder_grand = st.empty()
-        m_grand = create_map(
-            center_lat= (grand_bounds.bottom + grand_bounds.top)/2,
-            center_lon= (grand_bounds.left + grand_bounds.right)/2,
-            bounds=grand_bounds,
-            display_path=display_path_grand,
-            marker_data=None,
-            hide_osm=True,
-            draw_routes=False,
-            add_draw_tool=True
-        )
-        result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
-
-        # Extraction et classification des marqueurs dessinés
-        features = []
-        all_drawings = result_grand.get("all_drawings")
-        if all_drawings:
-            if isinstance(all_drawings, dict) and "features" in all_drawings:
-                features = all_drawings.get("features", [])
-            elif isinstance(all_drawings, list):
-                features = all_drawings
-        global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values())
-        new_markers = []
-        if features:
-            st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité :")
-            for i, feature in enumerate(features):
-                if feature.get("geometry", {}).get("type") == "Point":
-                    coords = feature.get("geometry", {}).get("coordinates")
-                    if coords and isinstance(coords, list) and len(coords) >= 2:
-                        lon, lat = coords[0], coords[1]
-                        # Calcul d'une correspondance de coordonnées entre les deux TIFF
-                        percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
-                        percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
-                        new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
-                        new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
-                    else:
-                        new_lon = new_lat = None
-                    assigned_route = assign_route_to_marker(new_lat, new_lon, routes_ci) if new_lat and new_lon else "Route inconnue"
-                    st.markdown(f"**ID {global_count + i + 1}**")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        selected_class = st.selectbox("Classe", list(class_color.keys()), key=f"class_{current_index}_{i}")
-                    with col2:
-                        selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{current_index}_{i}")
-                    new_markers.append({
-                        "ID": global_count + i + 1,
-                        "classe": selected_class,
-                        "gravite": selected_gravity,
-                        "lat": new_lat,
-                        "long": new_lon,
-                        "routes": assigned_route,
-                        "detection": "Manuelle",
-                        "couleur": class_color.get(selected_class, "#000000"),
-                        "radius": gravity_sizes.get(selected_gravity, 5)
-                    })
-            st.session_state.markers_by_pair[current_index] = new_markers
+        auto_uploaded_images = st.file_uploader("Téléversez vos images JPEG ou PNG", type=["jpeg", "jpg", "png"], accept_multiple_files=True, key="auto_images")
+        if auto_uploaded_images:
+            st.success("Les images ont été bien téléversées.")
         else:
-            st.write("Aucun marqueur n'a été détecté.")
+            st.info("Aucune image téléversée pour la détection automatique.")
+    # (La logique de détection automatique pourra être implémentée ultérieurement)
 
-        # Nettoyage éventuel des fichiers temporaires (à adapter selon vos besoins)
-        # for file_path in [current_pair["grand"]["temp_original"], current_pair["petit"]["temp_original"],
-        #                   reproj_grand_path, reproj_petit_path, temp_png_grand, temp_png_petit]:
-        #     if os.path.exists(file_path):
-        #         os.remove(file_path)
+with tab_manuel:
+    st.header("Détection Manuelle")
+    uploaded_files_grand = st.file_uploader("Téléversez vos fichiers TIFF GRAND", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_grand")
+    uploaded_files_petit = st.file_uploader("Téléversez vos fichiers TIFF PETIT", type=["tif", "tiff"], accept_multiple_files=True, key="tiff_petit")
+    
+    if uploaded_files_grand and uploaded_files_petit:
+        if len(uploaded_files_grand) != len(uploaded_files_petit):
+            st.error("Le nombre de fichiers TIFF GRAND et TIFF PETIT doit être identique.")
+        else:
+            grand_list = []
+            petit_list = []
+            for file in uploaded_files_grand:
+                file.seek(0)
+                grand_list.append(get_reprojected_and_center(file, "grand"))
+            for file in uploaded_files_petit:
+                file.seek(0)
+                petit_list.append(get_reprojected_and_center(file, "petit"))
+            # On trie les listes pour tenter de jumeler les images
+            grand_list = sorted(grand_list, key=lambda d: d["center"])
+            petit_list = sorted(petit_list, key=lambda d: d["center"])
+            pair_count = len(grand_list)
+            pairs = []
+            for i in range(pair_count):
+                pairs.append({"grand": grand_list[i], "petit": petit_list[i]})
+            st.session_state.pairs = pairs
 
-# --- Carte de suivi et récapitulatif global ---
+            # Navigation entre paires
+            col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
+            if col_nav1.button("← Précédent") and st.session_state.current_pair_index > 0:
+                st.session_state.current_pair_index -= 1
+            if col_nav3.button("Suivant →") and st.session_state.current_pair_index < pair_count - 1:
+                st.session_state.current_pair_index += 1
+            st.write(f"Affichage de la paire {st.session_state.current_pair_index + 1} sur {pair_count}")
+            current_index = st.session_state.current_pair_index
+            current_pair = st.session_state.pairs[current_index]
+
+            # Traitement de la paire courante : génération des PNG pour affichage
+            reproj_grand_path = current_pair["grand"]["path"]
+            with rasterio.open(reproj_grand_path) as src:
+                grand_bounds = src.bounds
+                data = src.read()
+                if data.shape[0] >= 3:
+                    r = normalize_data(data[0])
+                    g = normalize_data(data[1])
+                    b = normalize_data(data[2])
+                    rgb_norm = np.dstack((r, g, b))
+                    image_grand = Image.fromarray(rgb_norm)
+                else:
+                    band = data[0]
+                    band_norm = normalize_data(band)
+                    image_grand = Image.fromarray(band_norm, mode="L")
+            unique_id = str(uuid.uuid4())[:8]
+            temp_png_grand = f"converted_grand_{unique_id}.png"
+            image_grand.save(temp_png_grand)
+            display_path_grand = temp_png_grand
+
+            reproj_petit_path = current_pair["petit"]["path"]
+            with rasterio.open(reproj_petit_path) as src:
+                petit_bounds = src.bounds
+                data = src.read()
+                if data.shape[0] >= 3:
+                    r = normalize_data(data[0])
+                    g = normalize_data(data[1])
+                    b = normalize_data(data[2])
+                    rgb_norm = np.dstack((r, g, b))
+                    image_petit = Image.fromarray(rgb_norm)
+                else:
+                    band = data[0]
+                    band_norm = normalize_data(band)
+                    image_petit = Image.fromarray(band_norm, mode="L")
+            temp_png_petit = f"converted_{unique_id}.png"
+            image_petit.save(temp_png_petit)
+            display_path_petit = temp_png_petit
+
+            # Carte de dessin : TIFF GRAND (OSM masqué) pour dessiner les marqueurs
+            st.subheader("Carte de dessin")
+            map_placeholder_grand = st.empty()
+            m_grand = create_map(
+                center_lat=(grand_bounds.bottom + grand_bounds.top)/2,
+                center_lon=(grand_bounds.left + grand_bounds.right)/2,
+                bounds=grand_bounds,
+                display_path=display_path_grand,
+                marker_data=None,
+                hide_osm=True,
+                draw_routes=False,
+                add_draw_tool=True
+            )
+            result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
+
+            # Extraction et classification des marqueurs dessinés
+            features = []
+            all_drawings = result_grand.get("all_drawings")
+            if all_drawings:
+                if isinstance(all_drawings, dict) and "features" in all_drawings:
+                    features = all_drawings.get("features", [])
+                elif isinstance(all_drawings, list):
+                    features = all_drawings
+
+            global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values())
+            new_markers = []
+            if features:
+                st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité :")
+                for i, feature in enumerate(features):
+                    if feature.get("geometry", {}).get("type") == "Point":
+                        coords = feature.get("geometry", {}).get("coordinates")
+                        if coords and isinstance(coords, list) and len(coords) >= 2:
+                            lon, lat = coords[0], coords[1]
+                            # Correspondance des coordonnées entre les TIFF
+                            percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
+                            percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
+                            new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
+                            new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
+                        else:
+                            new_lon = new_lat = None
+                        assigned_route = assign_route_to_marker(new_lat, new_lon, routes_ci) if new_lat and new_lon else "Route inconnue"
+                        st.markdown(f"**ID {global_count + i + 1}**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            selected_class = st.selectbox("Classe", list(class_color.keys()), key=f"class_{current_index}_{i}")
+                        with col2:
+                            selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{current_index}_{i}")
+                        new_markers.append({
+                            "ID": global_count + i + 1,
+                            "classe": selected_class,
+                            "gravite": selected_gravity,
+                            "lat": new_lat,
+                            "long": new_lon,
+                            "routes": assigned_route,
+                            "detection": "Manuelle",
+                            "couleur": class_color.get(selected_class, "#000000"),
+                            "radius": gravity_sizes.get(selected_gravity, 5)
+                        })
+                st.session_state.markers_by_pair[current_index] = new_markers
+            else:
+                st.write("Aucun marqueur n'a été détecté.")
+    else:
+        st.info("Veuillez téléverser les fichiers TIFF pour lancer la détection manuelle.")
+
+# ---------------------------
+# Carte de suivi et récapitulatif global
+# ---------------------------
 st.subheader("Carte de suivi")
 global_markers = []
 for markers in st.session_state.markers_by_pair.values():
     global_markers.extend(markers)
 
-if "pairs" in st.session_state and st.session_state.pairs:
+if st.session_state.pairs:
     # Utilisation de la première paire comme référence pour la carte PETIT
     first_pair = st.session_state.pairs[0]
     try:
@@ -672,6 +738,7 @@ if "pairs" in st.session_state and st.session_state.pairs:
     if petit_bounds:
         center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
         center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
+        # Pour la carte de suivi, on conserve l'affichage des routes (draw_routes=True)
         m_petit = create_map(
             center_lat=center_lat_petit,
             center_lon=center_lon_petit,
@@ -688,7 +755,34 @@ if "pairs" in st.session_state and st.session_state.pairs:
     else:
         st.info("Impossible d'afficher la carte de suivi à cause d'un problème avec le TIFF PETIT.")
 else:
-    st.info("Aucune donnée TIFF disponible pour la carte de suivi.")
+    # Aucune donnée TIFF téléversée : affichage d'une carte par défaut avec les routes
+    all_lons = []
+    all_lats = []
+    for route in routes_ci:
+        for lon, lat in route["coords"]:
+            all_lons.append(lon)
+            all_lats.append(lat)
+    if all_lons and all_lats:
+        min_lon, max_lon = min(all_lons), max(all_lons)
+        min_lat, max_lat = min(all_lats), max(all_lats)
+        # Création d'un objet "bounds" simple
+        class Bounds:
+            pass
+        route_bounds = Bounds()
+        route_bounds.left = min_lon
+        route_bounds.right = max_lon
+        route_bounds.bottom = min_lat
+        route_bounds.top = max_lat
+        center_lat_default = (min_lat + max_lat) / 2
+        center_lon_default = (min_lon + max_lon) / 2
+        m_default = create_map(
+            center_lat_default, center_lon_default, route_bounds, display_path="",
+            marker_data=global_markers, tiff_opacity=0, tiff_show=True, tiff_control=False, draw_routes=True,
+            add_draw_tool=False
+        )
+        st_folium(m_default, width=700, height=500, key="folium_map_default")
+    else:
+        st.info("Aucune donnée de route disponible pour afficher la carte de suivi.")
 
 st.markdown("### Récapitulatif global des défauts")
 if global_markers:
