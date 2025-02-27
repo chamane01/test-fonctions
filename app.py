@@ -276,16 +276,36 @@ def get_reprojected_and_center(uploaded_file, group):
         center_lat = (bounds.bottom + bounds.top) / 2
     return {"path": reproj_path, "center": (center_lon, center_lat), "bounds": bounds, "temp_original": temp_path}
 
-# Variables globales pour la détection
+#########################################
+# Variables globales
+#########################################
+# Pour la détection, on conserve les marqueurs par paire
 if "current_pair_index" not in st.session_state:
     st.session_state.current_pair_index = 0
 if "pairs" not in st.session_state:
     st.session_state.pairs = []
 if "markers_by_pair" not in st.session_state:
     st.session_state.markers_by_pair = {}
+if "next_marker_id" not in st.session_state:
+    st.session_state.next_marker_id = 1
 
-# Exemple de dictionnaires pour les classes et tailles (à adapter selon vos besoins)
-class_color = {"Classe1": "#FF0000", "Classe2": "#00FF00", "Classe3": "#0000FF"}
+# Dictionnaire des classes (14 classes) et des tailles de gravité
+class_color = {
+    "deformations ornierage": "#FF0000",
+    "fissurations": "#00FF00",
+    "Faiençage": "#0000FF",
+    "fissure de retrait": "#FFFF00",
+    "fissure anarchique": "#FF00FF",
+    "reparations": "#00FFFF",
+    "nid de poule": "#FFA500",
+    "arrachements": "#800080",
+    "fluage": "#008000",
+    "denivellement accotement": "#000080",
+    "chaussée detruite": "#FFC0CB",
+    "envahissement vegetations": "#A52A2A",
+    "assainissements": "#808080",
+    "depot de terre": "#8B4513"
+}
 gravity_sizes = {1: 5, 2: 7, 3: 9}
 
 # Chargement des routes
@@ -360,7 +380,7 @@ if app_mode == "Conversion JPEG → GeoTIFF & Export JPEG":
                 format="%.3f"
             )
             st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
-            # Bouton unique pour générer et télécharger le ZIP de prétraitement
+            # Bouton pour générer et télécharger le ZIP de prétraitement
             if st.button("Générer les images prétraitées"):
                 zip_buffer = io.BytesIO()
                 with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -471,7 +491,7 @@ else:
     
     with tab_auto:
         st.header("Détection Automatique")
-        # On utilise uniquement les images issues de la conversion prétraitée
+        # Utilisation uniquement des images converties issues du ZIP prétraité
         if st.button("Utiliser les images converties (configuration images)"):
             if "preprocessed_zip" in st.session_state:
                 zip_bytes = st.session_state["preprocessed_zip"]
@@ -488,43 +508,37 @@ else:
             else:
                 st.error("Aucun résultat de conversion prétraitée n'est disponible.")
         # Le téléversement manuel est supprimé dans cette interface.
-
+    
     with tab_manuel:
         st.header("Détection Manuelle")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Utiliser résultats conversion TIFF GRAND (configuration 2)"):
-                if "preprocessed_zip" in st.session_state:
-                    zip_bytes = st.session_state["preprocessed_zip"]
-                    manual_grand_files = []
-                    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zip_file:
-                        for filename in zip_file.namelist():
-                            if filename.endswith("_geotiff_x2.tif"):
-                                file_data = zip_file.read(filename)
-                                file_obj = io.BytesIO(file_data)
-                                file_obj.name = filename
-                                manual_grand_files.append(file_obj)
+        # Bouton unique pour charger simultanément les fichiers TIFF GRAND et TIFF PETIT depuis la conversion
+        if st.button("Utiliser résultats conversion TIFF (les deux configurations)"):
+            if "preprocessed_zip" in st.session_state:
+                zip_bytes = st.session_state["preprocessed_zip"]
+                manual_grand_files = []
+                manual_petit_files = []
+                with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zip_file:
+                    for filename in zip_file.namelist():
+                        if filename.endswith("_geotiff_x2.tif"):
+                            file_data = zip_file.read(filename)
+                            file_obj = io.BytesIO(file_data)
+                            file_obj.name = filename
+                            manual_grand_files.append(file_obj)
+                        elif filename.endswith("_geotiff.tif"):
+                            file_data = zip_file.read(filename)
+                            file_obj = io.BytesIO(file_data)
+                            file_obj.name = filename
+                            manual_petit_files.append(file_obj)
+                if manual_grand_files and manual_petit_files:
                     st.session_state["manual_grand_files"] = manual_grand_files
-                    st.success(f"{len(manual_grand_files)} fichiers TIFF GRAND chargés depuis conversion.")
-                else:
-                    st.error("Aucun résultat de conversion prétraitée n'est disponible.")
-        with col2:
-            if st.button("Utiliser résultats conversion TIFF PETIT (configuration 1)"):
-                if "preprocessed_zip" in st.session_state:
-                    zip_bytes = st.session_state["preprocessed_zip"]
-                    manual_petit_files = []
-                    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zip_file:
-                        for filename in zip_file.namelist():
-                            if filename.endswith("_geotiff.tif"):
-                                file_data = zip_file.read(filename)
-                                file_obj = io.BytesIO(file_data)
-                                file_obj.name = filename
-                                manual_petit_files.append(file_obj)
                     st.session_state["manual_petit_files"] = manual_petit_files
-                    st.success(f"{len(manual_petit_files)} fichiers TIFF PETIT chargés depuis conversion.")
+                    st.success(f"{len(manual_grand_files)} fichiers TIFF GRAND et {len(manual_petit_files)} fichiers TIFF PETIT chargés depuis conversion.")
                 else:
-                    st.error("Aucun résultat de conversion prétraitée n'est disponible.")
-        # Les téléversements manuels sont supprimés dans cette interface.
+                    st.error("Aucun résultat de conversion prétraitée n'est disponible pour l'une ou l'autre configuration.")
+            else:
+                st.error("Aucun résultat de conversion prétraitée n'est disponible.")
+        
+        # Si les deux listes de fichiers sont disponibles, on poursuit le traitement
         if st.session_state.get("manual_grand_files") and st.session_state.get("manual_petit_files"):
             grand_list = []
             petit_list = []
@@ -603,8 +617,9 @@ else:
                     features = all_drawings.get("features", [])
                 elif isinstance(all_drawings, list):
                     features = all_drawings
-            global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values())
-            new_markers = []
+            # Pour conserver des ID de marqueurs constants, on récupère d'éventuels marqueurs existants pour la paire courante
+            existing_markers = st.session_state.markers_by_pair.get(current_index, [])
+            updated_markers = []
             if features:
                 st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité :")
                 for i, feature in enumerate(features):
@@ -622,14 +637,20 @@ else:
                             new_lon = new_lat = None
                             utm_coords_petit = "Inconnues"
                         assigned_route = assign_route_to_marker(new_lat, new_lon, routes_ci) if new_lat and new_lon else "Route inconnue"
-                        st.markdown(f"**ID {global_count + i + 1}**")
+                        # Attribution persistante d'un ID pour ce marqueur
+                        if i < len(existing_markers):
+                            marker_id = existing_markers[i]["ID"]
+                        else:
+                            marker_id = st.session_state.next_marker_id
+                            st.session_state.next_marker_id += 1
+                        st.markdown(f"**ID {marker_id}**")
                         col1, col2 = st.columns(2)
                         with col1:
-                            selected_class = st.selectbox("Classe", list(class_color.keys()), key=f"class_{current_index}_{i}")
+                            selected_class = st.selectbox("Classe", list(class_color.keys()), key=f"class_{current_index}_{marker_id}")
                         with col2:
-                            selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{current_index}_{i}")
-                        new_markers.append({
-                            "ID": global_count + i + 1,
+                            selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{current_index}_{marker_id}")
+                        updated_markers.append({
+                            "ID": marker_id,
                             "classe": selected_class,
                             "gravite": selected_gravity,
                             "coordonnees UTM": utm_coords_petit,
@@ -640,7 +661,7 @@ else:
                             "couleur": class_color.get(selected_class, "#000000"),
                             "radius": gravity_sizes.get(selected_gravity, 5)
                         })
-                st.session_state.markers_by_pair[current_index] = new_markers
+                st.session_state.markers_by_pair[current_index] = updated_markers
             else:
                 st.write("Aucun marqueur n'a été détecté.")
         else:
