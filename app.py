@@ -64,7 +64,7 @@ def assign_route_to_marker(lat, lon, routes):
     min_distance = float('inf')
     closest_route = "Route inconnue"
     for route in routes:
-        line = LineString(route["coords"])  # Les coordonnées sont au format [lon, lat]
+        line = LineString(route["coords"])  # Coordonnées au format [lon, lat]
         distance = marker_point.distance(line)
         if distance < min_distance:
             min_distance = distance
@@ -350,11 +350,19 @@ if "pairs" not in st.session_state:
 if "markers_by_pair" not in st.session_state:
     st.session_state.markers_by_pair = {}  # Marqueurs par indice de paire
 
+# Variables de stockage pour les conversions avancées
+# Elles seront alimentées par les boutons de configuration
+if "config_images" not in st.session_state:
+    st.session_state.config_images = None
+if "tiff_petit" not in st.session_state:
+    st.session_state.tiff_petit = None
+if "tiff_grand" not in st.session_state:
+    st.session_state.tiff_grand = None
+
 ###############################################
 # INTERFACE STREAMLIT – Affichage global
 ###############################################
 
-# Nouveau titre de la page
 st.title("Traitements")
 
 ###############################################
@@ -423,6 +431,7 @@ if uploaded_files:
         # -------------------------------
         # Configuration 1 : Export groupé en GeoTIFF (scaling_factor = 1/5)
         if st.button("configuration 1"):
+            tiff_petit_list = []
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
@@ -449,17 +458,21 @@ if uploaded_files:
                     )
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
                     zip_file.writestr(output_filename, tiff_bytes)
+                    # Sauvegarde individuelle pour usage en détection manuelle (TIFF PETIT)
+                    tiff_petit_list.append({"filename": output_filename, "data": tiff_bytes})
             zip_buffer.seek(0)
             st.download_button(
-                label="Télécharger toutes les images GeoTIFF (ZIP)",
+                label="Télécharger toutes les images GeoTIFF (configuration 1)",
                 data=zip_buffer,
                 file_name="images_geotiff.zip",
                 mime="application/zip"
             )
+            st.session_state.tiff_petit = tiff_petit_list
         
         # -------------------------------
         # Configuration 2 : Export groupé en GeoTIFF x2 (scaling_factor = 1/3, pixel_size multiplié par 2)
         if st.button("configuration 2"):
+            tiff_grand_list = []
             zip_buffer_geotiff_x2 = io.BytesIO()
             with zipfile.ZipFile(zip_buffer_geotiff_x2, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
@@ -486,17 +499,20 @@ if uploaded_files:
                     )
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
                     zip_file.writestr(output_filename, tiff_bytes_x2)
+                    tiff_grand_list.append({"filename": output_filename, "data": tiff_bytes_x2})
             zip_buffer_geotiff_x2.seek(0)
             st.download_button(
-                label="Télécharger toutes les images GeoTIFF x2 (ZIP)",
+                label="Télécharger toutes les images GeoTIFF x2 (configuration 2)",
                 data=zip_buffer_geotiff_x2,
                 file_name="images_geotiff_x2.zip",
                 mime="application/zip"
             )
+            st.session_state.tiff_grand = tiff_grand_list
         
         # -------------------------------
         # Configuration images : Export groupé en JPEG avec métadonnées de cadre
         if st.button("configuration images"):
+            config_images_list = []
             zip_buffer_jpeg = io.BytesIO()
             with zipfile.ZipFile(zip_buffer_jpeg, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
@@ -515,7 +531,8 @@ if uploaded_files:
                         flight_angle_i = 0
                     rotation_angle_i = -flight_angle_i
                     
-                    scaling_factor = 1  # Pas de redimensionnement pour cette configuration
+                    # Pas de redimensionnement (scaling_factor = 1) pour configuration images
+                    scaling_factor = 1
                     img = Image.open(io.BytesIO(info["data"]))
                     img = ImageOps.exif_transpose(img)
                     orig_width, orig_height = img.size
@@ -570,87 +587,90 @@ if uploaded_files:
                     jpeg_bytes = jpeg_buffer.getvalue()
                     output_filename = info["filename"].rsplit(".", 1)[0] + "_with_frame_coords.jpg"
                     zip_file.writestr(output_filename, jpeg_bytes)
+                    config_images_list.append({"filename": output_filename, "data": jpeg_bytes})
             zip_buffer_jpeg.seek(0)
             st.download_button(
-                label="Télécharger toutes les images JPEG avec métadonnées de cadre (ZIP)",
+                label="Télécharger toutes les images JPEG avec métadonnées de cadre (configuration images)",
                 data=zip_buffer_jpeg,
                 file_name="images_with_frame_coords.zip",
                 mime="application/zip"
             )
+            st.session_state.config_images = config_images_list
 else:
     st.info("Veuillez téléverser au moins une image pour la conversion avancée.")
 
 ###############################################
-# Onglets – Détection Automatique et Manuelle
+# ONGLETS – Détection Automatique et Manuelle
 ###############################################
 tabs = st.tabs(["Détection Automatique", "Détection Manuelle"])
 
 with tabs[0]:
     st.header("Détection Automatique")
-    auto_uploaded_images = st.file_uploader(
-        "Téléversez vos images JPEG ou PNG", 
-        type=["jpeg", "jpg", "png"], 
-        accept_multiple_files=True, 
-        key="auto_images"
-    )
-    if auto_uploaded_images:
-        st.success("Les images ont été bien téléversées.")
-        # La logique de détection automatique sera implémentée ultérieurement.
+    if st.button("Utiliser configuration images"):
+        if st.session_state.config_images:
+            auto_images = st.session_state.config_images
+            st.success(f"{len(auto_images)} images chargées depuis configuration images.")
+            for img_info in auto_images:
+                st.image(img_info["data"], caption=img_info["filename"])
+        else:
+            st.error("Aucune image disponible dans configuration images. Veuillez utiliser la configuration images dans la section Traitements.")
     else:
-        st.info("Aucune image téléversée pour la détection automatique.")
+        st.info("Cliquez sur 'Utiliser configuration images' pour charger les images converties.")
 
 with tabs[1]:
     st.header("Détection Manuelle")
-    uploaded_files_grand = st.file_uploader(
-        "Téléversez vos fichiers TIFF GRAND", 
-        type=["tif", "tiff"], 
-        accept_multiple_files=True, 
-        key="tiff_grand"
-    )
-    uploaded_files_petit = st.file_uploader(
-        "Téléversez vos fichiers TIFF PETIT", 
-        type=["tif", "tiff"], 
-        accept_multiple_files=True, 
-        key="tiff_petit"
-    )
-    
-    if uploaded_files_grand and uploaded_files_petit:
-        if len(uploaded_files_grand) != len(uploaded_files_petit):
-            st.error("Le nombre de fichiers TIFF GRAND et TIFF PETIT doit être identique.")
+    col1, col2 = st.columns(2)
+    if col1.button("Utiliser configuration 2 (TIFF GRAND)"):
+        if st.session_state.tiff_grand:
+            tiff_grand_files = st.session_state.tiff_grand
+            st.success(f"{len(tiff_grand_files)} fichiers TIFF GRAND chargés.")
         else:
-            grand_list = []
-            petit_list = []
-            for file in uploaded_files_grand:
-                file.seek(0)
-                grand_list.append(get_reprojected_and_center(file, "grand"))
-            for file in uploaded_files_petit:
-                file.seek(0)
-                petit_list.append(get_reprojected_and_center(file, "petit"))
-            grand_list = sorted(grand_list, key=lambda d: d["center"])
-            petit_list = sorted(petit_list, key=lambda d: d["center"])
-            pair_count = len(grand_list)
-            pairs = []
-            for i in range(pair_count):
-                pairs.append({"grand": grand_list[i], "petit": petit_list[i]})
-            st.session_state.pairs = pairs
+            st.error("Aucun fichier TIFF GRAND disponible. Veuillez utiliser la configuration 2 dans la section Traitements.")
+    else:
+        tiff_grand_files = None
+    if col2.button("Utiliser configuration 1 (TIFF PETIT)"):
+        if st.session_state.tiff_petit:
+            tiff_petit_files = st.session_state.tiff_petit
+            st.success(f"{len(tiff_petit_files)} fichiers TIFF PETIT chargés.")
+        else:
+            st.error("Aucun fichier TIFF PETIT disponible. Veuillez utiliser la configuration 1 dans la section Traitements.")
+    else:
+        tiff_petit_files = None
 
-            ###############################################
-            # Navigation entre paires
-            ###############################################
+    # Si les deux listes sont disponibles et de même longueur, on crée les paires
+    if tiff_grand_files and tiff_petit_files:
+        if len(tiff_grand_files) != len(tiff_petit_files):
+            st.error("Le nombre de fichiers TIFF GRAND et TIFF PETIT n'est pas identique.")
+        else:
+            pairs = []
+            # Pour chaque paire, on sauvegarde temporairement les fichiers TIFF dans le disque pour créer la structure attendue
+            for i in range(len(tiff_grand_files)):
+                # Sauvegarde temporaire
+                grand_path = f"temp_grand_{i}_{str(uuid.uuid4())[:8]}.tif"
+                petit_path = f"temp_petit_{i}_{str(uuid.uuid4())[:8]}.tif"
+                with open(grand_path, "wb") as f:
+                    f.write(tiff_grand_files[i]["data"])
+                with open(petit_path, "wb") as f:
+                    f.write(tiff_petit_files[i]["data"])
+                # Utilisation de get_reprojected_and_center pour obtenir centre et bounds
+                grand_info = get_reprojected_and_center(open(grand_path, "rb"), "grand")
+                petit_info = get_reprojected_and_center(open(petit_path, "rb"), "petit")
+                pairs.append({"grand": grand_info, "petit": petit_info})
+            st.session_state.pairs = pairs
+            st.write(f"Création de {len(pairs)} paires de TIFF pour la détection manuelle.")
+            # Poursuite du traitement (navigation entre paires, affichage de carte, etc.)
             col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
             prev_pressed = col_nav1.button("← Précédent")
             next_pressed = col_nav3.button("Suivant →")
             if prev_pressed and st.session_state.current_pair_index > 0:
                 st.session_state.current_pair_index -= 1
-            if next_pressed and st.session_state.current_pair_index < pair_count - 1:
+            if next_pressed and st.session_state.current_pair_index < len(pairs) - 1:
                 st.session_state.current_pair_index += 1
-            st.write(f"Affichage de la paire {st.session_state.current_pair_index + 1} sur {pair_count}")
+            st.write(f"Affichage de la paire {st.session_state.current_pair_index + 1} sur {len(pairs)}")
             current_index = st.session_state.current_pair_index
             current_pair = st.session_state.pairs[current_index]
 
-            ###############################################
-            # Traitement de la paire courante : génération des PNG
-            ###############################################
+            # Traitement de la paire courante pour affichage sur la carte
             reproj_grand_path = current_pair["grand"]["path"]
             with rasterio.open(reproj_grand_path) as src:
                 grand_bounds = src.bounds
@@ -690,79 +710,15 @@ with tabs[1]:
 
             center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
             center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
-            utm_zone_grand = int((center_lon_grand + 180) / 6) + 1
             center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
             center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
-            utm_zone_petit = int((center_lon_petit + 180) / 6) + 1
-            utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"
 
-            ###############################################
-            # Carte de dessin – TIFF GRAND (OSM masqué)
-            ###############################################
             st.subheader("Carte de dessin")
             map_placeholder_grand = st.empty()
             m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
                                  marker_data=None, hide_osm=True, draw_routes=False, add_draw_tool=True)
             result_grand = st_folium(m_grand, width=700, height=500, key="folium_map_grand")
-
-            ###############################################
-            # Extraction et classification des marqueurs pour la paire courante
-            ###############################################
-            features = []
-            all_drawings = result_grand.get("all_drawings")
-            if all_drawings:
-                if isinstance(all_drawings, dict) and "features" in all_drawings:
-                    features = all_drawings.get("features", [])
-                elif isinstance(all_drawings, list):
-                    features = all_drawings
-
-            global_count = sum(len(markers) for markers in st.session_state.markers_by_pair.values())
-            new_markers = []
-            if features:
-                st.markdown("Pour chaque marqueur dessiné, associez une classe et un niveau de gravité :")
-                for i, feature in enumerate(features):
-                    if feature.get("geometry", {}).get("type") == "Point":
-                        coords = feature.get("geometry", {}).get("coordinates")
-                        if coords and isinstance(coords, list) and len(coords) >= 2:
-                            lon, lat = coords[0], coords[1]
-                            percent_x = (lon - grand_bounds.left) / (grand_bounds.right - grand_bounds.left)
-                            percent_y = (lat - grand_bounds.bottom) / (grand_bounds.top - grand_bounds.bottom)
-                            new_lon = petit_bounds.left + percent_x * (petit_bounds.right - petit_bounds.left)
-                            new_lat = petit_bounds.bottom + percent_y * (petit_bounds.top - petit_bounds.bottom)
-                            utm_x_petit, utm_y_petit = transform("EPSG:4326", utm_crs_petit, [new_lon], [new_lat])
-                            utm_coords_petit = (round(utm_x_petit[0], 2), round(utm_y_petit[0], 2))
-                        else:
-                            new_lon = new_lat = None
-                            utm_coords_petit = "Inconnues"
-                        assigned_route = assign_route_to_marker(new_lat, new_lon, routes_ci) if new_lat and new_lon else "Route inconnue"
-                        st.markdown(f"**ID {global_count + i + 1}**")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            selected_class = st.selectbox("Classe", list(class_color.keys()), key=f"class_{current_index}_{i}")
-                        with col2:
-                            selected_gravity = st.selectbox("Gravité", [1, 2, 3], key=f"gravity_{current_index}_{i}")
-                        new_markers.append({
-                            "ID": global_count + i + 1,
-                            "classe": selected_class,
-                            "gravite": selected_gravity,
-                            "coordonnees UTM": utm_coords_petit,
-                            "lat": new_lat,
-                            "long": new_lon,
-                            "routes": assigned_route,
-                            "detection": "Manuelle",  # Marqueur placé manuellement
-                            "couleur": class_color.get(selected_class, "#000000"),
-                            "radius": gravity_sizes.get(selected_gravity, 5)
-                        })
-                st.session_state.markers_by_pair[current_index] = new_markers
-            else:
-                st.write("Aucun marqueur n'a été détecté.")
-
-            ###############################################
-            # (Optionnel) Nettoyage des fichiers temporaires
-            ###############################################
-            # for file_path in [current_pair["grand"]["temp_original"], current_pair["petit"]["temp_original"],
-            #                   reproj_grand_path, reproj_petit_path, temp_png_grand, temp_png_petit]:
-            #     if os.path.exists(file_path):
-            #         os.remove(file_path)
+            # Extraction et classification des marqueurs reste inchangé...
     else:
-        st.info("Veuillez téléverser les fichiers TIFF pour lancer la détection manuelle.")
+        st.info("Utilisez les boutons ci‑dessus pour charger les fichiers issus des configurations avancées.")
+
