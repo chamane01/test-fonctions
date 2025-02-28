@@ -836,7 +836,10 @@ if st.button("Sauvegarder la mission"):
         # Ajout de la mission à l'historique si non déjà présente
         if mission_details not in st.session_state.mission_history:
             st.session_state.mission_history.append(mission_details)
-        st.success("Mission sauvegardée dans l'historique.")
+        # Réinitialisation de la carte de suivi et du récapitulatif des défauts
+        st.session_state.markers_by_pair = {}       # Supprime tous les marqueurs enregistrés
+        st.session_state.current_pair_index = 0      # Réinitialise l'index de la paire en cours
+        st.success("Mission sauvegardée dans l'historique et données de suivi réinitialisées.")
     else:
         st.error("Aucune mission sélectionnée.")
 
