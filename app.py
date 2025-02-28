@@ -424,14 +424,14 @@ else:
 #########################################
 # Affichage sur une seule page
 #########################################
-st.title("TRAITEMENTS")
+st.title("traitements")
 
 #########################
 # Section Post-traitements des images
 #########################
-st.header("post-traitements")
+st.header("post-traitements des images")
 uploaded_files = st.file_uploader(
-    "Téléversez une ou plusieurs images (JPG/JPEG)",
+    "Téléversez une ou plusieurs images (JPG/JPEG) avec métadonnées EXIF",
     type=["jpg", "jpeg"],
     accept_multiple_files=True
 )
@@ -590,8 +590,8 @@ st.header("detections")
 tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
 
 with tab_auto:
-    
-    if st.button("lancer le traitement Automatique"):
+    st.subheader("Détection Automatique")
+    if st.button("Utiliser les images converties (configuration images)"):
         if "preprocessed_zip" in st.session_state:
             zip_bytes = st.session_state["preprocessed_zip"]
             auto_converted_files = []
@@ -609,9 +609,9 @@ with tab_auto:
     # Le téléversement manuel est supprimé dans cette interface.
 
 with tab_manuel:
-    
+    st.subheader("Détection Manuelle")
     # Bouton unique pour charger simultanément les fichiers TIFF GRAND et TIFF PETIT depuis la conversion
-    if st.button("commencer le traitement manuel"):
+    if st.button("Utiliser résultats conversion TIFF (les deux configurations)"):
         if "preprocessed_zip" in st.session_state:
             zip_bytes = st.session_state["preprocessed_zip"]
             manual_grand_files = []
@@ -631,7 +631,7 @@ with tab_manuel:
             if manual_grand_files and manual_petit_files:
                 st.session_state["manual_grand_files"] = manual_grand_files
                 st.session_state["manual_petit_files"] = manual_petit_files
-                st.success(f"fichiers chargés depuis conversion.")
+                st.success(f"{len(manual_grand_files)} fichiers TIFF GRAND et {len(manual_petit_files)} fichiers TIFF PETIT chargés depuis conversion.")
             else:
                 st.error("Aucun résultat de conversion prétraitée n'est disponible pour l'une ou l'autre configuration.")
         else:
@@ -829,6 +829,7 @@ else:
 #########################################
 # Bouton de sauvegarde de la mission
 #########################################
+st.markdown("---")
 if st.button("Sauvegarder la mission"):
     current_mission = st.session_state.get("current_mission", None)
     if current_mission:
@@ -843,6 +844,8 @@ if st.button("Sauvegarder la mission"):
 #########################################
 # Gestionnaire de missions : Export CSV
 #########################################
+st.markdown("---")
+st.subheader("Export des résultats de la mission en CSV")
 if st.button("Exporter les résultats de la mission en CSV"):
     current_mission = st.session_state.get("current_mission", None)
     if current_mission:
