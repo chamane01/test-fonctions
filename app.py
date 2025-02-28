@@ -370,15 +370,12 @@ if st.session_state.missions:
 else:
     st.sidebar.info("Aucune mission disponible. Créez-en une.")
 
-# Calcul des global_markers à partir des marqueurs détectés
-global_markers = []
-for markers in st.session_state.get("markers_by_pair", {}).values():
-    global_markers.extend(markers)
-
 st.sidebar.subheader("Historique des missions sauvegardées")
 if st.session_state.mission_history:
-    # Pour chaque mission sauvegardée, ajouter une colonne "Données Défauts" regroupant les marqueurs associés
     mission_markers_map = {}
+    global_markers = []
+    for markers in st.session_state.get("markers_by_pair", {}).values():
+        global_markers.extend(markers)
     for marker in global_markers:
         mission_id = marker.get("mission", "N/A")
         if mission_id not in mission_markers_map:
@@ -393,7 +390,6 @@ if st.session_state.mission_history:
     df_missions = pd.DataFrame(mission_history_display)
     st.sidebar.table(df_missions)
     
-    # Préparation des fichiers Excel, CSV et TXT pour le téléchargement
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
         df_missions.to_excel(writer, index=False)
@@ -420,6 +416,22 @@ if st.session_state.mission_history:
     )
 else:
     st.sidebar.info("Aucune mission sauvegardée.")
+
+#########################################
+# Bouton de sauvegarde de la mission avec réinitialisation des données de suivi
+#########################################
+if st.button("Sauvegarder la mission"):
+    current_mission = st.session_state.get("current_mission", None)
+    if current_mission:
+        mission_details = st.session_state.missions.get(current_mission, {})
+        if mission_details not in st.session_state.mission_history:
+            st.session_state.mission_history.append(mission_details)
+        # Réinitialisation de la carte de suivi et du récapitulatif des défauts
+        st.session_state.markers_by_pair = {}
+        st.session_state.current_pair_index = 0
+        st.success("Mission sauvegardée et données de suivi réinitialisées.")
+    else:
+        st.error("Aucune mission sélectionnée.")
 
 #########################################
 # Affichage sur une seule page
