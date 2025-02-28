@@ -335,15 +335,15 @@ for feature in routes_data["features"]:
         })
 
 #########################################
-# Menu Principal avec navigation
+# Menu Principal avec navigation (unique id "main_sidebar")
 #########################################
 menu_option = st.sidebar.selectbox("Menu Principal", ["Missions", "Rapport", "Tableau de bord"], key="main_sidebar")
 
 if menu_option == "Missions":
     #########################################
-    # Sidebar Missions (regroupées dans un expander sans key)
+    # Sidebar Missions (regroupées dans un expander avec key "missions_sidebar")
     #########################################
-    with st.sidebar.expander("Missions", expanded=True):
+    with st.sidebar.expander("Missions", expanded=True, key="missions_sidebar"):
         st.header("Création de mission")
         with st.form("mission_form"):
             operator = st.text_input("Nom de l'opérateur")
@@ -426,8 +426,10 @@ if menu_option == "Missions":
 
     #########################################
     # Contenu principal pour Missions
+    # (La zone de traitements est ici encapsulée dans un container identifié par le commentaire "traitement_container")
     #########################################
     st.title("TRAITEMENTS")
+    # --- Début du container de traitement (id virtuel : "traitement_container") ---
     with st.container():
         #########################
         # Section Post-traitements des images
@@ -816,6 +818,9 @@ if menu_option == "Missions":
         else:
             st.write("Aucun marqueur global n'a été enregistré.")
         
+        #########################################
+        # Bouton de sauvegarde de la mission
+        #########################################
         if st.button("Sauvegarder la mission"):
             current_mission = st.session_state.get("current_mission", None)
             if current_mission:
@@ -826,6 +831,9 @@ if menu_option == "Missions":
             else:
                 st.error("Aucune mission sélectionnée.")
         
+        #########################################
+        # Gestionnaire de missions : Export CSV
+        #########################################
         if st.button("Exporter les résultats de la mission en CSV"):
             current_mission = st.session_state.get("current_mission", None)
             if current_mission:
@@ -864,7 +872,8 @@ if menu_option == "Missions":
                     st.info("Aucun marqueur n'est associé à la mission courante.")
             else:
                 st.info("Aucune mission sélectionnée.")
-
+    # --- Fin du container de traitement ---
+    
 elif menu_option == "Rapport":
     st.title("Rapport")
     st.write("Interface Rapport : à développer selon vos besoins.")
