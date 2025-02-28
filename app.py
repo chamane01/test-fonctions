@@ -899,3 +899,9 @@ if st.button("Exporter les résultats de la mission en CSV"):
             st.info("Aucun marqueur n'est associé à la mission courante.")
     else:
         st.info("Aucune mission sélectionnée.")
+
+if st.button("Supprimer les marqueurs carte de suivi"):
+    st.session_state.markers_by_pair = {}
+    st.session_state.current_pair_index = 0
+    st.success("Les marqueurs de la carte de suivi ont été supprimés.")
+
