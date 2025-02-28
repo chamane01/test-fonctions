@@ -1,130 +1,245 @@
 import streamlit as st
 import pandas as pd
-import random
+import sqlite3
+import folium
+import plotly.express as px
+from streamlit_folium import st_folium
+from datetime import datetime
 
-# Liste de quelques routes de la Côte d'Ivoire
-routes_list = ["la cotiere", "A1", "A2", "A3", "A100", "A4", "A5"]
+# === Fonctions de gestion de la base de données ===
 
-# Liste de classes de défauts (exemples)
-defect_classes = [
-    "deformations ornierage", "fissurations", "Faiençage", "fissure de retrait",
-    "fissure anarchique", "reparations", "nid de poule", "fluage", "arrachements",
-    "depot de terre", "assainissements", "envahissement vegetations",
-    "chaussée detruite", "denivellement accotement"
-]
+def connect_db(db_file='base_donnees.db'):
+    """Se connecte à la base SQLite (créée si nécessaire)."""
+    return sqlite3.connect(db_file)
 
-def format_road(road):
-    # Pour les routes de type A, on ajoute un descriptif
-    if road.startswith("A"):
-        return f"{road}(port-bouet, bassam)"
-    return road
+def create_tables(conn):
+    """Crée les tables missions et defects si elles n'existent pas déjà."""
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS missions (
+            id TEXT PRIMARY KEY,
+            operator TEXT,
+            appareil_type TEXT,
+            nom_appareil TEXT,
+            date TEXT,
+            troncon TEXT
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS defects (
+            id TEXT PRIMARY KEY,
+            mission_id TEXT,
+            classe TEXT,
+            gravite INTEGER,
+            coordonnees_utm TEXT,
+            lat REAL,
+            longitude REAL,
+            routes TEXT,
+            detection TEXT,
+            couleur TEXT,
+            radius INTEGER,
+            date TEXT,
+            appareil TEXT,
+            nom_appareil TEXT,
+            FOREIGN KEY (mission_id) REFERENCES missions(id)
+        )
+    ''')
+    conn.commit()
 
-def generate_data(num_missions, total_defects):
+def insert_mission(conn, row):
+    """Insère une mission dans la table missions."""
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR IGNORE INTO missions (id, operator, appareil_type, nom_appareil, date, troncon)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (row['id'], row['operator'], row['appareil_type'], row['nom_appareil'], row['date'], row['troncon']))
+    conn.commit()
+
+def insert_defect(conn, row):
+    """Insère un défaut dans la table defects."""
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR IGNORE INTO defects 
+        (id, mission_id, classe, gravite, coordonnees_utm, lat, longitude, routes, detection, couleur, radius, date, appareil, nom_appareil)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        row['ID'], 
+        row['mission'], 
+        row['classe'], 
+        row['gravite'], 
+        row['coordonnees UTM'], 
+        row['lat'], 
+        row['long'],  # colonne "long" issue du fichier source
+        row['routes'], 
+        row['detection'], 
+        row['couleur'], 
+        row['radius'], 
+        row['date'], 
+        row['appareil'], 
+        row['nom_appareil']
+    ))
+    conn.commit()
+
+def process_uploaded_file(uploaded_file):
     """
-    Génère une DataFrame avec les colonnes suivantes :
-    ID, classe, gravite, coordonnees UTM, lat, long, routes, detection, mission,
-    couleur, radius, date, appareil, nom_appareil.
+    Charge le fichier TXT (séparateur tabulation), affiche un aperçu,
+    crée les tables et insère les données dans la base SQLite.
     """
-    rows = []
-    defect_counter_global = 1
+    df = pd.read_csv(uploaded_file, sep="\t")
+    st.write("Aperçu des données importées :")
+    st.dataframe(df.head())
 
-    # Répartition uniforme des défauts par mission
-    defects_per_mission = total_defects // num_missions
-    reste = total_defects % num_missions
+    # Préparation d'une table missions à partir des missions uniques
+    missions_df = df[['mission', 'appareil', 'nom_appareil', 'date']].drop_duplicates().copy()
+    missions_df.rename(columns={'mission': 'id', 'appareil': 'appareil_type'}, inplace=True)
+    missions_df['operator'] = ""
+    missions_df['troncon'] = ""
 
-    for m in range(1, num_missions + 1):
-        # Génération d'un code mission (ex: "20250228-001-I")
-        mission_code = f"20250228-{m:03d}-I"
-        # Ajustement pour le reste des défauts
-        nb_defects = defects_per_mission + (1 if m <= reste else 0)
-        for d in range(1, nb_defects + 1):
-            # ID du défaut (ex: "20250228-001-I-1")
-            defect_id = f"{mission_code}-{d}"
-            # Choix aléatoire de la classe de défaut
-            defect_class = random.choice(defect_classes)
-            # Gravité aléatoire entre 1 et 3
-            gravite = random.choice([1, 2, 3])
-            # Coordonnées UTM simulées (valeurs proches de l'exemple)
-            utm_x = round(random.uniform(429600, 429750), 2)
-            utm_y = round(random.uniform(578840, 579000), 2)
-            coordonnees = f"[{utm_x}, {utm_y}]"
-            # Latitude et longitude avec de petites variations
-            lat = round(random.uniform(5.2365, 5.2380), 4)
-            lon = round(random.uniform(-3.6355, -3.6340), 4)
-            # Choix aléatoire d'une route et formatage
-            route = format_road(random.choice(routes_list))
-            # Détection toujours "Manuelle" dans l'exemple
-            detection = "Manuelle"
-            # Couleur générée aléatoirement en hexadécimal
-            couleur = f"#{random.randint(0, 0xFFFFFF):06X}"
-            # Rayon : choix parmi quelques valeurs (exemples : 5, 7 ou 9)
-            radius = random.choice([5, 7, 9])
-            # Date, appareil et nom d'appareil fixes d'après l'exemple
-            date = "2025-02-28"
-            appareil = "Drone"
-            nom_appareil = "phantom"
-            
-            rows.append({
-                "ID": defect_id,
-                "classe": defect_class,
-                "gravite": gravite,
-                "coordonnees UTM": coordonnees,
-                "lat": lat,
-                "long": lon,
-                "routes": route,
-                "detection": detection,
-                "mission": mission_code,
-                "couleur": couleur,
-                "radius": radius,
-                "date": date,
-                "appareil": appareil,
-                "nom_appareil": nom_appareil
-            })
-            defect_counter_global += 1
+    conn = connect_db()
+    create_tables(conn)
 
-    df = pd.DataFrame(rows)
+    # Insertion des missions
+    for _, row in missions_df.iterrows():
+        insert_mission(conn, row)
+    # Insertion des défauts
+    for _, row in df.iterrows():
+        insert_defect(conn, row)
+
+    conn.close()
+    st.success("Les données ont été insérées dans la base de données avec succès !")
+
+def get_missions():
+    """Récupère les missions depuis la base de données."""
+    conn = connect_db()
+    df = pd.read_sql("SELECT * FROM missions", conn)
+    conn.close()
     return df
 
-st.title("Générateur de base de données de défauts")
-st.write("Ce script génère une base de données (TXT) selon les scénarios proposés.")
+def get_defects():
+    """Récupère les défauts depuis la base de données."""
+    conn = connect_db()
+    df = pd.read_sql("SELECT * FROM defects", conn)
+    conn.close()
+    return df
 
-# Sélection du type de base de données dans la barre latérale
-option = st.sidebar.selectbox(
-    "Choisissez le type de base de données",
-    options=[
-        "100 défauts dans une mission",
-        "100 missions avec 1000 défauts détectés",
-        "150 missions avec 1000 défauts détectés"
-    ]
-)
+def add_mission_manual(id_mission, operator, appareil_type, nom_appareil, date_mission, troncon):
+    """Ajoute une nouvelle mission dans la base de données."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR IGNORE INTO missions (id, operator, appareil_type, nom_appareil, date, troncon)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (id_mission, operator, appareil_type, nom_appareil, date_mission, troncon))
+    conn.commit()
+    conn.close()
 
-# Paramétrage en fonction de l'option sélectionnée
-if option == "100 défauts dans une mission":
-    num_missions = 1
-    total_defects = 100
-elif option == "100 missions avec 1000 défauts détectés":
-    num_missions = 100
-    total_defects = 1000
-elif option == "150 missions avec 1000 défauts détectés":
-    num_missions = 150
-    total_defects = 1000
+# === Fonctions de visualisation ===
 
-st.sidebar.write(f"Nombre de missions : **{num_missions}**")
-st.sidebar.write(f"Nombre total de défauts : **{total_defects}**")
+def show_map(defects_df):
+    """Affiche une carte interactive avec les défauts."""
+    if defects_df.empty:
+        st.warning("Aucune donnée de défauts à afficher sur la carte.")
+        return
+    # Calcul du centre de la carte
+    center_lat = defects_df['lat'].mean()
+    center_lon = defects_df['longitude'].mean()
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=8)
+    
+    for _, row in defects_df.iterrows():
+        folium.CircleMarker(
+            location=[row['lat'], row['longitude']],
+            radius=5 + row['gravite'],  # taille proportionnelle à la gravité
+            color=row['couleur'] if row['couleur'] else 'blue',
+            fill=True,
+            fill_color=row['couleur'] if row['couleur'] else 'blue',
+            popup=(
+                f"<b>ID :</b> {row['id']}<br>"
+                f"<b>Classe :</b> {row['classe']}<br>"
+                f"<b>Gravité :</b> {row['gravite']}<br>"
+                f"<b>Date :</b> {row['date']}"
+            ),
+            tooltip=row['classe']
+        ).add_to(m)
+    st_folium(m, width=700, height=500)
 
-# Génération de la base de données
-df = generate_data(num_missions, total_defects)
+def show_charts(defects_df):
+    """Affiche plusieurs graphiques interactifs basés sur les défauts."""
+    st.subheader("Répartition des défauts par catégorie")
+    if not defects_df.empty:
+        fig1 = px.pie(defects_df, names='classe', title="Défauts par catégorie")
+        st.plotly_chart(fig1)
 
-st.subheader("Aperçu de la base de données")
-st.dataframe(df.head(10))
+        st.subheader("Distribution de la gravité")
+        fig2 = px.histogram(defects_df, x="gravite", nbins=10, title="Histogramme de la gravité")
+        st.plotly_chart(fig2)
 
-# Conversion de la DataFrame en chaîne de caractères au format CSV (séparateur tabulation)
-data_str = df.to_csv(sep="\t", index=False)
+        st.subheader("Évolution temporelle des défauts")
+        # Conversion de la colonne date en datetime
+        defects_df['date'] = pd.to_datetime(defects_df['date'], errors='coerce')
+        df_time = defects_df.dropna(subset=['date'])
+        if not df_time.empty:
+            df_time_grouped = df_time.groupby(df_time['date'].dt.date).size().reset_index(name='Nombre de défauts')
+            fig3 = px.line(df_time_grouped, x='date', y='Nombre de défauts', title="Évolution des défauts")
+            st.plotly_chart(fig3)
+        else:
+            st.info("Les données temporelles ne sont pas au format attendu.")
+    else:
+        st.warning("Aucune donnée disponible pour les graphiques.")
 
-# Bouton de téléchargement
-st.download_button(
-    label="Télécharger la base de données (TXT)",
-    data=data_str,
-    file_name="base_de_donnees.txt",
-    mime="text/plain"
-)
+# === Application principale Streamlit ===
+
+def main():
+    st.title("Tableau de Bord Dynamique – Gestion des Défauts")
+    navigation = st.sidebar.radio("Navigation", ["Charger les données", "Tableau de Bord", "Gestion des Missions"])
+    
+    # Section 1 : Chargement des données
+    if navigation == "Charger les données":
+        st.header("Charger un fichier TXT")
+        st.write("Importer le fichier TXT (séparateur tabulation) contenant la base de données des défauts.")
+        uploaded_file = st.file_uploader("Choisissez un fichier", type=["txt", "csv"])
+        if uploaded_file is not None:
+            process_uploaded_file(uploaded_file)
+
+    # Section 2 : Tableau de Bord des Défauts
+    elif navigation == "Tableau de Bord":
+        st.header("Visualisation des Défauts")
+        defects_df = get_defects()
+        if defects_df.empty:
+            st.warning("Aucune donnée de défauts disponible. Veuillez charger un fichier au préalable.")
+        else:
+            st.subheader("Carte Interactive")
+            show_map(defects_df)
+            st.subheader("Statistiques")
+            show_charts(defects_df)
+
+    # Section 3 : Gestion des Missions
+    elif navigation == "Gestion des Missions":
+        st.header("Gestion des Missions")
+        missions_df = get_missions()
+        st.subheader("Liste des Missions")
+        st.dataframe(missions_df)
+        
+        st.subheader("Ajouter une nouvelle Mission")
+        with st.form("ajouter_mission_form"):
+            id_mission = st.text_input("ID Mission")
+            operator = st.text_input("Opérateur")
+            appareil_type = st.text_input("Type d'appareil")
+            nom_appareil = st.text_input("Nom de l'appareil")
+            date_mission = st.date_input("Date de la mission", datetime.today())
+            troncon = st.text_input("Tronçon")
+            submit = st.form_submit_button("Ajouter Mission")
+            if submit:
+                add_mission_manual(id_mission, operator, appareil_type, nom_appareil, str(date_mission), troncon)
+                st.success("Mission ajoutée avec succès !")
+    
+    # Option de téléchargement de la base de données (accessible depuis la sidebar)
+    st.sidebar.subheader("Télécharger la base de données")
+    if st.sidebar.button("Télécharger DB"):
+        try:
+            with open('base_donnees.db', 'rb') as f:
+                st.download_button("Télécharger base_donnees.db", f, file_name="base_donnees.db")
+        except Exception as e:
+            st.error(f"Erreur lors du téléchargement : {e}")
+
+if __name__ == '__main__':
+    main()
