@@ -1,106 +1,86 @@
 import streamlit as st
-import json
-import random
+import sqlite3
+import pandas as pd
+import plotly.express as px
 
-# Listes de valeurs possibles pour certains champs
-CLASSES = [
-    "deformations ornierage", "fissurations", "Faiençage", "fissure de retrait",
-    "fissure anarchique", "reparations", "nid de poule", "fluage",
-    "arrachements", "depot de terre", "assainissements", "envahissement vegetations",
-    "chaussée detruite", "denivellement accotement"
+# Connexion à la base de données SQLite
+conn = sqlite3.connect("base_donnees_missions.db")
+# Lecture des tables defects et missions
+defects_df = pd.read_sql("SELECT * FROM defects", conn)
+missions_df = pd.read_sql("SELECT * FROM missions", conn)
+conn.close()
+
+# Conversion de la colonne date en type datetime
+defects_df['date'] = pd.to_datetime(defects_df['date'])
+
+# Barre latérale – Filtres
+st.sidebar.header("Filtres")
+# Filtre sur les routes disponibles
+routes_uniques = defects_df['routes'].unique().tolist()
+routes_selectionnees = st.sidebar.multiselect("Sélectionnez les routes :", 
+                                               options=routes_uniques, 
+                                               default=routes_uniques)
+# Filtre sur la plage de dates
+min_date = defects_df['date'].min().date()
+max_date = defects_df['date'].max().date()
+date_range = st.sidebar.date_input("Plage de dates :", 
+                                   value=(min_date, max_date), 
+                                   min_value=min_date, 
+                                   max_value=max_date)
+
+# Filtrer les données en fonction des sélections
+df_filtre = defects_df[
+    (defects_df['routes'].isin(routes_selectionnees)) &
+    (defects_df['date'] >= pd.to_datetime(date_range[0])) &
+    (defects_df['date'] <= pd.to_datetime(date_range[1]))
 ]
-ROUTES = ["la cotiere", "A1", "A2", "A3", "A100", "Autre"]
-HEX_COLORS = [
-    "#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF",
-    "#FFA500", "#008000", "#800080", "#8B4513", "#808080", "#A52A2A",
-    "#FFC0CB", "#000080"
-]
 
-def generate_defect(mission_id, defect_index):
-    """
-    Génère un dictionnaire correspondant à un défaut, en se basant sur les exemples fournis.
-    Les coordonnées UTM, lat et long sont légèrement randomisées autour de valeurs de base.
-    """
-    utm_x = 429640 + random.uniform(-50, 50)
-    utm_y = 578928 + random.uniform(-50, 50)
-    lat = 5.237 + random.uniform(-0.001, 0.001)
-    lon = -3.6349 + random.uniform(-0.001, 0.001)
-    
-    defect = {
-        "ID": f"{mission_id}-{defect_index+1}",
-        "classe": random.choice(CLASSES),
-        "gravite": random.choice([1, 2, 3]),
-        "coordonnees UTM": (round(utm_x, 2), round(utm_y, 2)),
-        "lat": round(lat, 6),
-        "long": round(lon, 6),
-        "routes": random.choice(ROUTES),
-        "detection": "Manuelle",
-        "mission": mission_id,
-        "couleur": random.choice(HEX_COLORS),
-        "radius": random.choice([5, 7, 9]),
-        "date": "2025-02-28",
-        "appareil": "Drone",
-        "nom_appareil": "phantom"
-    }
-    return defect
+# Titre du tableau de bord
+st.title("Tableau de Bord des Défauts des Missions")
+st.markdown("### Vue d'ensemble globale")
 
-def generate_mission(mission_index, num_defects):
-    """
-    Génère une mission au format configuration 2.
-    Le champ 'troncon' est généré sous la forme pkX-pkY, avec X et Y aléatoires.
-    La liste 'Données Défauts' contient 'num_defects' défauts générés.
-    """
-    mission_id = f"20250228-001-I-{mission_index:03d}"
-    mission = {
-        "id": mission_id,
-        "operator": "magass",
-        "appareil_type": "Drone",
-        "nom_appareil": "phantom",
-        "date": "2025-02-28",
-        "troncon": f"pk{random.randint(1,20)}-pk{random.randint(21,100)}",
-        "Données Défauts": [generate_defect(mission_id, i) for i in range(num_defects)]
-    }
-    return mission
+# Indicateurs clés
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("Nombre de missions", missions_df.shape[0])
+with col2:
+    st.metric("Nombre total de défauts", defects_df.shape[0])
+with col3:
+    st.metric("Défauts filtrés", df_filtre.shape[0])
 
-def main():
-    st.title("Téléchargement de la Base de Données")
-    st.markdown(
-        """
-        Ce Streamlit génère une base de données de missions pour défauts détectés.
-        Dans cet exemple, 150 missions sont créées de façon à totaliser exactement 1000 défauts.
-        Les données sont générées de façon aléatoire en s’appuyant sur les configurations fournies.
-        """
-    )
-    
-    # Paramètres
-    num_missions = 150
-    total_defects = 1000
-    
-    # Distribuer 6 défauts par mission (6*150 = 900) et répartir les 100 défauts restants aléatoirement
-    defects_distribution = [6] * num_missions
-    extra_defects = total_defects - (6 * num_missions)  # ici 100
-    indices_extra = random.sample(range(num_missions), extra_defects)
-    for idx in indices_extra:
-        defects_distribution[idx] += 1
+# Graphique – Défauts par route
+st.markdown("#### Défauts par Route")
+defauts_route = df_filtre.groupby("routes").size().reset_index(name="count")
+fig_routes = px.bar(defauts_route, x="routes", y="count", color="routes",
+                    title="Répartition des défauts par route", 
+                    labels={"count": "Nombre de défauts"})
+st.plotly_chart(fig_routes, use_container_width=True)
 
-    # Générer les missions
-    missions = [
-        generate_mission(i + 1, defects_distribution[i])
-        for i in range(num_missions)
-    ]
-    
-    # Conversion en texte (ici au format JSON avec indentations)
-    data_txt = json.dumps(missions, indent=4, ensure_ascii=False)
-    
-    st.download_button(
-        label="Télécharger la base de données (txt)",
-        data=data_txt,
-        file_name="base_donnees_missions.txt",
-        mime="text/plain"
-    )
-    
-    st.write("Nombre total de défauts générés :", sum(defects_distribution))
-    st.write("Nombre de missions générées :", num_missions)
+# Graphique – Évolution dans le temps
+st.markdown("#### Évolution des Défauts dans le Temps")
+defauts_temps = df_filtre.groupby(df_filtre['date'].dt.date).size().reset_index(name="count")
+fig_temps = px.line(defauts_temps, x="date", y="count", markers=True,
+                    title="Nombre de défauts au fil du temps",
+                    labels={"date": "Date", "count": "Nombre de défauts"})
+st.plotly_chart(fig_temps, use_container_width=True)
 
-if __name__ == "__main__":
-    main()
+# Carte interactive – Localisation des défauts
+st.markdown("#### Carte des Défauts")
+if not df_filtre.empty:
+    # La fonction st.map attend des colonnes nommées 'lat' et 'lon'
+    map_data = df_filtre[['lat', 'long']].rename(columns={"long": "lon"})
+    st.map(map_data)
+else:
+    st.info("Aucune donnée à afficher sur la carte pour les filtres sélectionnés.")
+
+# Graphique – Répartition par Gravité
+st.markdown("#### Répartition de la Gravité des Défauts")
+gravite_dist = df_filtre.groupby("gravite").size().reset_index(name="count")
+fig_gravite = px.pie(gravite_dist, names="gravite", values="count", 
+                     title="Distribution de la gravité",
+                     color_discrete_sequence=px.colors.qualitative.Set3)
+st.plotly_chart(fig_gravite, use_container_width=True)
+
+# Affichage d'un aperçu tabulaire des données filtrées
+st.markdown("### Aperçu des données filtrées")
+st.dataframe(df_filtre.reset_index(drop=True))
