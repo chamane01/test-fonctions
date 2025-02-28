@@ -424,14 +424,14 @@ else:
 #########################################
 # Affichage sur une seule page
 #########################################
-st.title("traitements")
+st.title("TRAITEMENTS")
 
 #########################
 # Section Post-traitements des images
 #########################
-st.header("post-traitements des images")
+st.header("post-traitements")
 uploaded_files = st.file_uploader(
-    "Téléversez une ou plusieurs images (JPG/JPEG) avec métadonnées EXIF",
+    "Téléversez une ou plusieurs images (JPG/JPEG)",
     type=["jpg", "jpeg"],
     accept_multiple_files=True
 )
@@ -591,7 +591,7 @@ tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"]
 
 with tab_auto:
     
-    if st.button("Utiliser les images converties (configuration images)"):
+    if st.button("lancer le traitement Automatique"):
         if "preprocessed_zip" in st.session_state:
             zip_bytes = st.session_state["preprocessed_zip"]
             auto_converted_files = []
@@ -611,7 +611,7 @@ with tab_auto:
 with tab_manuel:
     
     # Bouton unique pour charger simultanément les fichiers TIFF GRAND et TIFF PETIT depuis la conversion
-    if st.button("Utiliser résultats conversion TIFF (les deux configurations)"):
+    if st.button("commencer le traitement manuel"):
         if "preprocessed_zip" in st.session_state:
             zip_bytes = st.session_state["preprocessed_zip"]
             manual_grand_files = []
@@ -631,7 +631,7 @@ with tab_manuel:
             if manual_grand_files and manual_petit_files:
                 st.session_state["manual_grand_files"] = manual_grand_files
                 st.session_state["manual_petit_files"] = manual_petit_files
-                st.success(f"{len(manual_grand_files)} fichiers TIFF GRAND et {len(manual_petit_files)} fichiers TIFF PETIT chargés depuis conversion.")
+                st.success(f"fichiers chargés depuis conversion.")
             else:
                 st.error("Aucun résultat de conversion prétraitée n'est disponible pour l'une ou l'autre configuration.")
         else:
