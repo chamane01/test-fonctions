@@ -590,7 +590,7 @@ st.header("detections")
 tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
 
 with tab_auto:
-    st.subheader("Détection Automatique")
+    
     if st.button("Utiliser les images converties (configuration images)"):
         if "preprocessed_zip" in st.session_state:
             zip_bytes = st.session_state["preprocessed_zip"]
@@ -609,7 +609,7 @@ with tab_auto:
     # Le téléversement manuel est supprimé dans cette interface.
 
 with tab_manuel:
-    st.subheader("Détection Manuelle")
+    
     # Bouton unique pour charger simultanément les fichiers TIFF GRAND et TIFF PETIT depuis la conversion
     if st.button("Utiliser résultats conversion TIFF (les deux configurations)"):
         if "preprocessed_zip" in st.session_state:
@@ -829,7 +829,6 @@ else:
 #########################################
 # Bouton de sauvegarde de la mission
 #########################################
-st.markdown("---")
 if st.button("Sauvegarder la mission"):
     current_mission = st.session_state.get("current_mission", None)
     if current_mission:
