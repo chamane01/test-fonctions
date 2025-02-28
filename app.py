@@ -843,8 +843,6 @@ if st.button("Sauvegarder la mission"):
 #########################################
 # Gestionnaire de missions : Export CSV
 #########################################
-st.markdown("---")
-st.subheader("Export des résultats de la mission en CSV")
 if st.button("Exporter les résultats de la mission en CSV"):
     current_mission = st.session_state.get("current_mission", None)
     if current_mission:
