@@ -22,7 +22,7 @@ import json
 from shapely.geometry import Point, LineString
 import csv
 import random, string
-import pandas as pd  # Pour la création du tableau Excel
+import pandas as pd
 import piexif  # Assurez-vous que cette librairie est installée
 
 st.set_page_config(page_title="Application de Missions & Traitements", layout="wide")
@@ -335,15 +335,11 @@ for feature in routes_data["features"]:
         })
 
 #########################################
-# Menu Principal avec navigation (unique id "main_sidebar")
+# Fonctions d'affichage par section
 #########################################
-menu_option = st.sidebar.selectbox("Menu Principal", ["Missions", "Rapport", "Tableau de bord"], key="main_sidebar")
-
-if menu_option == "Missions":
-    #########################################
-    # Sidebar Missions (regroupées dans un expander avec key "missions_sidebar")
-    #########################################
-    with st.sidebar.expander("Missions", expanded=True, key="missions_sidebar"):
+def display_missions():
+    # Partie Sidebar pour la gestion des missions
+    with st.sidebar.expander("Missions", expanded=True):
         st.header("Création de mission")
         with st.form("mission_form"):
             operator = st.text_input("Nom de l'opérateur")
@@ -406,8 +402,7 @@ if menu_option == "Missions":
             df_missions.to_csv(csv_buffer, index=False, sep=";")
             csv_data = csv_buffer.getvalue().encode("utf-8")
             
-            txt_data = df_missions.to_string(index=False)
-            txt_data = txt_data.encode("utf-8")
+            txt_data = df_missions.to_string(index=False).encode("utf-8")
             
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -424,16 +419,10 @@ if menu_option == "Missions":
         else:
             st.info("Aucune mission sauvegardée.")
 
-    #########################################
-    # Contenu principal pour Missions
-    # (La zone de traitements est ici encapsulée dans un container identifié par le commentaire "traitement_container")
-    #########################################
+    # Partie principale : traitements, post-traitements, détections, etc.
     st.title("TRAITEMENTS")
-    # --- Début du container de traitement (id virtuel : "traitement_container") ---
     with st.container():
-        #########################
-        # Section Post-traitements des images
-        #########################
+        # Post-traitements des images
         st.header("Post-traitements")
         uploaded_files = st.file_uploader(
             "Téléversez une ou plusieurs images (JPG/JPEG)",
@@ -581,9 +570,7 @@ if menu_option == "Missions":
         else:
             st.info("Veuillez téléverser des images JPEG pour lancer le post-traitement.")
 
-        #####################
         # Section Detections
-        #####################
         st.markdown("---")
         st.header("Détections")
         tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
@@ -693,9 +680,7 @@ if menu_option == "Missions":
                 display_path_petit = temp_png_petit
                 center_lat_grand = (grand_bounds.bottom + grand_bounds.top) / 2
                 center_lon_grand = (grand_bounds.left + grand_bounds.right) / 2
-                center_lat_petit = (petit_bounds.bottom + petit_bounds.top) / 2
-                center_lon_petit = (petit_bounds.left + petit_bounds.right) / 2
-                utm_zone_petit = int((center_lon_petit + 180) / 6) + 1
+                utm_zone_petit = int((center_lon_grand + 180) / 6) + 1
                 utm_crs_petit = f"EPSG:326{utm_zone_petit:02d}"
                 st.subheader("Carte de dessin")
                 m_grand = create_map(center_lat_grand, center_lon_grand, grand_bounds, display_path_grand,
@@ -818,9 +803,6 @@ if menu_option == "Missions":
         else:
             st.write("Aucun marqueur global n'a été enregistré.")
         
-        #########################################
-        # Bouton de sauvegarde de la mission
-        #########################################
         if st.button("Sauvegarder la mission"):
             current_mission = st.session_state.get("current_mission", None)
             if current_mission:
@@ -831,9 +813,6 @@ if menu_option == "Missions":
             else:
                 st.error("Aucune mission sélectionnée.")
         
-        #########################################
-        # Gestionnaire de missions : Export CSV
-        #########################################
         if st.button("Exporter les résultats de la mission en CSV"):
             current_mission = st.session_state.get("current_mission", None)
             if current_mission:
@@ -872,12 +851,26 @@ if menu_option == "Missions":
                     st.info("Aucun marqueur n'est associé à la mission courante.")
             else:
                 st.info("Aucune mission sélectionnée.")
-    # --- Fin du container de traitement ---
-    
-elif menu_option == "Rapport":
+
+def display_rapport():
     st.title("Rapport")
     st.write("Interface Rapport : à développer selon vos besoins.")
 
-elif menu_option == "Tableau de bord":
+def display_tableau_de_bord():
     st.title("Tableau de bord")
     st.write("Interface Tableau de bord : à développer selon vos besoins.")
+
+#########################################
+# Programme principal avec gestion d'affichage
+#########################################
+def main():
+    menu_option = st.sidebar.selectbox("Menu Principal", ["Missions", "Rapport", "Tableau de bord"], key="main_sidebar")
+    if menu_option == "Missions":
+        display_missions()
+    elif menu_option == "Rapport":
+        display_rapport()
+    elif menu_option == "Tableau de bord":
+        display_tableau_de_bord()
+
+if __name__ == "__main__":
+    main()
