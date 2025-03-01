@@ -47,11 +47,12 @@ if uploaded_file is not None:
     if "distance(km)" not in missions_df.columns:
         st.error("Le fichier ne contient pas la colonne 'distance(km)'.")
     else:
+        # Calcul des métriques principales
         num_missions = len(missions_df)
         total_distance = missions_df["distance(km)"].sum()
         avg_distance = missions_df["distance(km)"].mean()
         
-        # Extraction des défauts de toutes les missions
+        # Extraction de tous les défauts de chaque mission
         defects = []
         for mission in data:
             for defect in mission.get("Données Défauts", []):
@@ -62,9 +63,11 @@ if uploaded_file is not None:
         if 'date' in df_defects.columns:
             df_defects['date'] = pd.to_datetime(df_defects['date'])
         
+        # Mapping des niveaux de gravité
         gravity_sizes = {1: 5, 2: 7, 3: 9}
         df_defects['severite'] = df_defects['gravite'].map(gravity_sizes)
         
+        # Affichage des métriques principales
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Nombre de Missions", num_missions)
         col2.metric("Nombre de Défauts", total_defects)
@@ -73,19 +76,71 @@ if uploaded_file is not None:
         
         st.markdown("---")
         
-        # Bouton pour afficher tous les éléments (placé ici pour impacter les diagrammes verticaux)
-        show_all = st.checkbox("Afficher tous les éléments", value=False)
+        # Graphique 1 : Évolution des Missions dans le Temps
+        missions_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M")).size().reset_index(name="Missions")
+        missions_over_time['date'] = missions_over_time['date'].dt.to_timestamp()
+        chart_missions = alt.Chart(missions_over_time).mark_line(point=True).encode(
+            x=alt.X('date:T', title='Date'),
+            y=alt.Y('Missions:Q', title='Nombre de Missions'),
+            tooltip=['date:T', 'Missions:Q']
+        ).properties(
+            width=700,
+            height=300,
+            title="Évolution des Missions dans le Temps"
+        )
+        st.altair_chart(chart_missions, use_container_width=True)
         
-        # Limitation du nombre d'éléments affichés (7 par défaut)
+        # Graphique 2 : Évolution des Défauts dans le Temps
+        defects_over_time = df_defects.groupby(df_defects['date'].dt.to_period("M")).size().reset_index(name="Défauts")
+        defects_over_time['date'] = defects_over_time['date'].dt.to_timestamp()
+        chart_defects_time = alt.Chart(defects_over_time).mark_line(point=True).encode(
+            x=alt.X('date:T', title='Date'),
+            y=alt.Y('Défauts:Q', title='Nombre de Défauts'),
+            tooltip=['date:T', 'Défauts:Q']
+        ).properties(
+            width=700,
+            height=300,
+            title="Évolution des Défauts dans le Temps"
+        )
+        st.altair_chart(chart_defects_time, use_container_width=True)
+        
+        # Graphique 3 : Évolution des Km par Mission dans le Temps
+        distance_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M"))["distance(km)"].sum().reset_index(name="Distance Totale")
+        distance_over_time['date'] = distance_over_time['date'].dt.to_timestamp()
+        chart_distance_time = alt.Chart(distance_over_time).mark_line(point=True).encode(
+            x=alt.X('date:T', title='Date'),
+            y=alt.Y('Distance Totale:Q', title='Km Totaux',
+                    scale=alt.Scale(domain=[0, distance_over_time["Distance Totale"].max()*1.2])),
+            tooltip=['date:T', 'Distance Totale:Q']
+        ).properties(
+            width=700,
+            height=300,
+            title="Évolution des Km par Mission dans le Temps"
+        )
+        st.altair_chart(chart_distance_time, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # Graphique 4 : Diagramme circulaire pour la Répartition Globale des Défauts par Catégorie
+        defect_category_counts = df_defects['classe'].value_counts().reset_index()
+        defect_category_counts.columns = ["Catégorie", "Nombre de Défauts"]
+        fig_pie = px.pie(defect_category_counts, values='Nombre de Défauts', names='Catégorie',
+                         title="Répartition Globale des Défauts par Catégorie",
+                         color_discrete_sequence=px.colors.qualitative.Set3)
+        st.plotly_chart(fig_pie, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # Bouton pour afficher tous les éléments (impacte les graphiques verticaux)
+        show_all = st.checkbox("Afficher tous les éléments", value=False)
         limit = None if show_all else 7
-
-        # 📌 **Diagramme vertical : Nombre de Défauts par Route**
+        
+        # Graphique 5 : Nombre de Défauts par Route (diagramme vertical)
         route_defect_counts = df_defects['routes'].value_counts().reset_index()
         route_defect_counts.columns = ["Route", "Nombre de Défauts"]
-        display_routes = route_defect_counts.head(limit)
-
+        display_routes = route_defect_counts if show_all else route_defect_counts.head(limit)
         chart_routes = alt.Chart(display_routes).mark_bar().encode(
-            x=alt.X("Route:N", sort='-y', title="Route", 
+            x=alt.X("Route:N", sort='-y', title="Route",
                     axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
             y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
             tooltip=["Route:N", "Nombre de Défauts:Q"],
@@ -96,11 +151,10 @@ if uploaded_file is not None:
             title="Nombre de Défauts par Route (Top 7 par défaut)"
         )
         st.altair_chart(chart_routes, use_container_width=True)
-
-        # 📌 **Diagramme vertical : Routes avec le Score de Sévérité Total**
+        
+        # Graphique 6 : Routes avec le Score de Sévérité Total (diagramme vertical)
         route_severity = df_defects.groupby('routes')['severite'].sum().reset_index().sort_values(by='severite', ascending=False)
-        display_severity = route_severity.head(limit)
-
+        display_severity = route_severity if show_all else route_severity.head(limit)
         chart_severity = alt.Chart(display_severity).mark_bar().encode(
             x=alt.X("routes:N", sort='-y', title="Route",
                     axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
@@ -113,18 +167,16 @@ if uploaded_file is not None:
             title="Routes avec le Score de Sévérité le Plus Élevé (Top 7 par défaut)"
         )
         st.altair_chart(chart_severity, use_container_width=True)
-
-        # 📌 **Analyse interactive par Type de Défaut**
+        
+        # Graphique 7 : Analyse interactive par Type de Défaut (diagramme vertical)
         st.markdown("### Analyse par Type de Défaut")
         defect_types = df_defects['classe'].unique()
         selected_defect = st.selectbox("Sélectionnez un type de défaut", defect_types)
         filtered_defects = df_defects[df_defects['classe'] == selected_defect]
-        
         if not filtered_defects.empty:
             route_count_selected = filtered_defects['routes'].value_counts().reset_index()
             route_count_selected.columns = ["Route", "Nombre de Défauts"]
-            display_selected = route_count_selected.head(limit)
-
+            display_selected = route_count_selected if show_all else route_count_selected.head(limit)
             chart_defect_type = alt.Chart(display_selected).mark_bar().encode(
                 x=alt.X("Route:N", sort='-y', title="Route",
                         axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
@@ -139,6 +191,6 @@ if uploaded_file is not None:
             st.altair_chart(chart_defect_type, use_container_width=True)
         else:
             st.write("Aucune donnée disponible pour ce type de défaut.")
-
+            
 else:
     st.info("Veuillez téléverser un fichier JSON contenant vos données pour afficher le dashboard.")
