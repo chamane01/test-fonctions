@@ -248,6 +248,7 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
     folium.LayerControl().add_to(m)
     if marker_data:
         for marker in marker_data:
+            # Assurez-vous que lat et long ne sont pas None
             if marker.get("lat") is not None and marker.get("long") is not None:
                 color = class_color.get(marker["classe"], "#000000")
                 radius = gravity_sizes.get(marker["gravite"], 5)
@@ -286,21 +287,26 @@ def generate_mission_id(date_mission, counter):
 #########################################
 # Variables globales
 #########################################
+# Pour la détection, on conserve les marqueurs par paire
 if "current_pair_index" not in st.session_state:
     st.session_state.current_pair_index = 0
 if "pairs" not in st.session_state:
     st.session_state.pairs = []
 if "markers_by_pair" not in st.session_state:
     st.session_state.markers_by_pair = {}
+# Gestion du compteur global pour les marqueurs par mission
 if "mission_marker_counter" not in st.session_state:
     st.session_state.mission_marker_counter = {}
+
+# Gestion des missions
 if "missions" not in st.session_state:
     st.session_state.missions = {}
 if "mission_counter" not in st.session_state:
     st.session_state.mission_counter = 1
 if "mission_history" not in st.session_state:
-    st.session_state.mission_history = {}
+    st.session_state.mission_history = []
 
+# Dictionnaire des 14 classes et des tailles de gravité
 class_color = {
     "deformations ornierage": "#FF0000",
     "fissurations": "#00FF00",
@@ -319,6 +325,7 @@ class_color = {
 }
 gravity_sizes = {1: 5, 2: 7, 3: 9}
 
+# Chargement des routes
 with open("routeQSD.txt", "r") as f:
     routes_data = json.load(f)
 routes_ci = []
@@ -364,12 +371,14 @@ if st.session_state.missions:
 else:
     st.sidebar.info("Aucune mission disponible.")
 
+# Calcul des global_markers à partir des marqueurs détectés
 global_markers = []
 for markers in st.session_state.get("markers_by_pair", {}).values():
     global_markers.extend(markers)
 
 st.sidebar.subheader("Historique des missions sauvegardées")
 if st.session_state.mission_history:
+    # Pour chaque mission sauvegardée, ajouter une colonne "Données Défauts" regroupant les marqueurs associés
     mission_markers_map = {}
     for marker in global_markers:
         mission_id = marker.get("mission", "N/A")
@@ -385,6 +394,7 @@ if st.session_state.mission_history:
     df_missions = pd.DataFrame(mission_history_display)
     st.sidebar.table(df_missions)
     
+    # Préparation des fichiers Excel, CSV et TXT pour le téléchargement
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
         df_missions.to_excel(writer, index=False)
@@ -460,6 +470,7 @@ if uploaded_files:
             "img_height": img_height
         })
     st.session_state["images_info"] = images_info
+    # Calcul de la distance globale du trajet en utilisant les coordonnées UTM
     if len(images_info) > 1:
         total_distance = 0
         for i in range(1, len(images_info)):
@@ -485,6 +496,7 @@ if uploaded_files:
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
+                    # Calcul de l'angle de vol
                     if len(images_info) >= 2:
                         if i == 0:
                             dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
@@ -498,6 +510,7 @@ if uploaded_files:
                         flight_angle_i = math.degrees(math.atan2(dx, dy))
                     else:
                         flight_angle_i = 0
+                    # Conversion Configuration 1 (TIFF PETIT) avec scaling_factor = 1/5
                     tiff_bytes = convert_to_tiff_in_memory(
                         image_file=io.BytesIO(info["data"]),
                         pixel_size=pixel_size,
@@ -508,6 +521,7 @@ if uploaded_files:
                     )
                     output_filename_tiff1 = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
                     zip_file.writestr(output_filename_tiff1, tiff_bytes)
+                    # Conversion Configuration 2 (TIFF GRAND) avec scaling_factor = 1/3
                     tiff_bytes_x2 = convert_to_tiff_in_memory(
                         image_file=io.BytesIO(info["data"]),
                         pixel_size=pixel_size * 2,
@@ -518,6 +532,7 @@ if uploaded_files:
                     )
                     output_filename_tiff2 = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
                     zip_file.writestr(output_filename_tiff2, tiff_bytes_x2)
+                    # Conversion Configuration images (JPEG avec métadonnées)
                     rotation_angle_i = -flight_angle_i
                     scaling_factor = 1
                     img = Image.open(io.BytesIO(info["data"]))
@@ -575,33 +590,43 @@ if uploaded_files:
                 file_name="images_pretraitees.zip",
                 mime="application/zip"
             )
-            st.success("Vos images ont été post-traitées, vous pouvez les utiliser.")
+            st.success("Vos images ont été post-traitées, vous pouvez les utilisés.")
+else:
+    st.info("Veuillez téléverser des images JPEG pour lancer le post-traitement.")
 
 #####################
 # Section Detections
 #####################
 st.markdown("---")
 st.header("detections")
+# Onglets pour détection automatique et détection manuelle
 tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
 
 with tab_auto:
+    
     if st.button("lancer le traitement Automatique"):
         if "preprocessed_zip" in st.session_state:
-            # On utilise ici les informations stockées dans images_info pour afficher chaque image traitée sur une carte fixe.
+            zip_bytes = st.session_state["preprocessed_zip"]
+            auto_converted_files = []
+            with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zip_file:
+                for filename in zip_file.namelist():
+                    if filename.endswith("_with_frame_coords.jpg"):
+                        file_data = zip_file.read(filename)
+                        file_obj = io.BytesIO(file_data)
+                        file_obj.name = filename
+                        auto_converted_files.append(file_obj)
+            st.session_state["auto_converted_images"] = auto_converted_files
+            st.success(f"{len(auto_converted_files)} images converties chargées.")
+            # Traitement automatique: récupération des coordonnées à 40% entre le centre et le bord droit de chaque image
             if "images_info" in st.session_state:
                 images_info = st.session_state["images_info"]
-                # Initialisation de la carte avec la position du premier overlay (après conversion UTM -> lat/lon)
-                transformer0 = Transformer.from_crs(images_info[0]["utm_crs"], "EPSG:4326", always_xy=True)
-                center0 = list(transformer0.transform(images_info[0]["utm"][0], images_info[0]["utm"][1]))
-                auto_map = folium.Map(location=[center0[1], center0[0]], zoom_start=18)
-                overall_bounds = []
+                auto_markers = []
                 for i, info in enumerate(images_info):
-                    # Calcul de l'angle de vol
                     if len(images_info) >= 2:
                         if i == 0:
                             dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
                             dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
-                        elif i == len(images_info)-1:
+                        elif i == len(images_info) - 1:
                             dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
                             dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
                         else:
@@ -611,6 +636,7 @@ with tab_auto:
                     else:
                         flight_angle_i = 0
                     rotation_angle_i = -flight_angle_i
+                    scaling_factor = 1
                     new_width = info["img_width"]
                     new_height = info["img_height"]
                     effective_pixel_size = pixel_size
@@ -620,64 +646,48 @@ with tab_auto:
                     T3 = Affine.rotation(rotation_angle_i)
                     T4 = Affine.translation(center_x, center_y)
                     transform_affine = T4 * T3 * T2 * T1
-                    # Calcul des coins en UTM
-                    corners_utm = [transform_affine * corner for corner in [(-new_width/2, -new_height/2),
-                                                                            (new_width/2, -new_height/2),
-                                                                            (new_width/2, new_height/2),
-                                                                            (-new_width/2, new_height/2)]]
-                    # Conversion des coins en lat/lon
-                    transformer = Transformer.from_crs(info["utm_crs"], "EPSG:4326", always_xy=True)
-                    corners_latlon = [list(transformer.transform(x,y)) for (x,y) in corners_utm]
-                    lats = [pt[1] for pt in corners_latlon]
-                    lons = [pt[0] for pt in corners_latlon]
-                    sw = [min(lats), min(lons)]
-                    ne = [max(lats), max(lons)]
-                    overall_bounds.extend([sw, ne])
-                    # Traitement de l'image pour overlay : redimensionnement (scaling_factor=1) et dessin du carré rouge
-                    img_proc = Image.open(io.BytesIO(info["data"]))
-                    img_proc = ImageOps.exif_transpose(img_proc)
-                    img_proc = img_proc.resize((new_width, new_height), Image.LANCZOS)
-                    # Position du carré : 40% entre le centre et le bord droit = (0.7*new_width, new_height/2)
-                    marker_px = (0.7 * new_width, new_height/2)
-                    draw = ImageDraw.Draw(img_proc)
-                    square_size = 20  # Taille du carré en pixels
-                    left = marker_px[0] - square_size/2
-                    top = marker_px[1] - square_size/2
-                    right = marker_px[0] + square_size/2
-                    bottom = marker_px[1] + square_size/2
-                    draw.rectangle([left, top, right, bottom], outline="red", width=3)
-                    buf = io.BytesIO()
-                    img_proc.save(buf, format="JPEG")
-                    img_data = buf.getvalue()
-                    img_data_url = "data:image/jpeg;base64," + base64.b64encode(img_data).decode("utf-8")
-                    # Ajout de l'overlay image sur la carte
-                    folium.raster_layers.ImageOverlay(
-                        image=img_data_url,
-                        bounds=[sw, ne],
-                        opacity=0.8,
-                        name=f"Image {i+1}"
-                    ).add_to(auto_map)
-                    # Calcul du point du carré en UTM puis conversion en lat/lon
+                    # Calcul du point situé à 40% entre le centre et le bord droit
                     marker_utm = transform_affine * (0.7 * new_width, new_height/2)
-                    marker_latlon = list(transformer.transform(marker_utm[0], marker_utm[1]))
-                    # Dessin d'un petit carré sur la carte autour du point (taille fixe)
-                    delta = 0.00005
-                    marker_bounds = [[marker_latlon[1]-delta, marker_latlon[0]-delta], [marker_latlon[1]+delta, marker_latlon[0]+delta]]
-                    folium.Rectangle(bounds=marker_bounds, color="red", fill=False, weight=2,
-                                     popup=f"UTM: {info['utm']}").add_to(auto_map)
-                if overall_bounds:
-                    all_lats = [pt[0] for pt in overall_bounds]
-                    all_lons = [pt[1] for pt in overall_bounds]
-                    sw_overall = [min(all_lats), min(all_lons)]
-                    ne_overall = [max(all_lats), max(all_lons)]
-                    auto_map.fit_bounds([sw_overall, ne_overall])
-                st_folium(auto_map, width=700, height=500, key="auto_map_fixed")
+                    # Conversion des coordonnées UTM en lat/lon (EPSG:4326)
+                    transformer = Transformer.from_crs(info["utm_crs"], "EPSG:4326", always_xy=True)
+                    lon_conv, lat_conv = transformer.transform(marker_utm[0], marker_utm[1])
+                    marker = {
+                        "ID": f"{st.session_state.get('current_mission', 'auto')}-{i+1}",
+                        "classe": "deformations ornierage",
+                        "gravite": 1,
+                        "coordonnees UTM": (round(marker_utm[0],2), round(marker_utm[1],2)),
+                        "lat": lat_conv,
+                        "long": lon_conv,
+                        "routes": "Route inconnue",
+                        "detection": "Automatique",
+                        "mission": st.session_state.get("current_mission", "N/A"),
+                        "couleur": class_color.get("deformations ornierage", "#FF0000"),
+                        "radius": gravity_sizes.get(1, 5),
+                        "date": st.session_state.missions.get(st.session_state.get("current_mission", "N/A"), {}).get("date", ""),
+                        "appareil": st.session_state.missions.get(st.session_state.get("current_mission", "N/A"), {}).get("appareil_type", ""),
+                        "nom_appareil": st.session_state.missions.get(st.session_state.get("current_mission", "N/A"), {}).get("nom_appareil", "")
+                    }
+                    auto_markers.append(marker)
+                st.session_state.markers_by_pair["auto"] = auto_markers
             else:
                 st.error("Aucune information d'images disponible pour le traitement automatique.")
+            # Affichage des images avec le marqueur dessiné sur l'endroit où les coordonnées ont été récupérées
+            for i, file_obj in enumerate(auto_converted_files):
+                file_obj.seek(0)
+                img = Image.open(file_obj)
+                draw = ImageDraw.Draw(img)
+                x = 0.7 * img.width
+                y = 0.5 * img.height
+                r = 5
+                draw.ellipse((x-r, y-r, x+r, y+r), fill="red")
+                st.image(img, caption=file_obj.name)
         else:
             st.error("Aucun résultat de conversion prétraitée n'est disponible.")
+    # Le téléversement manuel est supprimé dans cette interface.
 
 with tab_manuel:
+    
+    # Bouton unique pour charger simultanément les fichiers TIFF GRAND et TIFF PETIT depuis la conversion
     if st.button("commencer le traitement manuel"):
         if "preprocessed_zip" in st.session_state:
             zip_bytes = st.session_state["preprocessed_zip"]
@@ -782,6 +792,7 @@ with tab_manuel:
                 features = all_drawings.get("features", [])
             elif isinstance(all_drawings, list):
                 features = all_drawings
+        # Gestion des IDs des marqueurs avec référence de mission
         current_mission = st.session_state.get("current_mission", "N/A")
         mission_details = st.session_state.missions.get(current_mission, {}) if current_mission != "N/A" else {}
         if current_mission not in st.session_state.mission_marker_counter:
@@ -899,7 +910,9 @@ if st.button("Sauvegarder la mission"):
     current_mission = st.session_state.get("current_mission", None)
     if current_mission:
         mission_details = st.session_state.missions.get(current_mission, {})
+        # Ajout de la distance du trajet en km à la mission
         mission_details["distance(km)"] = st.session_state.get("trajet_distance_km", 0)
+        # Ajout de la mission à l'historique si non déjà présente
         if mission_details not in st.session_state.mission_history:
             st.session_state.mission_history.append(mission_details)
         st.success("Mission sauvegardée dans l'historique.")
@@ -912,6 +925,7 @@ if st.button("Sauvegarder la mission"):
 if st.button("Exporter les résultats de la mission en CSV"):
     current_mission = st.session_state.get("current_mission", None)
     if current_mission:
+        # Collecter tous les marqueurs appartenant à la mission courante
         mission_markers = []
         for markers in st.session_state.markers_by_pair.values():
             for marker in markers:
@@ -920,7 +934,9 @@ if st.button("Exporter les résultats de la mission en CSV"):
         if mission_markers:
             output = io.StringIO()
             writer = csv.writer(output, delimiter=';')
+            # Ecrire l'en-tête avec les nouvelles colonnes Date, Appareil et Nom Appareil
             writer.writerow(["ID", "Classe", "Gravité", "Coordonnées UTM", "Latitude", "Longitude", "Route", "Détection", "Mission", "Date", "Appareil", "Nom Appareil"])
+            # Ecrire les lignes
             for marker in mission_markers:
                 writer.writerow([
                     marker.get("ID"),
