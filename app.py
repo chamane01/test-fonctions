@@ -7,7 +7,7 @@ import pydeck as pdk
 from datetime import datetime
 
 # Configuration de la page et CSS pour centrer le contenu et limiter la largeur
-st.set_page_config(page_title="Dashboard Ultra Moderne", layout="wide")
+st.set_page_config(page_title="Tableau de Suivie des Routes Nationales", layout="wide")
 st.markdown(
     """
     <style>
@@ -36,17 +36,15 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
-# Téléversement du logo avant le titre principal
-logo_file = st.file_uploader("Téléversez votre logo", type=["png", "jpg", "jpeg"], key="logo")
-if logo_file is not None:
-    st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
-    st.image(logo_file, width=200)
-    st.markdown("</div>", unsafe_allow_html=True)
+# Affichage du logo à partir d'un chemin direct (images (5).png)
+st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
+st.image("images (5).png", width=200)
+st.markdown("</div>", unsafe_allow_html=True)
 
 # Début du conteneur principal (contenu centré et à largeur limitée)
 st.markdown("<div class='main-container'>", unsafe_allow_html=True)
 
-st.title("Dashboard Ultra Moderne - Missions et Défauts")
+st.title("tableau de suivie des routes nationales")
 st.markdown("Visualisez vos données avec des graphiques interactifs et un design moderne.")
 
 # Téléversement du fichier JSON via la sidebar
