@@ -216,6 +216,22 @@ if uploaded_file is not None:
             st.altair_chart(chart_defect_type, use_container_width=True)
         else:
             st.write("Aucune donnée disponible pour ce type de défaut.")
+        
+        st.markdown("---")
+        
+        # Nouvelle section : Analyse par Route
+        st.markdown("### Analyse par Route")
+        selected_route = st.selectbox("Sélectionnez une route", sorted(df_defects['routes'].unique()))
+        inventory = df_defects[df_defects['routes'] == selected_route]['classe'].value_counts().reset_index()
+        inventory.columns = ["Dégradation", "Nombre de Défauts"]
+        chart_route_inventory = alt.Chart(inventory).mark_bar().encode(
+            x=alt.X("Dégradation:N", sort='-y', title="Dégradation",
+                    axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
+            y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
+            tooltip=["Dégradation:N", "Nombre de Défauts:Q"],
+            color=alt.Color("Dégradation:N", scale=alt.Scale(scheme='category20b'))
+        ).properties(width=900, height=500, title=f"Inventaire des Dégradations pour la Route : {selected_route}")
+        st.altair_chart(chart_route_inventory, use_container_width=True)
             
 else:
     st.info("Veuillez téléverser un fichier JSON contenant vos données pour afficher le dashboard.")
