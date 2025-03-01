@@ -3,7 +3,7 @@ import rasterio
 from rasterio.transform import from_origin
 from rasterio.io import MemoryFile
 from rasterio.warp import calculate_default_transform, reproject, Resampling, transform
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageDraw
 import exifread
 import numpy as np
 import os
@@ -13,7 +13,7 @@ import math
 from affine import Affine
 import zipfile
 import folium
-from folium.plugins import Draw
+from folium.plugins import Draw, MeasureControl
 from streamlit_folium import st_folium
 import base64
 import uuid
@@ -243,6 +243,7 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
             edit_options={'edit': True}
         )
         draw.add_to(m)
+        m.add_child(MeasureControl())
     m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
     folium.LayerControl().add_to(m)
     if marker_data:
@@ -468,6 +469,7 @@ if uploaded_files:
             "img_width": img_width,
             "img_height": img_height
         })
+    st.session_state["images_info"] = images_info
     # Calcul de la distance globale du trajet en utilisant les coordonnées UTM
     if len(images_info) > 1:
         total_distance = 0
@@ -615,6 +617,67 @@ with tab_auto:
                         auto_converted_files.append(file_obj)
             st.session_state["auto_converted_images"] = auto_converted_files
             st.success(f"{len(auto_converted_files)} images converties chargées.")
+            # Traitement automatique: récupération des coordonnées à 40% entre le centre et la droite de chaque image
+            if "images_info" in st.session_state:
+                images_info = st.session_state["images_info"]
+                auto_markers = []
+                for i, info in enumerate(images_info):
+                    if len(images_info) >= 2:
+                        if i == 0:
+                            dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
+                            dy = images_info[1]["utm"][1] - images_info[0]["utm"][1]
+                        elif i == len(images_info) - 1:
+                            dx = images_info[-1]["utm"][0] - images_info[-2]["utm"][0]
+                            dy = images_info[-1]["utm"][1] - images_info[-2]["utm"][1]
+                        else:
+                            dx = images_info[i+1]["utm"][0] - images_info[i-1]["utm"][0]
+                            dy = images_info[i+1]["utm"][1] - images_info[i-1]["utm"][1]
+                        flight_angle_i = math.degrees(math.atan2(dx, dy))
+                    else:
+                        flight_angle_i = 0
+                    rotation_angle_i = -flight_angle_i
+                    scaling_factor = 1
+                    new_width = info["img_width"]
+                    new_height = info["img_height"]
+                    effective_pixel_size = pixel_size
+                    center_x, center_y = info["utm"]
+                    T1 = Affine.translation(-new_width/2, -new_height/2)
+                    T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
+                    T3 = Affine.rotation(rotation_angle_i)
+                    T4 = Affine.translation(center_x, center_y)
+                    transform_affine = T4 * T3 * T2 * T1
+                    # Dans l'image d'origine, le point 40% de la distance entre le centre et le bord droit est (0.7*largeur, hauteur/2)
+                    marker_utm = transform_affine * (0.7 * new_width, new_height/2)
+                    marker = {
+                        "ID": f"{st.session_state.get('current_mission', 'auto')}-{i+1}",
+                        "classe": "deformations ornierage",
+                        "gravite": 1,
+                        "coordonnees UTM": (round(marker_utm[0],2), round(marker_utm[1],2)),
+                        "lat": None,
+                        "long": None,
+                        "routes": "Route inconnue",
+                        "detection": "Automatique",
+                        "mission": st.session_state.get("current_mission", "N/A"),
+                        "couleur": class_color.get("deformations ornierage", "#FF0000"),
+                        "radius": gravity_sizes.get(1, 5),
+                        "date": st.session_state.missions.get(st.session_state.get("current_mission", "N/A"), {}).get("date", ""),
+                        "appareil": st.session_state.missions.get(st.session_state.get("current_mission", "N/A"), {}).get("appareil_type", ""),
+                        "nom_appareil": st.session_state.missions.get(st.session_state.get("current_mission", "N/A"), {}).get("nom_appareil", "")
+                    }
+                    auto_markers.append(marker)
+                st.session_state.markers_by_pair["auto"] = auto_markers
+            else:
+                st.error("Aucune information d'images disponible pour le traitement automatique.")
+            # Affichage des images avec le marqueur dessiné sur l'endroit où les coordonnées ont été récupérées
+            for i, file_obj in enumerate(auto_converted_files):
+                file_obj.seek(0)
+                img = Image.open(file_obj)
+                draw = ImageDraw.Draw(img)
+                x = 0.7 * img.width
+                y = 0.5 * img.height
+                r = 5
+                draw.ellipse((x-r, y-r, x+r, y+r), fill="red")
+                st.image(img, caption=file_obj.name)
         else:
             st.error("Aucun résultat de conversion prétraitée n'est disponible.")
     # Le téléversement manuel est supprimé dans cette interface.
