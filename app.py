@@ -3,6 +3,7 @@ import pandas as pd
 import json
 import altair as alt
 import plotly.express as px
+import pydeck as pdk
 from datetime import datetime
 
 # Configuration de la page et CSS minimaliste et coloré
@@ -52,7 +53,7 @@ if uploaded_file is not None:
         total_distance = missions_df["distance(km)"].sum()
         avg_distance = missions_df["distance(km)"].mean()
         
-        # Extraction de tous les défauts de chaque mission
+        # Extraction de tous les défauts
         defects = []
         for mission in data:
             for defect in mission.get("Données Défauts", []):
@@ -63,7 +64,7 @@ if uploaded_file is not None:
         if 'date' in df_defects.columns:
             df_defects['date'] = pd.to_datetime(df_defects['date'])
         
-        # Mapping des niveaux de gravité
+        # Mapping des niveaux de gravité (pour les barres et la carte)
         gravity_sizes = {1: 5, 2: 7, 3: 9}
         df_defects['severite'] = df_defects['gravite'].map(gravity_sizes)
         
@@ -128,6 +129,44 @@ if uploaded_file is not None:
                          title="Répartition Globale des Défauts par Catégorie",
                          color_discrete_sequence=px.colors.qualitative.Set3)
         st.plotly_chart(fig_pie, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # Carte des Défauts avec intensité de rouge selon la gravité
+        def get_red_color(gravite):
+            if gravite == 1:
+                return [255, 200, 200]  # rouge pâle
+            elif gravite == 2:
+                return [255, 100, 100]  # rouge moyen
+            elif gravite == 3:
+                return [255, 0, 0]      # rouge vif
+            else:
+                return [255, 0, 0]
+        
+        df_defects['marker_color'] = df_defects['gravite'].apply(get_red_color)
+        
+        layer = pdk.Layer(
+            "ScatterplotLayer",
+            data=df_defects,
+            get_position='[long, lat]',
+            get_color="marker_color",
+            get_radius="radius * 50",  # ajustez le facteur de multiplication selon vos données
+            pickable=True,
+        )
+        
+        view_state = pdk.ViewState(
+            latitude=df_defects['lat'].mean(),
+            longitude=df_defects['long'].mean(),
+            zoom=8,
+            pitch=0,
+        )
+        
+        deck = pdk.Deck(
+            layers=[layer],
+            initial_view_state=view_state,
+            tooltip={"text": "Route: {routes}\nClasse: {classe}\nGravité: {gravite}"}
+        )
+        st.pydeck_chart(deck)
         
         st.markdown("---")
         
