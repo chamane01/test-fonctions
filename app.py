@@ -7,7 +7,7 @@ import pydeck as pdk
 from datetime import datetime
 
 # Configuration de la page et CSS pour centrer le contenu et limiter la largeur
-st.set_page_config(page_title="Tableau de Suivie des Routes Nationales", layout="wide")
+st.set_page_config(page_title="Tableau de Suivie des dégradations sur les Routes Nationales", layout="wide")
 st.markdown(
     """
     <style>
@@ -44,8 +44,8 @@ st.markdown("</div>", unsafe_allow_html=True)
 # Début du conteneur principal (contenu centré et à largeur limitée)
 st.markdown("<div class='main-container'>", unsafe_allow_html=True)
 
-st.title("tableau de suivie des routes nationales")
-st.markdown("Visualisez vos données avec des graphiques interactifs et un design moderne.")
+st.title("tableau de suivie des dégradations sur les routes nationales")
+st.markdown("parceque nous croyons que la route précède le developpement")
 
 # Chargement direct du fichier JSON depuis le repository
 with open("jeu_donnees_missions (1).json", "r", encoding="utf-8") as f:
