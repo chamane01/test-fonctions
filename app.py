@@ -248,19 +248,19 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
     folium.LayerControl().add_to(m)
     if marker_data:
         for marker in marker_data:
-            lat = marker["lat"]
-            lon = marker["long"]
-            color = class_color.get(marker["classe"], "#000000")
-            radius = gravity_sizes.get(marker["gravite"], 5)
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=radius,
-                color=color,
-                fill=True,
-                fill_color=color,
-                fill_opacity=0.7,
-                tooltip=f"{marker['ID']} - {marker['classe']} (Gravité {marker['gravite']}) - Route : {marker.get('routes', 'Route inconnue')} - Détection: {marker.get('detection', 'Inconnue')} - Mission: {marker.get('mission', 'N/A')}"
-            ).add_to(m)
+            # Assurez-vous que lat et long ne sont pas None
+            if marker.get("lat") is not None and marker.get("long") is not None:
+                color = class_color.get(marker["classe"], "#000000")
+                radius = gravity_sizes.get(marker["gravite"], 5)
+                folium.CircleMarker(
+                    location=[marker["lat"], marker["long"]],
+                    radius=radius,
+                    color=color,
+                    fill=True,
+                    fill_color=color,
+                    fill_opacity=0.7,
+                    tooltip=f"{marker['ID']} - {marker['classe']} (Gravité {marker['gravite']}) - Route : {marker.get('routes', 'Route inconnue')} - Détection: {marker.get('detection', 'Inconnue')} - Mission: {marker.get('mission', 'N/A')}"
+                ).add_to(m)
     return m
 
 def get_reprojected_and_center(uploaded_file, group):
@@ -617,7 +617,7 @@ with tab_auto:
                         auto_converted_files.append(file_obj)
             st.session_state["auto_converted_images"] = auto_converted_files
             st.success(f"{len(auto_converted_files)} images converties chargées.")
-            # Traitement automatique: récupération des coordonnées à 40% entre le centre et la droite de chaque image
+            # Traitement automatique: récupération des coordonnées à 40% entre le centre et le bord droit de chaque image
             if "images_info" in st.session_state:
                 images_info = st.session_state["images_info"]
                 auto_markers = []
@@ -646,15 +646,18 @@ with tab_auto:
                     T3 = Affine.rotation(rotation_angle_i)
                     T4 = Affine.translation(center_x, center_y)
                     transform_affine = T4 * T3 * T2 * T1
-                    # Dans l'image d'origine, le point 40% de la distance entre le centre et le bord droit est (0.7*largeur, hauteur/2)
+                    # Calcul du point situé à 40% entre le centre et le bord droit
                     marker_utm = transform_affine * (0.7 * new_width, new_height/2)
+                    # Conversion des coordonnées UTM en lat/lon (EPSG:4326)
+                    transformer = Transformer.from_crs(info["utm_crs"], "EPSG:4326", always_xy=True)
+                    lon_conv, lat_conv = transformer.transform(marker_utm[0], marker_utm[1])
                     marker = {
                         "ID": f"{st.session_state.get('current_mission', 'auto')}-{i+1}",
                         "classe": "deformations ornierage",
                         "gravite": 1,
                         "coordonnees UTM": (round(marker_utm[0],2), round(marker_utm[1],2)),
-                        "lat": None,
-                        "long": None,
+                        "lat": lat_conv,
+                        "long": lon_conv,
                         "routes": "Route inconnue",
                         "detection": "Automatique",
                         "mission": st.session_state.get("current_mission", "N/A"),
