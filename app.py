@@ -231,9 +231,6 @@ else:
         color=alt.Color("Dégradation:N", scale=alt.Scale(scheme='category20b'))
     ).properties(width=900, height=500, title=f"Inventaire des Dégradations pour la Route : {selected_route}")
     st.altair_chart(chart_route_inventory, use_container_width=True)
-            
-else:
-    st.info("Veuillez vérifier que le fichier 'jeu_donnees_missions (1).json' est présent dans le repository.")
 
 # Fermeture du conteneur principal
 st.markdown("</div>", unsafe_allow_html=True)
