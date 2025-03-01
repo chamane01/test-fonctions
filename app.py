@@ -368,7 +368,7 @@ if st.session_state.missions:
     current_mission = st.sidebar.selectbox("Sélectionnez la mission", mission_list, index=mission_list.index(st.session_state.current_mission))
     st.session_state.current_mission = current_mission
 else:
-    st.sidebar.info("Aucune mission disponible. Créez-en une.")
+    st.sidebar.info("Aucune mission disponible.")
 
 # Calcul des global_markers à partir des marqueurs détectés
 global_markers = []
@@ -468,6 +468,17 @@ if uploaded_files:
             "img_width": img_width,
             "img_height": img_height
         })
+    # Calcul de la distance globale du trajet en utilisant les coordonnées UTM
+    if len(images_info) > 1:
+        total_distance = 0
+        for i in range(1, len(images_info)):
+            x1, y1 = images_info[i-1]["utm"]
+            x2, y2 = images_info[i]["utm"]
+            total_distance += math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+        st.session_state["trajet_distance_km"] = total_distance / 1000
+    elif len(images_info) == 1:
+        st.session_state["trajet_distance_km"] = 0
+
     if len(images_info) == 0:
         st.error("Aucune image exploitable (avec coordonnées GPS) n'a été trouvée.")
     else:
@@ -833,6 +844,8 @@ if st.button("Sauvegarder la mission"):
     current_mission = st.session_state.get("current_mission", None)
     if current_mission:
         mission_details = st.session_state.missions.get(current_mission, {})
+        # Ajout de la distance du trajet en km à la mission
+        mission_details["distance(km)"] = st.session_state.get("trajet_distance_km", 0)
         # Ajout de la mission à l'historique si non déjà présente
         if mission_details not in st.session_state.mission_history:
             st.session_state.mission_history.append(mission_details)
