@@ -248,7 +248,6 @@ def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
     folium.LayerControl().add_to(m)
     if marker_data:
         for marker in marker_data:
-            # Assurez-vous que lat et long ne sont pas None
             if marker.get("lat") is not None and marker.get("long") is not None:
                 color = class_color.get(marker["classe"], "#000000")
                 radius = gravity_sizes.get(marker["gravite"], 5)
@@ -287,18 +286,15 @@ def generate_mission_id(date_mission, counter):
 #########################################
 # Variables globales
 #########################################
-# Pour la détection, on conserve les marqueurs par paire
 if "current_pair_index" not in st.session_state:
     st.session_state.current_pair_index = 0
 if "pairs" not in st.session_state:
     st.session_state.pairs = []
 if "markers_by_pair" not in st.session_state:
     st.session_state.markers_by_pair = {}
-# Gestion du compteur global pour les marqueurs par mission
 if "mission_marker_counter" not in st.session_state:
     st.session_state.mission_marker_counter = {}
 
-# Gestion des missions
 if "missions" not in st.session_state:
     st.session_state.missions = {}
 if "mission_counter" not in st.session_state:
@@ -306,7 +302,6 @@ if "mission_counter" not in st.session_state:
 if "mission_history" not in st.session_state:
     st.session_state.mission_history = []
 
-# Dictionnaire des 14 classes et des tailles de gravité
 class_color = {
     "deformations ornierage": "#FF0000",
     "fissurations": "#00FF00",
@@ -325,7 +320,6 @@ class_color = {
 }
 gravity_sizes = {1: 5, 2: 7, 3: 9}
 
-# Chargement des routes
 with open("routeQSD.txt", "r") as f:
     routes_data = json.load(f)
 routes_ci = []
@@ -371,14 +365,12 @@ if st.session_state.missions:
 else:
     st.sidebar.info("Aucune mission disponible.")
 
-# Calcul des global_markers à partir des marqueurs détectés
 global_markers = []
 for markers in st.session_state.get("markers_by_pair", {}).values():
     global_markers.extend(markers)
 
 st.sidebar.subheader("Historique des missions sauvegardées")
 if st.session_state.mission_history:
-    # Pour chaque mission sauvegardée, ajouter une colonne "Données Défauts" regroupant les marqueurs associés
     mission_markers_map = {}
     for marker in global_markers:
         mission_id = marker.get("mission", "N/A")
@@ -394,7 +386,6 @@ if st.session_state.mission_history:
     df_missions = pd.DataFrame(mission_history_display)
     st.sidebar.table(df_missions)
     
-    # Préparation des fichiers Excel, CSV et TXT pour le téléchargement
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
         df_missions.to_excel(writer, index=False)
@@ -470,7 +461,6 @@ if uploaded_files:
             "img_height": img_height
         })
     st.session_state["images_info"] = images_info
-    # Calcul de la distance globale du trajet en utilisant les coordonnées UTM
     if len(images_info) > 1:
         total_distance = 0
         for i in range(1, len(images_info)):
@@ -496,7 +486,6 @@ if uploaded_files:
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for i, info in enumerate(images_info):
-                    # Calcul de l'angle de vol
                     if len(images_info) >= 2:
                         if i == 0:
                             dx = images_info[1]["utm"][0] - images_info[0]["utm"][0]
@@ -510,7 +499,6 @@ if uploaded_files:
                         flight_angle_i = math.degrees(math.atan2(dx, dy))
                     else:
                         flight_angle_i = 0
-                    # Conversion Configuration 1 (TIFF PETIT) avec scaling_factor = 1/5
                     tiff_bytes = convert_to_tiff_in_memory(
                         image_file=io.BytesIO(info["data"]),
                         pixel_size=pixel_size,
@@ -521,7 +509,6 @@ if uploaded_files:
                     )
                     output_filename_tiff1 = info["filename"].rsplit(".", 1)[0] + "_geotiff.tif"
                     zip_file.writestr(output_filename_tiff1, tiff_bytes)
-                    # Conversion Configuration 2 (TIFF GRAND) avec scaling_factor = 1/3
                     tiff_bytes_x2 = convert_to_tiff_in_memory(
                         image_file=io.BytesIO(info["data"]),
                         pixel_size=pixel_size * 2,
@@ -532,7 +519,6 @@ if uploaded_files:
                     )
                     output_filename_tiff2 = info["filename"].rsplit(".", 1)[0] + "_geotiff_x2.tif"
                     zip_file.writestr(output_filename_tiff2, tiff_bytes_x2)
-                    # Conversion Configuration images (JPEG avec métadonnées)
                     rotation_angle_i = -flight_angle_i
                     scaling_factor = 1
                     img = Image.open(io.BytesIO(info["data"]))
@@ -554,8 +540,8 @@ if uploaded_files:
                                (-new_width/2, new_height/2)]
                     corner_coords = []
                     for corner in corners:
-                        x, y = transform_affine * corner
-                        corner_coords.append((x, y))
+                        x_c, y_c = transform_affine * corner
+                        corner_coords.append((x_c, y_c))
                     metadata_str = f"Frame Coordinates: {corner_coords}"
                     try:
                         import piexif
@@ -590,7 +576,7 @@ if uploaded_files:
                 file_name="images_pretraitees.zip",
                 mime="application/zip"
             )
-            st.success("Vos images ont été post-traitées, vous pouvez les utilisés.")
+            st.success("Vos images ont été post-traitées, vous pouvez les utiliser.")
 else:
     st.info("Veuillez téléverser des images JPEG pour lancer le post-traitement.")
 
@@ -599,11 +585,9 @@ else:
 #####################
 st.markdown("---")
 st.header("detections")
-# Onglets pour détection automatique et détection manuelle
 tab_auto, tab_manuel = st.tabs(["Détection Automatique", "Détection Manuelle"])
 
 with tab_auto:
-    
     if st.button("lancer le traitement Automatique"):
         if "preprocessed_zip" in st.session_state:
             zip_bytes = st.session_state["preprocessed_zip"]
@@ -617,7 +601,6 @@ with tab_auto:
                         auto_converted_files.append(file_obj)
             st.session_state["auto_converted_images"] = auto_converted_files
             st.success(f"{len(auto_converted_files)} images converties chargées.")
-            # Traitement automatique: récupération des coordonnées à 40% entre le centre et le bord droit de chaque image
             if "images_info" in st.session_state:
                 images_info = st.session_state["images_info"]
                 auto_markers = []
@@ -646,25 +629,31 @@ with tab_auto:
                     T3 = Affine.rotation(rotation_angle_i)
                     T4 = Affine.translation(center_x, center_y)
                     transform_affine = T4 * T3 * T2 * T1
-                    # Calcul du point situé à 40% de la distance entre le centre et la bordure droite
-                    x_center = new_width / 2
-                    offset = 0.4 * (new_width / 2)
-                    pixel_x = x_center + offset
-                    pixel_y = new_height / 2
-                    # On s'assure que les coordonnées restent dans les limites de l'image
-                    pixel_x = max(0, min(pixel_x, new_width))
-                    pixel_y = max(0, min(pixel_y, new_height))
-                    marker_utm = transform_affine * (pixel_x, pixel_y)
-                    # Conversion des coordonnées UTM en lat/lon (EPSG:4326)
-                    transformer = Transformer.from_crs(info["utm_crs"], "EPSG:4326", always_xy=True)
-                    lon_conv, lat_conv = transformer.transform(marker_utm[0], marker_utm[1])
+                    # Calcul simple : on place le rectangle à 40% de la distance entre le centre et la bordure droite
+                    x_center = img.width / 2
+                    offset = 0.4 * (img.width / 2)
+                    x = x_center + offset
+                    y = img.height / 2
+                    effective_pixel_size = pixel_size / (1/5)  # pour scaling_factor = 1/5
+                    square_side_pixels = int(round(2 / effective_pixel_size))
+                    half_side = square_side_pixels // 2
+                    # S'assurer que le rectangle est entièrement dans l'image
+                    x = max(half_side, min(x, img.width - half_side))
+                    y = max(half_side, min(y, img.height - half_side))
+                    # Dessin du rectangle
+                    for file_obj in auto_converted_files:
+                        file_obj.seek(0)
+                        img = Image.open(file_obj)
+                        draw = ImageDraw.Draw(img)
+                        draw.rectangle([x - half_side, y - half_side, x + half_side, y + half_side], outline="red", width=2)
+                        st.image(img, caption=file_obj.name)
                     marker = {
                         "ID": f"{st.session_state.get('current_mission', 'auto')}-{i+1}",
                         "classe": "deformations ornierage",
                         "gravite": 1,
-                        "coordonnees UTM": (round(marker_utm[0],2), round(marker_utm[1],2)),
-                        "lat": lat_conv,
-                        "long": lon_conv,
+                        "coordonnees UTM": (round(info["utm"][0],2), round(info["utm"][1],2)),
+                        "lat": info["lat"],
+                        "long": info["lon"],
                         "routes": "Route inconnue",
                         "detection": "Automatique",
                         "mission": st.session_state.get("current_mission", "N/A"),
@@ -678,30 +667,12 @@ with tab_auto:
                 st.session_state.markers_by_pair["auto"] = auto_markers
             else:
                 st.error("Aucune information d'images disponible pour le traitement automatique.")
-            # Affichage des images avec le carré dessiné au point calculé
-            for i, file_obj in enumerate(auto_converted_files):
-                file_obj.seek(0)
-                img = Image.open(file_obj)
-                draw = ImageDraw.Draw(img)
-                # Calcul explicite du centre et du décalage pour être sûr que la coordonnée est dans l'image
-                x_center = img.width / 2
-                offset = 0.4 * (img.width / 2)
-                x = x_center + offset
-                y = img.height / 2
-                x = max(0, min(x, img.width))
-                y = max(0, min(y, img.height))
-                effective_pixel_size = pixel_size / (1/5)  # Pour les images converties avec scaling_factor = 1/5
-                square_side_pixels = int(round(2 / effective_pixel_size))
-                half_side = square_side_pixels // 2
-                draw.rectangle([x - half_side, y - half_side, x + half_side, y + half_side], outline="red", width=2)
-                st.image(img, caption=file_obj.name)
         else:
             st.error("Aucun résultat de conversion prétraitée n'est disponible.")
+
     # Le téléversement manuel est supprimé dans cette interface.
 
 with tab_manuel:
-    
-    # Bouton unique pour charger simultanément les fichiers TIFF GRAND et TIFF PETIT depuis la conversion
     if st.button("commencer le traitement manuel"):
         if "preprocessed_zip" in st.session_state:
             zip_bytes = st.session_state["preprocessed_zip"]
@@ -806,7 +777,6 @@ with tab_manuel:
                 features = all_drawings.get("features", [])
             elif isinstance(all_drawings, list):
                 features = all_drawings
-        # Gestion des IDs des marqueurs avec référence de mission
         current_mission = st.session_state.get("current_mission", "N/A")
         mission_details = st.session_state.missions.get(current_mission, {}) if current_mission != "N/A" else {}
         if current_mission not in st.session_state.mission_marker_counter:
@@ -924,9 +894,7 @@ if st.button("Sauvegarder la mission"):
     current_mission = st.session_state.get("current_mission", None)
     if current_mission:
         mission_details = st.session_state.missions.get(current_mission, {})
-        # Ajout de la distance du trajet en km à la mission
         mission_details["distance(km)"] = st.session_state.get("trajet_distance_km", 0)
-        # Ajout de la mission à l'historique si non déjà présente
         if mission_details not in st.session_state.mission_history:
             st.session_state.mission_history.append(mission_details)
         st.success("Mission sauvegardée dans l'historique.")
@@ -939,7 +907,6 @@ if st.button("Sauvegarder la mission"):
 if st.button("Exporter les résultats de la mission en CSV"):
     current_mission = st.session_state.get("current_mission", None)
     if current_mission:
-        # Collecter tous les marqueurs appartenant à la mission courante
         mission_markers = []
         for markers in st.session_state.markers_by_pair.values():
             for marker in markers:
@@ -948,9 +915,7 @@ if st.button("Exporter les résultats de la mission en CSV"):
         if mission_markers:
             output = io.StringIO()
             writer = csv.writer(output, delimiter=';')
-            # Ecrire l'en-tête avec les nouvelles colonnes Date, Appareil et Nom Appareil
             writer.writerow(["ID", "Classe", "Gravité", "Coordonnées UTM", "Latitude", "Longitude", "Route", "Détection", "Mission", "Date", "Appareil", "Nom Appareil"])
-            # Ecrire les lignes
             for marker in mission_markers:
                 writer.writerow([
                     marker.get("ID"),
