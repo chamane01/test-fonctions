@@ -132,7 +132,7 @@ if uploaded_file is not None:
         
         st.markdown("---")
         
-        # Bouton pour afficher tous les éléments (déplacé juste au-dessus des diagrammes verticaux)
+        # Bouton pour afficher tous les éléments (placé ici pour impacter les diagrammes verticaux)
         show_all = st.checkbox("Afficher tous les éléments", value=False)
         
         #########################################
@@ -142,7 +142,7 @@ if uploaded_file is not None:
         display_routes = route_defect_counts if show_all else route_defect_counts.head(7)
         max_count = display_routes["Nombre de Défauts"].max()
         chart_routes = alt.Chart(display_routes).mark_bar().encode(
-            x=alt.X("Route:N", sort='-y', title="Route", axis=alt.Axis(labelAngle=0)),
+            x=alt.X("Route:N", sort='-y', title="Route", axis=alt.Axis(labelAngle=0, labelOverlap=True)),
             y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts", scale=alt.Scale(domain=[0, max_count*1.2])),
             tooltip=["Route:N", "Nombre de Défauts:Q"],
             color=alt.Color("Route:N", scale=alt.Scale(scheme='tableau10'))
@@ -159,7 +159,7 @@ if uploaded_file is not None:
         display_severity = route_severity if show_all else route_severity.head(7)
         max_severity = display_severity["severite"].max()
         chart_severity = alt.Chart(display_severity).mark_bar().encode(
-            x=alt.X("routes:N", sort='-y', title="Route", axis=alt.Axis(labelAngle=0)),
+            x=alt.X("routes:N", sort='-y', title="Route", axis=alt.Axis(labelAngle=0, labelOverlap=True)),
             y=alt.Y("severite:Q", title="Score de Sévérité Total", scale=alt.Scale(domain=[0, max_severity*1.2])),
             tooltip=["routes:N", "severite:Q"],
             color=alt.Color("routes:N", scale=alt.Scale(scheme='tableau20'))
@@ -182,7 +182,7 @@ if uploaded_file is not None:
             display_selected = route_count_selected if show_all else route_count_selected.head(7)
             max_sel = display_selected["Nombre de Défauts"].max()
             chart_defect_type = alt.Chart(display_selected).mark_bar().encode(
-                x=alt.X("Route:N", sort='-y', title="Route", axis=alt.Axis(labelAngle=0)),
+                x=alt.X("Route:N", sort='-y', title="Route", axis=alt.Axis(labelAngle=0, labelOverlap=True)),
                 y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts", scale=alt.Scale(domain=[0, max_sel*1.2])),
                 tooltip=["Route:N", "Nombre de Défauts:Q"],
                 color=alt.Color("Route:N", scale=alt.Scale(scheme='category20b'))
