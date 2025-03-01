@@ -87,7 +87,7 @@ else:
     
     st.markdown("---")
     
-    # --- Graphiques d'évolution dans le temps (affichés 2 par 2) ---
+    # --- Graphiques d'évolution dans le temps affichés 2 par 2 ---
     # Graphique A : Évolution des Missions
     missions_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M")).size().reset_index(name="Missions")
     missions_over_time['date'] = missions_over_time['date'].dt.to_timestamp()
@@ -124,7 +124,7 @@ else:
         tooltip=['date:T', 'Score Moyen:Q']
     ).properties(width=350, height=300, title="Score de Sévérité Moyen")
     
-    # Affichage des 4 graphiques d'évolution deux par deux
+    # Affichage des 4 graphiques d'évolution par paires
     col_time1, col_time2 = st.columns(2)
     with col_time1:
         st.altair_chart(chart_missions, use_container_width=True)
@@ -188,7 +188,7 @@ else:
     limit = None if show_all else 7
     
     # --- Regroupement des 4 diagrammes verticaux en 2 lignes de 2 colonnes ---
-    # Graphique 5 : Nombre de Défauts par Route (diagramme vertical)
+    # Graphique 5 : Nombre de Défauts par Route
     route_defect_counts = df_defects['routes'].value_counts().reset_index()
     route_defect_counts.columns = ["Route", "Nombre de Défauts"]
     chart_routes = alt.Chart(route_defect_counts if show_all else route_defect_counts.head(limit)).mark_bar().encode(
@@ -199,7 +199,7 @@ else:
         color=alt.Color("Route:N", scale=alt.Scale(scheme='tableau10'))
     ).properties(width=900, height=500, title="Nombre de Défauts par Route")
     
-    # Graphique 6 : Routes avec le Score de Sévérité Total (diagramme vertical)
+    # Graphique 6 : Routes avec le Score de Sévérité Total
     route_severity = df_defects.groupby('routes')['severite'].sum().reset_index().sort_values(by='severite', ascending=False)
     chart_severity = alt.Chart(route_severity if show_all else route_severity.head(limit)).mark_bar().encode(
         x=alt.X("routes:N", sort='-y', title="Route",
@@ -209,7 +209,7 @@ else:
         color=alt.Color("routes:N", scale=alt.Scale(scheme='tableau20'))
     ).properties(width=900, height=500, title="Score de Sévérité par Route")
     
-    # Graphique 7 : Analyse par Type de Défaut (diagramme vertical)
+    # Graphique 7 : Analyse par Type de Défaut (restauration de l'analyse initiale)
     st.markdown("### Analyse par Type de Défaut")
     defect_types = df_defects['classe'].unique()
     selected_defect = st.selectbox("Sélectionnez un type de défaut", defect_types)
@@ -227,36 +227,19 @@ else:
     else:
         chart_defect_type = None
     
-    # Graphique 8 : Analyse par Route (diagramme vertical)
-    st.markdown("### Analyse par Route")
-    selected_route = st.selectbox("Sélectionnez une route", sorted(df_defects['routes'].unique()))
-    inventory = df_defects[df_defects['routes'] == selected_route]['classe'].value_counts().reset_index()
-    inventory.columns = ["Dégradation", "Nombre de Défauts"]
-    chart_route_inventory = alt.Chart(inventory).mark_bar().encode(
-        x=alt.X("Dégradation:N", sort='-y', title="Dégradation",
-                axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
-        y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
-        tooltip=["Dégradation:N", "Nombre de Défauts:Q"],
-        color=alt.Color("Dégradation:N", scale=alt.Scale(scheme='category20b'))
-    ).properties(width=900, height=500, title=f"Inventaire des Dégradations pour la Route : {selected_route}")
-    
-    # Affichage des 4 diagrammes en deux lignes de deux colonnes
+    # Affichage des deux lignes de diagrammes verticaux
     col_bottom1, col_bottom2 = st.columns(2)
     with col_bottom1:
         st.altair_chart(chart_routes, use_container_width=True)
     with col_bottom2:
         st.altair_chart(chart_severity, use_container_width=True)
         
-    col_bottom3, col_bottom4 = st.columns(2)
-    with col_bottom3:
-        st.markdown("### Analyse par Type de Défaut")
-        if chart_defect_type is not None:
-            st.altair_chart(chart_defect_type, use_container_width=True)
-        else:
-            st.write("Aucune donnée disponible pour ce type de défaut.")
-    with col_bottom4:
-        st.markdown("### Analyse par Route")
-        st.altair_chart(chart_route_inventory, use_container_width=True)
-
+    # Affichage de l'analyse par type de défaut sur une ligne entière
+    st.markdown("### Analyse par Type de Défaut")
+    if chart_defect_type is not None:
+        st.altair_chart(chart_defect_type, use_container_width=True)
+    else:
+        st.write("Aucune donnée disponible pour ce type de défaut.")
+    
 # Fermeture du conteneur principal
 st.markdown("</div>", unsafe_allow_html=True)
