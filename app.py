@@ -44,8 +44,8 @@ st.markdown("</div>", unsafe_allow_html=True)
 # Début du conteneur principal (contenu centré et à largeur limitée)
 st.markdown("<div class='main-container'>", unsafe_allow_html=True)
 
-st.title("tableau de suivie des routes nationales")
-st.markdown("Visualisez vos données avec des graphiques interactifs et un design moderne.")
+st.title("Tableau de Bord des degradations sur les routes ivoiriennes ")
+st.markdown("parceque nous croyons que la route précède le developpement")
 
 # Téléversement du fichier JSON via la sidebar
 uploaded_file = st.sidebar.file_uploader("Téléverser un fichier JSON", type=["json"], key="json_data")
