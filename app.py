@@ -646,8 +646,15 @@ with tab_auto:
                     T3 = Affine.rotation(rotation_angle_i)
                     T4 = Affine.translation(center_x, center_y)
                     transform_affine = T4 * T3 * T2 * T1
-                    # Calcul du point situé à 40% entre le centre et le bord droit
-                    marker_utm = transform_affine * (0.7 * new_width, new_height/2)
+                    # Calcul du point situé à 40% de la distance entre le centre et la bordure droite
+                    x_center = new_width / 2
+                    offset = 0.4 * (new_width / 2)
+                    pixel_x = x_center + offset
+                    pixel_y = new_height / 2
+                    # On s'assure que les coordonnées restent dans les limites de l'image
+                    pixel_x = max(0, min(pixel_x, new_width))
+                    pixel_y = max(0, min(pixel_y, new_height))
+                    marker_utm = transform_affine * (pixel_x, pixel_y)
                     # Conversion des coordonnées UTM en lat/lon (EPSG:4326)
                     transformer = Transformer.from_crs(info["utm_crs"], "EPSG:4326", always_xy=True)
                     lon_conv, lat_conv = transformer.transform(marker_utm[0], marker_utm[1])
@@ -671,17 +678,19 @@ with tab_auto:
                 st.session_state.markers_by_pair["auto"] = auto_markers
             else:
                 st.error("Aucune information d'images disponible pour le traitement automatique.")
-            # Affichage des images avec le marqueur dessiné sur l'endroit où les coordonnées ont été récupérées
+            # Affichage des images avec le carré dessiné au point calculé
             for i, file_obj in enumerate(auto_converted_files):
                 file_obj.seek(0)
                 img = Image.open(file_obj)
                 draw = ImageDraw.Draw(img)
-                # Calcul de la position du marqueur en pixels
-                x = 0.7 * img.width
-                y = 0.5 * img.height
-                # Pour ces images, le scaling_factor utilisé est de 1/5, donc la taille effective d'un pixel est :
-                effective_pixel_size = pixel_size / (1/5)  # soit 5 * pixel_size (m/pixel)
-                # Calcul du côté en pixels correspondant à 2m
+                # Calcul explicite du centre et du décalage pour être sûr que la coordonnée est dans l'image
+                x_center = img.width / 2
+                offset = 0.4 * (img.width / 2)
+                x = x_center + offset
+                y = img.height / 2
+                x = max(0, min(x, img.width))
+                y = max(0, min(y, img.height))
+                effective_pixel_size = pixel_size / (1/5)  # Pour les images converties avec scaling_factor = 1/5
                 square_side_pixels = int(round(2 / effective_pixel_size))
                 half_side = square_side_pixels // 2
                 draw.rectangle([x - half_side, y - half_side, x + half_side, y + half_side], outline="red", width=2)
