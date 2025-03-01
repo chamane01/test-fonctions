@@ -6,7 +6,7 @@ import plotly.express as px
 import pydeck as pdk
 from datetime import datetime
 
-# Configuration de la page et CSS minimaliste et coloré
+# Configuration de la page et CSS pour centrer le contenu et limiter la largeur
 st.set_page_config(page_title="Dashboard Ultra Moderne", layout="wide")
 st.markdown(
     """
@@ -28,16 +28,29 @@ st.markdown(
     h1, h2, h3 {
         color: #2c3e50;
     }
+    .main-container {
+        max-width: 1200px;
+        margin: 0 auto;
+    }
     </style>
     """, unsafe_allow_html=True
 )
+
+# Téléversement du logo avant le titre principal
+logo_file = st.file_uploader("Téléversez votre logo", type=["png", "jpg", "jpeg"], key="logo")
+if logo_file is not None:
+    st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
+    st.image(logo_file, width=200)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# Début du conteneur principal (contenu centré et à largeur limitée)
+st.markdown("<div class='main-container'>", unsafe_allow_html=True)
 
 st.title("Dashboard Ultra Moderne - Missions et Défauts")
 st.markdown("Visualisez vos données avec des graphiques interactifs et un design moderne.")
 
 # Téléversement du fichier JSON via la sidebar
-uploaded_file = st.sidebar.file_uploader("Téléverser un fichier JSON", type=["json"])
-
+uploaded_file = st.sidebar.file_uploader("Téléverser un fichier JSON", type=["json"], key="json_data")
 if uploaded_file is not None:
     data = json.load(uploaded_file)
     
@@ -53,7 +66,7 @@ if uploaded_file is not None:
         total_distance = missions_df["distance(km)"].sum()
         avg_distance = missions_df["distance(km)"].mean()
         
-        # Extraction de tous les défauts
+        # Extraction de tous les défauts de chaque mission
         defects = []
         for mission in data:
             for defect in mission.get("Données Défauts", []):
@@ -64,7 +77,7 @@ if uploaded_file is not None:
         if 'date' in df_defects.columns:
             df_defects['date'] = pd.to_datetime(df_defects['date'])
         
-        # Mapping des niveaux de gravité (pour les barres et la carte)
+        # Mapping des niveaux de gravité pour la taille des marqueurs
         gravity_sizes = {1: 5, 2: 7, 3: 9}
         df_defects['severite'] = df_defects['gravite'].map(gravity_sizes)
         
@@ -84,11 +97,7 @@ if uploaded_file is not None:
             x=alt.X('date:T', title='Date'),
             y=alt.Y('Missions:Q', title='Nombre de Missions'),
             tooltip=['date:T', 'Missions:Q']
-        ).properties(
-            width=700,
-            height=300,
-            title="Évolution des Missions dans le Temps"
-        )
+        ).properties(width=700, height=300, title="Évolution des Missions dans le Temps")
         st.altair_chart(chart_missions, use_container_width=True)
         
         # Graphique 2 : Évolution des Défauts dans le Temps
@@ -98,11 +107,7 @@ if uploaded_file is not None:
             x=alt.X('date:T', title='Date'),
             y=alt.Y('Défauts:Q', title='Nombre de Défauts'),
             tooltip=['date:T', 'Défauts:Q']
-        ).properties(
-            width=700,
-            height=300,
-            title="Évolution des Défauts dans le Temps"
-        )
+        ).properties(width=700, height=300, title="Évolution des Défauts dans le Temps")
         st.altair_chart(chart_defects_time, use_container_width=True)
         
         # Graphique 3 : Évolution des Km par Mission dans le Temps
@@ -110,14 +115,9 @@ if uploaded_file is not None:
         distance_over_time['date'] = distance_over_time['date'].dt.to_timestamp()
         chart_distance_time = alt.Chart(distance_over_time).mark_line(point=True).encode(
             x=alt.X('date:T', title='Date'),
-            y=alt.Y('Distance Totale:Q', title='Km Totaux',
-                    scale=alt.Scale(domain=[0, distance_over_time["Distance Totale"].max()*1.2])),
+            y=alt.Y('Distance Totale:Q', title='Km Totaux', scale=alt.Scale(domain=[0, distance_over_time["Distance Totale"].max()*1.2])),
             tooltip=['date:T', 'Distance Totale:Q']
-        ).properties(
-            width=700,
-            height=300,
-            title="Évolution des Km par Mission dans le Temps"
-        )
+        ).properties(width=700, height=300, title="Évolution des Km par Mission dans le Temps")
         st.altair_chart(chart_distance_time, use_container_width=True)
         
         st.markdown("---")
@@ -132,17 +132,17 @@ if uploaded_file is not None:
         
         st.markdown("---")
         
-        # Carte des Défauts avec intensité de rouge selon la gravité
+        # Carte des Défauts : couleurs rouges variant selon la gravité
         def get_red_color(gravite):
             if gravite == 1:
-                return [255, 200, 200]  # rouge pâle
+                return [255, 200, 200]  # Rouge pâle
             elif gravite == 2:
-                return [255, 100, 100]  # rouge moyen
+                return [255, 100, 100]  # Rouge moyen
             elif gravite == 3:
-                return [255, 0, 0]      # rouge vif
+                return [255, 0, 0]      # Rouge vif
             else:
                 return [255, 0, 0]
-        
+                
         df_defects['marker_color'] = df_defects['gravite'].apply(get_red_color)
         
         layer = pdk.Layer(
@@ -150,7 +150,7 @@ if uploaded_file is not None:
             data=df_defects,
             get_position='[long, lat]',
             get_color="marker_color",
-            get_radius="radius * 50",  # ajustez le facteur de multiplication selon vos données
+            get_radius="radius * 50",
             pickable=True,
         )
         
@@ -170,7 +170,7 @@ if uploaded_file is not None:
         
         st.markdown("---")
         
-        # Bouton pour afficher tous les éléments (impacte les graphiques verticaux)
+        # Option d'affichage complet pour les graphiques verticaux
         show_all = st.checkbox("Afficher tous les éléments", value=False)
         limit = None if show_all else 7
         
@@ -184,11 +184,7 @@ if uploaded_file is not None:
             y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
             tooltip=["Route:N", "Nombre de Défauts:Q"],
             color=alt.Color("Route:N", scale=alt.Scale(scheme='tableau10'))
-        ).properties(
-            width=900,
-            height=500,
-            title="Nombre de Défauts par Route (Top 7 par défaut)"
-        )
+        ).properties(width=900, height=500, title="Nombre de Défauts par Route (Top 7 par défaut)")
         st.altair_chart(chart_routes, use_container_width=True)
         
         # Graphique 6 : Routes avec le Score de Sévérité Total (diagramme vertical)
@@ -200,11 +196,7 @@ if uploaded_file is not None:
             y=alt.Y("severite:Q", title="Score de Sévérité Total"),
             tooltip=["routes:N", "severite:Q"],
             color=alt.Color("routes:N", scale=alt.Scale(scheme='tableau20'))
-        ).properties(
-            width=900,
-            height=500,
-            title="Routes avec le Score de Sévérité le Plus Élevé (Top 7 par défaut)"
-        )
+        ).properties(width=900, height=500, title="Routes avec le Score de Sévérité le Plus Élevé (Top 7 par défaut)")
         st.altair_chart(chart_severity, use_container_width=True)
         
         # Graphique 7 : Analyse interactive par Type de Défaut (diagramme vertical)
@@ -222,14 +214,13 @@ if uploaded_file is not None:
                 y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
                 tooltip=["Route:N", "Nombre de Défauts:Q"],
                 color=alt.Color("Route:N", scale=alt.Scale(scheme='category20b'))
-            ).properties(
-                width=900,
-                height=500,
-                title=f"Répartition des Défauts pour le Type : {selected_defect} (Top 7 par défaut)"
-            )
+            ).properties(width=900, height=500, title=f"Répartition des Défauts pour le Type : {selected_defect} (Top 7 par défaut)")
             st.altair_chart(chart_defect_type, use_container_width=True)
         else:
             st.write("Aucune donnée disponible pour ce type de défaut.")
             
 else:
     st.info("Veuillez téléverser un fichier JSON contenant vos données pour afficher le dashboard.")
+
+# Fermeture du conteneur principal
+st.markdown("</div>", unsafe_allow_html=True)
