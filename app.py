@@ -676,10 +676,15 @@ with tab_auto:
                 file_obj.seek(0)
                 img = Image.open(file_obj)
                 draw = ImageDraw.Draw(img)
+                # Calcul de la position du marqueur en pixels
                 x = 0.7 * img.width
                 y = 0.5 * img.height
-                r = 5
-                draw.ellipse((x-r, y-r, x+r, y+r), fill="red")
+                # Pour ces images, le scaling_factor utilisé est de 1/5, donc la taille effective d'un pixel est :
+                effective_pixel_size = pixel_size / (1/5)  # soit 5 * pixel_size (m/pixel)
+                # Calcul du côté en pixels correspondant à 2m
+                square_side_pixels = int(round(2 / effective_pixel_size))
+                half_side = square_side_pixels // 2
+                draw.rectangle([x - half_side, y - half_side, x + half_side, y + half_side], outline="red", width=2)
                 st.image(img, caption=file_obj.name)
         else:
             st.error("Aucun résultat de conversion prétraitée n'est disponible.")
