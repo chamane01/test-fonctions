@@ -7,7 +7,7 @@ import pydeck as pdk
 from datetime import datetime
 
 # Configuration de la page et CSS pour centrer le contenu et limiter la largeur
-st.set_page_config(page_title="Tableau de Suivie des Routes Nationales", layout="wide")
+st.set_page_config(page_title="Tableau de Bord des degradations sur les routes ivoiriennes ", layout="wide")
 st.markdown(
     """
     <style>
