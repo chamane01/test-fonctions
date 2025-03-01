@@ -87,35 +87,55 @@ else:
     
     st.markdown("---")
     
-    # Graphique 1 : Évolution des Missions dans le Temps
+    # Calcul et création des graphiques d'évolution dans le temps
+    # Graphique A : Évolution des Missions
     missions_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M")).size().reset_index(name="Missions")
     missions_over_time['date'] = missions_over_time['date'].dt.to_timestamp()
     chart_missions = alt.Chart(missions_over_time).mark_line(point=True).encode(
         x=alt.X('date:T', title='Date'),
         y=alt.Y('Missions:Q', title='Nombre de Missions'),
         tooltip=['date:T', 'Missions:Q']
-    ).properties(width=700, height=300, title="Évolution des Missions dans le Temps")
-    st.altair_chart(chart_missions, use_container_width=True)
+    ).properties(width=350, height=300, title="Évolution des Missions")
     
-    # Graphique 2 : Évolution des Défauts dans le Temps
+    # Graphique B : Évolution des Défauts
     defects_over_time = df_defects.groupby(df_defects['date'].dt.to_period("M")).size().reset_index(name="Défauts")
     defects_over_time['date'] = defects_over_time['date'].dt.to_timestamp()
     chart_defects_time = alt.Chart(defects_over_time).mark_line(point=True).encode(
         x=alt.X('date:T', title='Date'),
         y=alt.Y('Défauts:Q', title='Nombre de Défauts'),
         tooltip=['date:T', 'Défauts:Q']
-    ).properties(width=700, height=300, title="Évolution des Défauts dans le Temps")
-    st.altair_chart(chart_defects_time, use_container_width=True)
+    ).properties(width=350, height=300, title="Évolution des Défauts")
     
-    # Graphique 3 : Évolution des Km par Mission dans le Temps
+    # Graphique C : Évolution des Km Totaux
     distance_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M"))["distance(km)"].sum().reset_index(name="Distance Totale")
     distance_over_time['date'] = distance_over_time['date'].dt.to_timestamp()
     chart_distance_time = alt.Chart(distance_over_time).mark_line(point=True).encode(
         x=alt.X('date:T', title='Date'),
         y=alt.Y('Distance Totale:Q', title='Km Totaux', scale=alt.Scale(domain=[0, distance_over_time["Distance Totale"].max()*1.2])),
         tooltip=['date:T', 'Distance Totale:Q']
-    ).properties(width=700, height=300, title="Évolution des Km par Mission dans le Temps")
-    st.altair_chart(chart_distance_time, use_container_width=True)
+    ).properties(width=350, height=300, title="Évolution des Km")
+    
+    # Graphique D (nouveau) : Évolution du Score de Sévérité Moyen
+    severity_over_time = df_defects.groupby(df_defects['date'].dt.to_period("M"))["severite"].mean().reset_index(name="Score Moyen")
+    severity_over_time['date'] = severity_over_time['date'].dt.to_timestamp()
+    chart_severity_over_time = alt.Chart(severity_over_time).mark_line(point=True).encode(
+        x=alt.X('date:T', title='Date'),
+        y=alt.Y('Score Moyen:Q', title='Score de Sévérité Moyen'),
+        tooltip=['date:T', 'Score Moyen:Q']
+    ).properties(width=350, height=300, title="Score de Sévérité Moyen")
+    
+    # Affichage des 4 graphiques côte à côte par paires
+    col_time1, col_time2 = st.columns(2)
+    with col_time1:
+        st.altair_chart(chart_missions, use_container_width=True)
+    with col_time2:
+        st.altair_chart(chart_defects_time, use_container_width=True)
+    
+    col_time3, col_time4 = st.columns(2)
+    with col_time3:
+        st.altair_chart(chart_distance_time, use_container_width=True)
+    with col_time4:
+        st.altair_chart(chart_severity_over_time, use_container_width=True)
     
     st.markdown("---")
     
