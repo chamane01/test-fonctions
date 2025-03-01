@@ -44,7 +44,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 # Début du conteneur principal (contenu centré et à largeur limitée)
 st.markdown("<div class='main-container'>", unsafe_allow_html=True)
 
-st.title("tableau de suivie des dégradations sur les routes nationales")
+st.title("tableau de bord de suivie des dégradations sur les routes ivoiriennes")
 st.markdown("parceque nous croyons que la route précède le developpement")
 
 # Chargement direct du fichier JSON depuis le repository
