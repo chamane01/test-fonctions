@@ -7,7 +7,7 @@ import pydeck as pdk
 from datetime import datetime
 
 # Configuration de la page et CSS pour centrer le contenu et limiter la largeur
-st.set_page_config(page_title="Tableau de Suivie des Routes Nationales", layout="wide")
+st.set_page_config(page_title="Tableau de Suivie des dégradations sur les Routes Nationales", layout="wide")
 st.markdown(
     """
     <style>
@@ -44,8 +44,8 @@ st.markdown("</div>", unsafe_allow_html=True)
 # Début du conteneur principal (contenu centré et à largeur limitée)
 st.markdown("<div class='main-container'>", unsafe_allow_html=True)
 
-st.title("tableau de suivie des routes nationales")
-st.markdown("Visualisez vos données avec des graphiques interactifs et un design moderne.")
+st.title("tableau de bord de suivie des dégradations sur les routes ivoiriennes")
+st.markdown("parceque nous croyons que la route précède le developpement")
 
 # Chargement direct du fichier JSON depuis le repository
 with open("jeu_donnees_missions (1).json", "r", encoding="utf-8") as f:
@@ -87,35 +87,55 @@ else:
     
     st.markdown("---")
     
-    # Graphique 1 : Évolution des Missions dans le Temps
+    # Graphiques d'évolution dans le temps
+    # Graphique A : Évolution des Missions
     missions_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M")).size().reset_index(name="Missions")
     missions_over_time['date'] = missions_over_time['date'].dt.to_timestamp()
     chart_missions = alt.Chart(missions_over_time).mark_line(point=True).encode(
         x=alt.X('date:T', title='Date'),
         y=alt.Y('Missions:Q', title='Nombre de Missions'),
         tooltip=['date:T', 'Missions:Q']
-    ).properties(width=700, height=300, title="Évolution des Missions dans le Temps")
-    st.altair_chart(chart_missions, use_container_width=True)
+    ).properties(width=350, height=300, title="Évolution des Missions")
     
-    # Graphique 2 : Évolution des Défauts dans le Temps
+    # Graphique B : Évolution des Défauts
     defects_over_time = df_defects.groupby(df_defects['date'].dt.to_period("M")).size().reset_index(name="Défauts")
     defects_over_time['date'] = defects_over_time['date'].dt.to_timestamp()
     chart_defects_time = alt.Chart(defects_over_time).mark_line(point=True).encode(
         x=alt.X('date:T', title='Date'),
         y=alt.Y('Défauts:Q', title='Nombre de Défauts'),
         tooltip=['date:T', 'Défauts:Q']
-    ).properties(width=700, height=300, title="Évolution des Défauts dans le Temps")
-    st.altair_chart(chart_defects_time, use_container_width=True)
+    ).properties(width=350, height=300, title="Évolution des Défauts")
     
-    # Graphique 3 : Évolution des Km par Mission dans le Temps
+    # Graphique C : Évolution des Km Totaux
     distance_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M"))["distance(km)"].sum().reset_index(name="Distance Totale")
     distance_over_time['date'] = distance_over_time['date'].dt.to_timestamp()
     chart_distance_time = alt.Chart(distance_over_time).mark_line(point=True).encode(
         x=alt.X('date:T', title='Date'),
         y=alt.Y('Distance Totale:Q', title='Km Totaux', scale=alt.Scale(domain=[0, distance_over_time["Distance Totale"].max()*1.2])),
         tooltip=['date:T', 'Distance Totale:Q']
-    ).properties(width=700, height=300, title="Évolution des Km par Mission dans le Temps")
-    st.altair_chart(chart_distance_time, use_container_width=True)
+    ).properties(width=350, height=300, title="Évolution des Km")
+    
+    # Graphique D : Évolution du Score de Sévérité Moyen
+    severity_over_time = df_defects.groupby(df_defects['date'].dt.to_period("M"))["severite"].mean().reset_index(name="Score Moyen")
+    severity_over_time['date'] = severity_over_time['date'].dt.to_timestamp()
+    chart_severity_over_time = alt.Chart(severity_over_time).mark_line(point=True).encode(
+        x=alt.X('date:T', title='Date'),
+        y=alt.Y('Score Moyen:Q', title='Score de Sévérité Moyen'),
+        tooltip=['date:T', 'Score Moyen:Q']
+    ).properties(width=350, height=300, title="Score de Sévérité Moyen")
+    
+    # Affichage des 4 graphiques côte à côte par paires
+    col_time1, col_time2 = st.columns(2)
+    with col_time1:
+        st.altair_chart(chart_missions, use_container_width=True)
+    with col_time2:
+        st.altair_chart(chart_defects_time, use_container_width=True)
+    
+    col_time3, col_time4 = st.columns(2)
+    with col_time3:
+        st.altair_chart(chart_distance_time, use_container_width=True)
+    with col_time4:
+        st.altair_chart(chart_severity_over_time, use_container_width=True)
     
     st.markdown("---")
     
@@ -171,6 +191,7 @@ else:
     show_all = st.checkbox("Afficher tous les éléments", value=False)
     limit = None if show_all else 7
     
+    # Affichage côte à côte du Nombre de Défauts par Route et du Score de Sévérité par Route
     # Graphique 5 : Nombre de Défauts par Route (diagramme vertical)
     route_defect_counts = df_defects['routes'].value_counts().reset_index()
     route_defect_counts.columns = ["Route", "Nombre de Défauts"]
@@ -181,10 +202,9 @@ else:
         y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
         tooltip=["Route:N", "Nombre de Défauts:Q"],
         color=alt.Color("Route:N", scale=alt.Scale(scheme='tableau10'))
-    ).properties(width=900, height=500, title="Nombre de Défauts par Route (Top 7 par défaut)")
-    st.altair_chart(chart_routes, use_container_width=True)
+    ).properties(width=450, height=500, title="Nombre de Défauts par Route")
     
-    # Graphique 6 : Routes avec le Score de Sévérité Total (diagramme vertical)
+    # Graphique 6 : Score de Sévérité Total par Route (diagramme vertical)
     route_severity = df_defects.groupby('routes')['severite'].sum().reset_index().sort_values(by='severite', ascending=False)
     display_severity = route_severity if show_all else route_severity.head(limit)
     chart_severity = alt.Chart(display_severity).mark_bar().encode(
@@ -193,8 +213,14 @@ else:
         y=alt.Y("severite:Q", title="Score de Sévérité Total"),
         tooltip=["routes:N", "severite:Q"],
         color=alt.Color("routes:N", scale=alt.Scale(scheme='tableau20'))
-    ).properties(width=900, height=500, title="Routes avec le Score de Sévérité le Plus Élevé (Top 7 par défaut)")
-    st.altair_chart(chart_severity, use_container_width=True)
+    ).properties(width=450, height=500, title="Score de Sévérité par Route")
+    
+    # Affichage côte à côte des deux graphiques
+    col_route, col_severity = st.columns(2)
+    with col_route:
+        st.altair_chart(chart_routes, use_container_width=True)
+    with col_severity:
+        st.altair_chart(chart_severity, use_container_width=True)
     
     # Graphique 7 : Analyse interactive par Type de Défaut (diagramme vertical)
     st.markdown("### Analyse par Type de Défaut")
