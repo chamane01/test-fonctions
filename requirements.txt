@@ -25,3 +25,4 @@ laspy
 scipy
 seaborn
 xlsxwriter
+reportlab
