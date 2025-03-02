@@ -4,24 +4,29 @@ import numpy as np
 from PIL import Image
 
 def process_image(img, canny_thresh1, canny_thresh2, clahe_clip, clahe_tile, morph_kernel_size,
-                  extra_canny_enabled, canny_thresh3, canny_thresh4, white_filter_enabled, white_filter_size):
+                  extra_canny_enabled, canny_thresh3, canny_thresh4, white_filter_enabled, white_filter_size,
+                  noise_filter_enabled, noise_filter_size):
     # Conversion en niveaux de gris
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # Amélioration du contraste avec CLAHE
+    # Amélioration du contraste avec CLAHE (clip limit modifiable de 0 à 10)
     clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(clahe_tile, clahe_tile))
     enhanced = clahe.apply(gray)
     
-    # Optionnel : flou gaussien pour réduire le bruit
+    # Application d'un flou gaussien pour réduire le bruit
     blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
+    
+    # Filtre de bruit supplémentaire (filtre médian) si activé
+    if noise_filter_enabled and noise_filter_size is not None:
+        blurred = cv2.medianBlur(blurred, noise_filter_size)
     
     # Détection des contours avec Canny (seuils 1 et 2)
     edges = cv2.Canny(blurred, canny_thresh1, canny_thresh2)
     
-    # Si activé, détection avec seuils supplémentaires
+    # Si activé, détection avec des seuils supplémentaires (seuils 3 et 4)
     if extra_canny_enabled:
         edges2 = cv2.Canny(blurred, canny_thresh3, canny_thresh4)
-        # Combinaison des deux détections par opération OR bit à bit
+        # Combinaison des détections par opération OR bit à bit
         edges = cv2.bitwise_or(edges, edges2)
     
     # Opération morphologique pour fermer les petites interruptions et réduire le bruit
@@ -44,7 +49,8 @@ def main():
     st.sidebar.header("Paramètres de traitement")
     canny_thresh1 = st.sidebar.slider("Seuil 1 Canny", 0, 255, 50)
     canny_thresh2 = st.sidebar.slider("Seuil 2 Canny", 0, 255, 150)
-    clahe_clip = st.sidebar.slider("Clip Limit CLAHE", 1.0, 10.0, 2.0, step=0.5)
+    # Valeur minimale du clip limit passée à 0.0
+    clahe_clip = st.sidebar.slider("Clip Limit CLAHE", 0.0, 10.0, 2.0, step=0.5)
     clahe_tile = st.sidebar.slider("Tile Grid Size CLAHE", 2, 20, 8)
     morph_kernel_size = st.sidebar.slider("Taille du noyau morphologique", 1, 10, 3)
     
@@ -57,12 +63,20 @@ def main():
         canny_thresh3 = 0
         canny_thresh4 = 0
     
-    # Paramètre supplémentaire pour le filtre blanc
+    # Paramètre pour le filtre de regroupement blanc
     white_filter_enabled = st.sidebar.checkbox("Activer filtre de regroupement blanc", value=False)
     if white_filter_enabled:
         white_filter_size = st.sidebar.slider("Taille du filtre blanc", 1, 10, 3)
     else:
         white_filter_size = None
+    
+    # Paramètre pour le filtre de bruit supplémentaire
+    noise_filter_enabled = st.sidebar.checkbox("Activer filtre de bruit", value=False)
+    if noise_filter_enabled:
+        # La taille du filtre médian doit être un nombre impair supérieur ou égal à 3
+        noise_filter_size = st.sidebar.slider("Taille du filtre de bruit (median)", 3, 11, 3, step=2)
+    else:
+        noise_filter_size = None
     
     # Téléversement des images
     uploaded_files = st.file_uploader("Téléversez une ou plusieurs images", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
@@ -75,7 +89,8 @@ def main():
             
             # Traitement de l'image
             processed = process_image(image, canny_thresh1, canny_thresh2, clahe_clip, clahe_tile, morph_kernel_size,
-                                      extra_canny_enabled, canny_thresh3, canny_thresh4, white_filter_enabled, white_filter_size)
+                                      extra_canny_enabled, canny_thresh3, canny_thresh4, white_filter_enabled, white_filter_size,
+                                      noise_filter_enabled, noise_filter_size if noise_filter_enabled else 0)
             
             # Affichage
             st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), caption="Image originale", use_column_width=True)
