@@ -3,54 +3,54 @@ import cv2
 import numpy as np
 from PIL import Image
 
-def process_image(image):
-    # 1. Conversion en niveaux de gris
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+def process_image(img, canny_thresh1, canny_thresh2, clahe_clip, clahe_tile, morph_kernel_size):
+    # Conversion en niveaux de gris
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # 2. Correction de l'éclairage non uniforme
-    # Utilisation d'une opération morphologique (fermeture) pour estimer le fond
-    kernel_bg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-    background = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel_bg)
-    # Soustraction du fond pour corriger les variations d'illumination
-    corrected = cv2.absdiff(gray, background)
-    corrected = cv2.normalize(corrected, None, 0, 255, cv2.NORM_MINMAX)
+    # Amélioration du contraste avec CLAHE
+    clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(clahe_tile, clahe_tile))
+    enhanced = clahe.apply(gray)
     
-    # 3. Réduction du bruit par flou gaussien
-    blurred = cv2.GaussianBlur(corrected, (5, 5), 0)
+    # Optionnel : flou gaussien pour réduire le bruit
+    blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
     
-    # 4. Détection des contours avec l'algorithme Canny
-    # Les valeurs des seuils (50 et 150) peuvent être ajustées selon le type d'image
-    edges = cv2.Canny(blurred, 50, 150)
+    # Détection des contours avec Canny
+    edges = cv2.Canny(blurred, canny_thresh1, canny_thresh2)
     
-    # 5. Opération morphologique pour "fermer" les contours détectés et éliminer les petits bruits
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel_close, iterations=1)
+    # Opération morphologique pour fermer les petites interruptions et réduire le bruit
+    kernel = np.ones((morph_kernel_size, morph_kernel_size), np.uint8)
+    closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
     
-    # 6. Filtrage médian pour réduire encore le bruit résiduel
-    final = cv2.medianBlur(closed, 3)
-    
-    return final
+    return closed
 
-st.title("Détection Automatique de Dégradations (Noir & Blanc)")
-st.write("Ce système, inspiré de la méthodologie décrite dans le document de Barrile et al. (2020) :contentReference[oaicite:1]{index=1}, permet d'extraire les dégradations sous forme de traces blanches sur fond noir.")
-
-uploaded_files = st.file_uploader("Choisir une ou plusieurs images", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
-
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        # Lecture de l'image
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        
-        if image is not None:
-            processed = process_image(image)
-            processed_pil = Image.fromarray(processed)
+def main():
+    st.title("Détection Automatique de Dégradations sur Images de Voirie")
+    st.write("Téléversez une ou plusieurs images pour obtenir une image traitée "
+             "où les dégradations (ex. fissures) sont affichées en blanc sur fond noir.")
+    
+    # Paramètres de contrôle dans la barre latérale
+    st.sidebar.header("Paramètres de traitement")
+    canny_thresh1 = st.sidebar.slider("Seuil 1 Canny", 0, 255, 50)
+    canny_thresh2 = st.sidebar.slider("Seuil 2 Canny", 0, 255, 150)
+    clahe_clip = st.sidebar.slider("Clip Limit CLAHE", 1.0, 10.0, 2.0, step=0.5)
+    clahe_tile = st.sidebar.slider("Tile Grid Size CLAHE", 2, 20, 8)
+    morph_kernel_size = st.sidebar.slider("Taille du noyau morphologique", 1, 10, 3)
+    
+    # Téléversement des images
+    uploaded_files = st.file_uploader("Téléversez une ou plusieurs images", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+    
+    if uploaded_files:
+        for file in uploaded_files:
+            # Lecture de l'image avec OpenCV
+            file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
+            image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
             
-            st.subheader(f"Résultat pour {uploaded_file.name}")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.image(Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)), caption="Image Originale", use_column_width=True)
-            with col2:
-                st.image(processed_pil, caption="Dégradations en Blanc sur Fond Noir", use_column_width=True)
-        else:
-            st.error(f"Erreur lors de la lecture de {uploaded_file.name}")
+            # Traitement de l'image
+            processed = process_image(image, canny_thresh1, canny_thresh2, clahe_clip, clahe_tile, morph_kernel_size)
+            
+            # Affichage
+            st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), caption="Image originale", use_column_width=True)
+            st.image(processed, caption="Image traitée (dégradations détectées)", use_column_width=True)
+
+if __name__ == '__main__':
+    main()
