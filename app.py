@@ -69,14 +69,14 @@ st.markdown(
 )
 
 #############################################
-# Menu principal : Trois options
+# Menu principal : Tableau de bord, Missions, Rapport
 #############################################
-menu_option = st.sidebar.radio("Menu", ["Tableau de bord", "Rapport", "Missions"])
+menu_option = st.sidebar.radio("Menu", ["Tableau de bord", "Missions", "Rapport"])
 
 #############################################
 # Données et fonctions communes pour Tableau de bord et Rapport
 #############################################
-# Chargement des données du suivi des missions (pour le tableau de bord et rapports)
+# Chargement des données (suivi des missions) depuis le JSON
 with open("jeu_donnees_missions (1).json", "r", encoding="utf-8") as f:
     data = json.load(f)
 missions_df = pd.DataFrame(data)
@@ -92,7 +92,7 @@ if 'date' in df_defects.columns:
     df_defects['date'] = pd.to_datetime(df_defects['date'])
 
 #############################################
-# Fonction de génération du rapport PDF avec deux graphiques
+# Fonction de génération du rapport PDF
 #############################################
 def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_date, end_date):
     buffer = BytesIO()
@@ -100,7 +100,7 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     PAGE_WIDTH, PAGE_HEIGHT = A4
     margin = 40
 
-    # En-tête avec le logo (utilisé également dans le tableau de bord)
+    # En-tête avec le logo
     logo_path = "images (5).png"
     try:
         img = ImageReader(logo_path)
@@ -113,7 +113,7 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     c.drawString(margin + 60, PAGE_HEIGHT - margin - 40, f"Type: {report_type} | Période: {start_date} au {end_date}")
     c.drawString(margin + 60, PAGE_HEIGHT - margin - 60, f"Éditeur: {metadata.get('editor', 'Inconnu')}")
     
-    # Calcul des indicateurs pour la période sélectionnée
+    # Calcul des indicateurs pour la période
     filtered_missions = missions_df[(missions_df['date'].dt.date >= start_date) & (missions_df['date'].dt.date <= end_date)]
     num_missions = len(filtered_missions)
     total_distance = filtered_missions["distance(km)"].sum() if "distance(km)" in filtered_missions.columns else 0
@@ -146,7 +146,7 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     y -= 20
     c.setFont("Helvetica", 10)
     
-    # Premier graphique : Bar chart comparant Missions et Défauts
+    # Premier graphique : Bar chart
     fig1, ax1 = plt.subplots(figsize=(4,3))
     categories = ['Missions', 'Défauts']
     values = [num_missions, total_defects]
@@ -163,11 +163,12 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     buf1.seek(0)
     img_chart1 = ImageReader(buf1)
     
-    # Second graphique : Pie chart de la répartition des Défauts par Catégorie
+    # Second graphique : Pie chart avec texte réduit et rayon augmenté
     fig2, ax2 = plt.subplots(figsize=(4,3))
     if not filtered_defects.empty and "classe" in filtered_defects.columns:
         defect_counts = filtered_defects['classe'].value_counts()
-        ax2.pie(defect_counts, labels=defect_counts.index, autopct='%1.1f%%', startangle=90, colors=plt.cm.Pastel1.colors)
+        ax2.pie(defect_counts, labels=defect_counts.index, autopct='%1.1f%%', startangle=90, 
+                colors=plt.cm.Pastel1.colors, textprops={'fontsize': 6}, radius=1.1)
         ax2.set_title("Répartition Défauts par Catégorie", fontsize=10)
     else:
         ax2.text(0.5, 0.5, "Pas de données", horizontalalignment='center', verticalalignment='center')
@@ -178,7 +179,7 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     buf2.seek(0)
     img_chart2 = ImageReader(buf2)
     
-    # Positionnement côte à côte des deux graphiques
+    # Positionnement des graphiques côte à côte
     chart_width = (PAGE_WIDTH - 3 * margin) / 2
     chart_height = 200
     y_chart = y - chart_height - 20
@@ -195,13 +196,12 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     return buffer
 
 #############################################
-# Affichage pour Tableau de bord et Rapport
+# Affichage pour Tableau de bord, Missions et Rapport
 #############################################
 if menu_option == "Tableau de bord":
     st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
     st.image("images (5).png", width=200)
     st.markdown("</div>", unsafe_allow_html=True)
-    
     st.markdown("<div class='main-container'>", unsafe_allow_html=True)
     st.title("Tableau de bord de Suivi des Dégradations sur les Routes Ivoiriennes")
     st.markdown("Parce que nous croyons que la route précède le développement")
@@ -209,20 +209,26 @@ if menu_option == "Tableau de bord":
     if "distance(km)" not in missions_df.columns:
         st.error("Le fichier ne contient pas la colonne 'distance(km)'.")
     else:
-        # Indicateurs principaux
-        num_missions = len(missions_df)
-        total_distance = missions_df["distance(km)"].sum()
-        avg_distance = missions_df["distance(km)"].mean()
+        # Récupération des missions historiques
+        hist = st.session_state.get("mission_history", [])
+        num_hist = len(hist)
+        total_distance_hist = sum(float(m.get("distance(km)", 0)) for m in hist)
+        # Calcul des indicateurs combinés
+        num_missions_json = len(missions_df)
+        total_distance_json = missions_df["distance(km)"].sum()
+        total_missions = num_missions_json + num_hist
+        total_distance_all = total_distance_json + total_distance_hist
+        avg_distance_all = total_distance_all / total_missions if total_missions > 0 else 0
         total_defects = len(df_defects)
         
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Nombre de Missions", num_missions)
+        col1.metric("Nombre de Missions", total_missions)
         col2.metric("Nombre de Défauts", total_defects)
-        col3.metric("Distance Totale (km)", f"{total_distance:.1f}")
-        col4.metric("Distance Moyenne (km)", f"{avg_distance:.1f}")
+        col3.metric("Distance Totale (km)", f"{total_distance_all:.1f}")
+        col4.metric("Distance Moyenne (km)", f"{avg_distance_all:.1f}")
         
         st.markdown("---")
-        # Graphiques interactifs avec Altair et Plotly
+        # Graphiques interactifs (Altair, Plotly, Pydeck, etc.)
         missions_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M")).size().reset_index(name="Missions")
         missions_over_time['date'] = missions_over_time['date'].dt.to_timestamp()
         chart_missions = alt.Chart(missions_over_time).mark_line(point=True).encode(
@@ -246,7 +252,6 @@ if menu_option == "Tableau de bord":
             st.altair_chart(chart_defects_time, use_container_width=True)
         
         st.markdown("---")
-        # Graphiques supplémentaires
         distance_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M"))["distance(km)"].sum().reset_index(name="Distance Totale")
         distance_over_time['date'] = distance_over_time['date'].dt.to_timestamp()
         chart_distance_time = alt.Chart(distance_over_time).mark_line(point=True).encode(
@@ -273,7 +278,6 @@ if menu_option == "Tableau de bord":
             st.altair_chart(chart_severity_over_time, use_container_width=True)
         
         st.markdown("---")
-        # Diagramme circulaire et carte (Pydeck)
         if 'classe' in df_defects.columns:
             defect_category_counts = df_defects['classe'].value_counts().reset_index()
             defect_category_counts.columns = ["Catégorie", "Nombre de Défauts"]
@@ -294,7 +298,6 @@ if menu_option == "Tableau de bord":
                 else:
                     return [255, 0, 0]
             df_defects['marker_color'] = df_defects['gravite'].apply(get_red_color)
-            
             layer = pdk.Layer(
                 "ScatterplotLayer",
                 data=df_defects,
@@ -317,37 +320,30 @@ if menu_option == "Tableau de bord":
             st.pydeck_chart(deck)
         
         st.markdown("---")
-        # Analyses complémentaires par Route et par Type de Défaut
         show_all = st.checkbox("Afficher tous les éléments", value=False)
         limit = None if show_all else 7
-        
         route_defect_counts = df_defects['routes'].value_counts().reset_index()
         route_defect_counts.columns = ["Route", "Nombre de Défauts"]
         display_routes = route_defect_counts if show_all else route_defect_counts.head(limit)
         chart_routes = alt.Chart(display_routes).mark_bar().encode(
-            x=alt.X("Route:N", sort='-y', title="Route",
-                    axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
+            x=alt.X("Route:N", sort='-y', title="Route", axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
             y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
             tooltip=["Route:N", "Nombre de Défauts:Q"],
             color=alt.Color("Route:N", scale=alt.Scale(scheme='tableau10'))
         ).properties(width=450, height=500, title="Nombre de Défauts par Route")
-        
         route_severity = df_defects.groupby('routes')['severite'].sum().reset_index().sort_values(by='severite', ascending=False)
         display_severity = route_severity if show_all else route_severity.head(limit)
         chart_severity = alt.Chart(display_severity).mark_bar().encode(
-            x=alt.X("routes:N", sort='-y', title="Route",
-                    axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
+            x=alt.X("routes:N", sort='-y', title="Route", axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
             y=alt.Y("severite:Q", title="Score de Sévérité Total"),
             tooltip=["routes:N", "severite:Q"],
             color=alt.Color("routes:N", scale=alt.Scale(scheme='tableau20'))
         ).properties(width=450, height=500, title="Score de Sévérité par Route")
-        
         col_route, col_severity = st.columns(2)
         with col_route:
             st.altair_chart(chart_routes, use_container_width=True)
         with col_severity:
             st.altair_chart(chart_severity, use_container_width=True)
-        
         st.markdown("### Analyse par Type de Défaut")
         defect_types = df_defects['classe'].unique()
         selected_defect = st.selectbox("Sélectionnez un type de défaut", defect_types)
@@ -357,8 +353,7 @@ if menu_option == "Tableau de bord":
             route_count_selected.columns = ["Route", "Nombre de Défauts"]
             display_selected = route_count_selected if show_all else route_count_selected.head(limit)
             chart_defect_type = alt.Chart(display_selected).mark_bar().encode(
-                x=alt.X("Route:N", sort='-y', title="Route",
-                        axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
+                x=alt.X("Route:N", sort='-y', title="Route", axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
                 y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
                 tooltip=["Route:N", "Nombre de Défauts:Q"],
                 color=alt.Color("Route:N", scale=alt.Scale(scheme='category20b'))
@@ -366,67 +361,24 @@ if menu_option == "Tableau de bord":
             st.altair_chart(chart_defect_type, use_container_width=True)
         else:
             st.write("Aucune donnée disponible pour ce type de défaut.")
-        
         st.markdown("---")
         st.markdown("### Analyse par Route")
         selected_route = st.selectbox("Sélectionnez une route", sorted(df_defects['routes'].unique()))
         inventory = df_defects[df_defects['routes'] == selected_route]['classe'].value_counts().reset_index()
         inventory.columns = ["Dégradation", "Nombre de Défauts"]
         chart_route_inventory = alt.Chart(inventory).mark_bar().encode(
-            x=alt.X("Dégradation:N", sort='-y', title="Dégradation",
-                    axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
+            x=alt.X("Dégradation:N", sort='-y', title="Dégradation", axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
             y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
             tooltip=["Dégradation:N", "Nombre de Défauts:Q"],
             color=alt.Color("Dégradation:N", scale=alt.Scale(scheme='category20b'))
         ).properties(width=900, height=500, title=f"Inventaire des Dégradations pour la Route : {selected_route}")
         st.altair_chart(chart_route_inventory, use_container_width=True)
-    
     st.markdown("</div>", unsafe_allow_html=True)
 
-elif menu_option == "Rapport":
-    st.title("Génération de Rapports")
-    report_type = st.selectbox("Sélectionnez le type de rapport", 
-                               ["Journalier", "Semaine", "Mensuel", "Annuel", "Général"])
-    
-    # Sélection de la période en fonction du type de rapport
-    if report_type == "Journalier":
-        selected_day = st.date_input("Sélectionnez le jour", value=date.today(), key="daily_date")
-        start_date = selected_day
-        end_date = selected_day
-    elif report_type == "Semaine":
-        selected_week = st.date_input("Sélectionnez une date de la semaine", value=date.today(), key="weekly_date")
-        start_date = selected_week - timedelta(days=selected_week.weekday())
-        end_date = start_date + timedelta(days=6)
-    elif report_type == "Mensuel":
-        selected_month = st.date_input("Sélectionnez un mois", value=date.today(), key="monthly_date")
-        start_date = selected_month.replace(day=1)
-        _, last_day = calendar.monthrange(selected_month.year, selected_month.month)
-        end_date = selected_month.replace(day=last_day)
-    elif report_type == "Annuel":
-        selected_year = st.number_input("Sélectionnez l'année", value=date.today().year, step=1, key="yearly_year")
-        start_date = date(int(selected_year), 1, 1)
-        end_date = date(int(selected_year), 12, 31)
-    else:
-        start_date = missions_df['date'].min().date()
-        end_date = missions_df['date'].max().date()
-    
-    st.sidebar.header("📝 Métadonnées pour le Rapport")
-    titre = st.sidebar.text_input("Titre du rapport", "Rapport de Suivi")
-    editor = st.sidebar.text_input("Éditeur", "Admin")
-    metadata = {"titre": titre, "editor": editor}
-    
-    if st.button("Générer le Rapport PDF"):
-        pdf_buffer = generate_report_pdf(report_type, missions_df, df_defects, metadata, start_date, end_date)
-        st.success("✅ Rapport généré avec succès!")
-        st.download_button("Télécharger le PDF", data=pdf_buffer, file_name=f"rapport_{report_type}.pdf", mime="application/pdf")
-
-#############################################
-# Section Missions
-#############################################
 elif menu_option == "Missions":
-    #########################################
-    # Fonctions et définitions communes pour Missions
-    #########################################
+    ######################################################################################
+    # Section Missions : Création, gestion, post-traitement, détection, suivi et export
+    ######################################################################################
     def extract_exif_info(image_file):
         image_file.seek(0)
         tags = exifread.process_file(image_file)
@@ -734,7 +686,7 @@ elif menu_option == "Missions":
     else:
         st.sidebar.info("Aucune mission disponible.")
 
-    # Calcul des global_markers à partir des marqueurs détectés
+    # Historique des missions
     global_markers = []
     for markers in st.session_state.get("markers_by_pair", {}).values():
         global_markers.extend(markers)
@@ -753,19 +705,19 @@ elif menu_option == "Missions":
             markers_for_mission = mission_markers_map.get(m["id"], [])
             m["Données Défauts"] = str(markers_for_mission)
             mission_history_display.append(m)
-        df_missions = pd.DataFrame(mission_history_display)
-        st.sidebar.table(df_missions)
+        df_missions_hist = pd.DataFrame(mission_history_display)
+        st.sidebar.table(df_missions_hist)
         
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-            df_missions.to_excel(writer, index=False)
+            df_missions_hist.to_excel(writer, index=False)
         excel_data = excel_buffer.getvalue()
         
         csv_buffer = io.StringIO()
-        df_missions.to_csv(csv_buffer, index=False, sep=";")
+        df_missions_hist.to_csv(csv_buffer, index=False, sep=";")
         csv_data = csv_buffer.getvalue().encode("utf-8")
         
-        txt_data = df_missions.to_string(index=False)
+        txt_data = df_missions_hist.to_string(index=False)
         txt_data = txt_data.encode("utf-8")
         
         zip_buffer = io.BytesIO()
@@ -1289,3 +1241,38 @@ elif menu_option == "Missions":
         else:
             st.info("Aucune mission sélectionnée.")
 
+elif menu_option == "Rapport":
+    st.title("Génération de Rapports")
+    report_type = st.selectbox("Sélectionnez le type de rapport", 
+                               ["Journalier", "Semaine", "Mensuel", "Annuel", "Général"])
+    
+    if report_type == "Journalier":
+        selected_day = st.date_input("Sélectionnez le jour", value=date.today(), key="daily_date")
+        start_date = selected_day
+        end_date = selected_day
+    elif report_type == "Semaine":
+        selected_week = st.date_input("Sélectionnez une date de la semaine", value=date.today(), key="weekly_date")
+        start_date = selected_week - timedelta(days=selected_week.weekday())
+        end_date = start_date + timedelta(days=6)
+    elif report_type == "Mensuel":
+        selected_month = st.date_input("Sélectionnez un mois", value=date.today(), key="monthly_date")
+        start_date = selected_month.replace(day=1)
+        _, last_day = calendar.monthrange(selected_month.year, selected_month.month)
+        end_date = selected_month.replace(day=last_day)
+    elif report_type == "Annuel":
+        selected_year = st.number_input("Sélectionnez l'année", value=date.today().year, step=1, key="yearly_year")
+        start_date = date(int(selected_year), 1, 1)
+        end_date = date(int(selected_year), 12, 31)
+    else:
+        start_date = missions_df['date'].min().date()
+        end_date = missions_df['date'].max().date()
+    
+    st.sidebar.header("📝 Métadonnées pour le Rapport")
+    titre = st.sidebar.text_input("Titre du rapport", "Rapport de Suivi")
+    editor = st.sidebar.text_input("Éditeur", "Admin")
+    metadata = {"titre": titre, "editor": editor}
+    
+    if st.button("Générer le Rapport PDF"):
+        pdf_buffer = generate_report_pdf(report_type, missions_df, df_defects, metadata, start_date, end_date)
+        st.success("✅ Rapport généré avec succès!")
+        st.download_button("Télécharger le PDF", data=pdf_buffer, file_name=f"rapport_{report_type}.pdf", mime="application/pdf")
