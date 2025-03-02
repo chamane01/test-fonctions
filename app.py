@@ -11,6 +11,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.lib import colors
 from io import BytesIO
 import calendar
+import matplotlib.pyplot as plt
 
 # Configuration générale de la page et CSS personnalisée
 st.set_page_config(page_title="Suivi des Dégradations sur Routes Ivoiriennes", layout="wide")
@@ -108,13 +109,52 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     y -= 20
     c.drawString(margin, y, f"Nombre de Défauts: {total_defects}")
     
-    # Zone réservée aux graphiques ou analyses complémentaires
+    # Zone réservée aux graphiques et analyses complémentaires
     y -= 40
     c.setFont("Helvetica-Bold", 14)
     c.drawString(margin, y, "Graphiques et Analyses")
     y -= 20
     c.setFont("Helvetica", 10)
-    c.drawString(margin, y, "Les graphiques détaillés sont consultables dans l'application.")
+    
+    # --- Création du premier graphique : Bar chart Missions vs Défauts ---
+    fig1, ax1 = plt.subplots(figsize=(4,3))
+    categories = ['Missions', 'Défauts']
+    values = [num_missions, total_defects]
+    bars = ax1.bar(categories, values, color=['#3498db', '#e74c3c'])
+    ax1.set_title("Comparaison Missions / Défauts", fontsize=10)
+    for bar in bars:
+        height = bar.get_height()
+        ax1.annotate(f'{int(height)}', xy=(bar.get_x() + bar.get_width() / 2, height),
+                     xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=8)
+    plt.tight_layout()
+    buf1 = BytesIO()
+    plt.savefig(buf1, format='PNG', dpi=100)
+    plt.close(fig1)
+    buf1.seek(0)
+    img_chart1 = ImageReader(buf1)
+    
+    # --- Création du second graphique : Répartition des Défauts par Catégorie ---
+    fig2, ax2 = plt.subplots(figsize=(4,3))
+    if not filtered_defects.empty and "classe" in filtered_defects.columns:
+        defect_counts = filtered_defects['classe'].value_counts()
+        ax2.pie(defect_counts, labels=defect_counts.index, autopct='%1.1f%%', startangle=90, colors=plt.cm.Pastel1.colors)
+        ax2.set_title("Répartition Défauts par Catégorie", fontsize=10)
+    else:
+        ax2.text(0.5, 0.5, "Pas de données", horizontalalignment='center', verticalalignment='center')
+    plt.tight_layout()
+    buf2 = BytesIO()
+    plt.savefig(buf2, format='PNG', dpi=100)
+    plt.close(fig2)
+    buf2.seek(0)
+    img_chart2 = ImageReader(buf2)
+    
+    # Positionnement des deux graphiques côte à côte
+    chart_width = (PAGE_WIDTH - 3 * margin) / 2
+    chart_height = 200  # Hauteur approximative des graphiques
+    # On fixe la position verticale pour les graphiques
+    y_chart = y - chart_height - 20
+    c.drawImage(img_chart1, margin, y_chart, width=chart_width, height=chart_height, preserveAspectRatio=True, mask='auto')
+    c.drawImage(img_chart2, margin + chart_width + margin, y_chart, width=chart_width, height=chart_height, preserveAspectRatio=True, mask='auto')
     
     # Pied de page avec la date de génération
     c.setFont("Helvetica", 8)
@@ -189,7 +229,6 @@ if menu_option == "Tableau de bord":
             tooltip=['date:T', 'Distance Totale:Q']
         ).properties(width=350, height=300, title="Évolution des Km")
         
-        # Mapping de la gravité pour le score
         gravity_sizes = {1: 5, 2: 7, 3: 9}
         if 'gravite' in df_defects.columns:
             df_defects['severite'] = df_defects['gravite'].map(gravity_sizes)
@@ -254,7 +293,6 @@ if menu_option == "Tableau de bord":
         
         st.markdown("---")
         # Section Complémentaire : Analyse par Route et par Type de Défaut
-        
         show_all = st.checkbox("Afficher tous les éléments", value=False)
         limit = None if show_all else 7
         
@@ -291,9 +329,9 @@ if menu_option == "Tableau de bord":
         st.markdown("### Analyse par Type de Défaut")
         defect_types = df_defects['classe'].unique()
         selected_defect = st.selectbox("Sélectionnez un type de défaut", defect_types)
-        filtered_defects = df_defects[df_defects['classe'] == selected_defect]
-        if not filtered_defects.empty:
-            route_count_selected = filtered_defects['routes'].value_counts().reset_index()
+        filtered_defects_type = df_defects[df_defects['classe'] == selected_defect]
+        if not filtered_defects_type.empty:
+            route_count_selected = filtered_defects_type['routes'].value_counts().reset_index()
             route_count_selected.columns = ["Route", "Nombre de Défauts"]
             display_selected = route_count_selected if show_all else route_count_selected.head(limit)
             chart_defect_type = alt.Chart(display_selected).mark_bar().encode(
