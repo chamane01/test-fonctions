@@ -76,13 +76,13 @@ menu_option = st.sidebar.radio("Menu", ["Tableau de bord", "Missions", "Rapport"
 #############################################
 # Données et fonctions communes pour Tableau de bord et Rapport
 #############################################
-# Chargement des données (suivi des missions) depuis le JSON
+# Chargement des données du suivi (JSON)
 with open("jeu_donnees_missions (1).json", "r", encoding="utf-8") as f:
     data = json.load(f)
 missions_df = pd.DataFrame(data)
 missions_df['date'] = pd.to_datetime(missions_df['date'])
 
-# Extraction des défauts
+# Extraction des défauts depuis le JSON
 defects = []
 for mission in data:
     for defect in mission.get("Données Défauts", []):
@@ -119,13 +119,11 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     total_distance = filtered_missions["distance(km)"].sum() if "distance(km)" in filtered_missions.columns else 0
     avg_distance = filtered_missions["distance(km)"].mean() if ("distance(km)" in filtered_missions.columns and num_missions > 0) else 0
 
-    if not df_defects.empty and 'date' in df_defects.columns:
-        filtered_defects = df_defects[(df_defects['date'].dt.date >= start_date) & (df_defects['date'].dt.date <= end_date)]
-    else:
-        filtered_defects = df_defects
+    # On utilise ici uniquement les défauts issus du JSON (pour le rapport)
+    filtered_defects = df_defects[(df_defects['date'].dt.date >= start_date) & (df_defects['date'].dt.date <= end_date)] if 'date' in df_defects.columns else df_defects
     total_defects = len(filtered_defects)
     
-    # Affichage des indicateurs principaux
+    # Affichage des indicateurs
     y = PAGE_HEIGHT - margin - 100
     c.setFont("Helvetica-Bold", 14)
     c.drawString(margin, y, "Métriques Principales")
@@ -154,8 +152,8 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     ax1.set_title("Comparaison Missions / Défauts", fontsize=10)
     for bar in bars:
         height = bar.get_height()
-        ax1.annotate(f'{int(height)}', xy=(bar.get_x() + bar.get_width() / 2, height),
-                     xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=8)
+        ax1.annotate(f'{int(height)}', xy=(bar.get_x() + bar.get_width()/2, height),
+                     xytext=(0,3), textcoords="offset points", ha='center', va='bottom', fontsize=8)
     plt.tight_layout()
     buf1 = BytesIO()
     plt.savefig(buf1, format='PNG', dpi=100)
@@ -179,7 +177,7 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     buf2.seek(0)
     img_chart2 = ImageReader(buf2)
     
-    # Positionnement des graphiques côte à côte
+    # Positionnement côte à côte des graphiques
     chart_width = (PAGE_WIDTH - 3 * margin) / 2
     chart_height = 200
     y_chart = y - chart_height - 20
@@ -213,22 +211,38 @@ if menu_option == "Tableau de bord":
         hist = st.session_state.get("mission_history", [])
         num_hist = len(hist)
         total_distance_hist = sum(float(m.get("distance(km)", 0)) for m in hist)
-        # Calcul des indicateurs combinés
+        # Indicateurs issus du JSON
         num_missions_json = len(missions_df)
         total_distance_json = missions_df["distance(km)"].sum()
+        # Combinaison des missions
         total_missions = num_missions_json + num_hist
         total_distance_all = total_distance_json + total_distance_hist
         avg_distance_all = total_distance_all / total_missions if total_missions > 0 else 0
-        total_defects = len(df_defects)
+        
+        # Fusion des défauts issus du JSON avec ceux des missions historiques
+        mission_ids = [m["id"] for m in st.session_state.get("mission_history", [])]
+        markers_list = []
+        for markers in st.session_state.get("markers_by_pair", {}).values():
+            for marker in markers:
+                if marker.get("mission") in mission_ids:
+                    markers_list.append(marker)
+        if markers_list:
+            df_markers = pd.DataFrame(markers_list)
+            if "date" in df_markers.columns:
+                df_markers['date'] = pd.to_datetime(df_markers['date'], errors='coerce')
+            df_defects_combined = pd.concat([df_defects, df_markers], ignore_index=True)
+        else:
+            df_defects_combined = df_defects.copy()
+        total_defects_all = len(df_defects_combined)
         
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Nombre de Missions", total_missions)
-        col2.metric("Nombre de Défauts", total_defects)
+        col2.metric("Nombre de Défauts", total_defects_all)
         col3.metric("Distance Totale (km)", f"{total_distance_all:.1f}")
         col4.metric("Distance Moyenne (km)", f"{avg_distance_all:.1f}")
         
         st.markdown("---")
-        # Graphiques interactifs (Altair, Plotly, Pydeck, etc.)
+        # Graphiques interactifs
         missions_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M")).size().reset_index(name="Missions")
         missions_over_time['date'] = missions_over_time['date'].dt.to_timestamp()
         chart_missions = alt.Chart(missions_over_time).mark_line(point=True).encode(
@@ -237,7 +251,7 @@ if menu_option == "Tableau de bord":
             tooltip=['date:T', 'Missions:Q']
         ).properties(width=350, height=300, title="Évolution des Missions")
         
-        defects_over_time = df_defects.groupby(df_defects['date'].dt.to_period("M")).size().reset_index(name="Défauts")
+        defects_over_time = df_defects_combined.groupby(df_defects_combined['date'].dt.to_period("M")).size().reset_index(name="Défauts")
         defects_over_time['date'] = defects_over_time['date'].dt.to_timestamp()
         chart_defects_time = alt.Chart(defects_over_time).mark_line(point=True).encode(
             x=alt.X('date:T', title='Date'),
@@ -261,9 +275,9 @@ if menu_option == "Tableau de bord":
         ).properties(width=350, height=300, title="Évolution des Km")
         
         gravity_sizes = {1: 5, 2: 7, 3: 9}
-        if 'gravite' in df_defects.columns:
-            df_defects['severite'] = df_defects['gravite'].map(gravity_sizes)
-        severity_over_time = df_defects.groupby(df_defects['date'].dt.to_period("M"))["severite"].mean().reset_index(name="Score Moyen")
+        if 'gravite' in df_defects_combined.columns:
+            df_defects_combined['severite'] = df_defects_combined['gravite'].map(gravity_sizes)
+        severity_over_time = df_defects_combined.groupby(df_defects_combined['date'].dt.to_period("M"))["severite"].mean().reset_index(name="Score Moyen")
         severity_over_time['date'] = severity_over_time['date'].dt.to_timestamp()
         chart_severity_over_time = alt.Chart(severity_over_time).mark_line(point=True).encode(
             x=alt.X('date:T', title='Date'),
@@ -278,8 +292,8 @@ if menu_option == "Tableau de bord":
             st.altair_chart(chart_severity_over_time, use_container_width=True)
         
         st.markdown("---")
-        if 'classe' in df_defects.columns:
-            defect_category_counts = df_defects['classe'].value_counts().reset_index()
+        if 'classe' in df_defects_combined.columns:
+            defect_category_counts = df_defects_combined['classe'].value_counts().reset_index()
             defect_category_counts.columns = ["Catégorie", "Nombre de Défauts"]
             fig_pie = px.pie(defect_category_counts, values='Nombre de Défauts', names='Catégorie',
                              title="Répartition Globale des Défauts par Catégorie",
@@ -287,7 +301,7 @@ if menu_option == "Tableau de bord":
             st.plotly_chart(fig_pie, use_container_width=True)
         
         st.markdown("---")
-        if 'lat' in df_defects.columns and 'long' in df_defects.columns:
+        if 'lat' in df_defects_combined.columns and 'long' in df_defects_combined.columns:
             def get_red_color(gravite):
                 if gravite == 1:
                     return [255, 200, 200]
@@ -297,18 +311,18 @@ if menu_option == "Tableau de bord":
                     return [255, 0, 0]
                 else:
                     return [255, 0, 0]
-            df_defects['marker_color'] = df_defects['gravite'].apply(get_red_color)
+            df_defects_combined['marker_color'] = df_defects_combined['gravite'].apply(get_red_color)
             layer = pdk.Layer(
                 "ScatterplotLayer",
-                data=df_defects,
+                data=df_defects_combined,
                 get_position='[long, lat]',
                 get_color="marker_color",
                 get_radius="severite * 50",
                 pickable=True,
             )
             view_state = pdk.ViewState(
-                latitude=df_defects['lat'].mean(),
-                longitude=df_defects['long'].mean(),
+                latitude=df_defects_combined['lat'].mean(),
+                longitude=df_defects_combined['long'].mean(),
                 zoom=8,
                 pitch=0,
             )
@@ -322,7 +336,7 @@ if menu_option == "Tableau de bord":
         st.markdown("---")
         show_all = st.checkbox("Afficher tous les éléments", value=False)
         limit = None if show_all else 7
-        route_defect_counts = df_defects['routes'].value_counts().reset_index()
+        route_defect_counts = df_defects_combined['routes'].value_counts().reset_index()
         route_defect_counts.columns = ["Route", "Nombre de Défauts"]
         display_routes = route_defect_counts if show_all else route_defect_counts.head(limit)
         chart_routes = alt.Chart(display_routes).mark_bar().encode(
@@ -331,7 +345,7 @@ if menu_option == "Tableau de bord":
             tooltip=["Route:N", "Nombre de Défauts:Q"],
             color=alt.Color("Route:N", scale=alt.Scale(scheme='tableau10'))
         ).properties(width=450, height=500, title="Nombre de Défauts par Route")
-        route_severity = df_defects.groupby('routes')['severite'].sum().reset_index().sort_values(by='severite', ascending=False)
+        route_severity = df_defects_combined.groupby('routes')['severite'].sum().reset_index().sort_values(by='severite', ascending=False)
         display_severity = route_severity if show_all else route_severity.head(limit)
         chart_severity = alt.Chart(display_severity).mark_bar().encode(
             x=alt.X("routes:N", sort='-y', title="Route", axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
@@ -339,15 +353,17 @@ if menu_option == "Tableau de bord":
             tooltip=["routes:N", "severite:Q"],
             color=alt.Color("routes:N", scale=alt.Scale(scheme='tableau20'))
         ).properties(width=450, height=500, title="Score de Sévérité par Route")
+        
         col_route, col_severity = st.columns(2)
         with col_route:
             st.altair_chart(chart_routes, use_container_width=True)
         with col_severity:
             st.altair_chart(chart_severity, use_container_width=True)
+        
         st.markdown("### Analyse par Type de Défaut")
-        defect_types = df_defects['classe'].unique()
+        defect_types = df_defects_combined['classe'].unique()
         selected_defect = st.selectbox("Sélectionnez un type de défaut", defect_types)
-        filtered_defects_type = df_defects[df_defects['classe'] == selected_defect]
+        filtered_defects_type = df_defects_combined[df_defects_combined['classe'] == selected_defect]
         if not filtered_defects_type.empty:
             route_count_selected = filtered_defects_type['routes'].value_counts().reset_index()
             route_count_selected.columns = ["Route", "Nombre de Défauts"]
@@ -361,10 +377,11 @@ if menu_option == "Tableau de bord":
             st.altair_chart(chart_defect_type, use_container_width=True)
         else:
             st.write("Aucune donnée disponible pour ce type de défaut.")
+        
         st.markdown("---")
         st.markdown("### Analyse par Route")
-        selected_route = st.selectbox("Sélectionnez une route", sorted(df_defects['routes'].unique()))
-        inventory = df_defects[df_defects['routes'] == selected_route]['classe'].value_counts().reset_index()
+        selected_route = st.selectbox("Sélectionnez une route", sorted(df_defects_combined['routes'].unique()))
+        inventory = df_defects_combined[df_defects_combined['routes'] == selected_route]['classe'].value_counts().reset_index()
         inventory.columns = ["Dégradation", "Nombre de Défauts"]
         chart_route_inventory = alt.Chart(inventory).mark_bar().encode(
             x=alt.X("Dégradation:N", sort='-y', title="Dégradation", axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
@@ -703,7 +720,7 @@ elif menu_option == "Missions":
         for mission in st.session_state.mission_history:
             m = mission.copy()
             markers_for_mission = mission_markers_map.get(m["id"], [])
-            m["Données Défauts"] = str(markers_for_mission)
+            m["Données Défauts"] = markers_for_mission  # Conserver la liste pour d'éventuels traitements
             mission_history_display.append(m)
         df_missions_hist = pd.DataFrame(mission_history_display)
         st.sidebar.table(df_missions_hist)
@@ -801,7 +818,7 @@ elif menu_option == "Missions":
             )
             st.info(f"Résolution spatiale appliquée : {pixel_size*100:.1f} cm/pixel")
             if st.button("Générer les images prétraitées"):
-                zip_buffer = io.BytesIO()
+                zip_buffer = BytesIO()
                 with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                     for i, info in enumerate(images_info):
                         if len(images_info) >= 2:
