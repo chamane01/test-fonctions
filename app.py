@@ -76,7 +76,7 @@ menu_option = st.sidebar.radio("Menu", ["Tableau de bord", "Missions", "Rapport"
 #############################################
 # Données et fonctions communes pour Tableau de bord et Rapport
 #############################################
-# Chargement des données du suivi (JSON)
+# Chargement des données du suivi depuis le fichier JSON
 with open("jeu_donnees_missions (1).json", "r", encoding="utf-8") as f:
     data = json.load(f)
 missions_df = pd.DataFrame(data)
@@ -113,13 +113,12 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     c.drawString(margin + 60, PAGE_HEIGHT - margin - 40, f"Type: {report_type} | Période: {start_date} au {end_date}")
     c.drawString(margin + 60, PAGE_HEIGHT - margin - 60, f"Éditeur: {metadata.get('editor', 'Inconnu')}")
     
-    # Calcul des indicateurs pour la période
+    # Calcul des indicateurs pour la période (uniquement issus du JSON)
     filtered_missions = missions_df[(missions_df['date'].dt.date >= start_date) & (missions_df['date'].dt.date <= end_date)]
     num_missions = len(filtered_missions)
     total_distance = filtered_missions["distance(km)"].sum() if "distance(km)" in filtered_missions.columns else 0
     avg_distance = filtered_missions["distance(km)"].mean() if ("distance(km)" in filtered_missions.columns and num_missions > 0) else 0
 
-    # On utilise ici uniquement les défauts issus du JSON (pour le rapport)
     filtered_defects = df_defects[(df_defects['date'].dt.date >= start_date) & (df_defects['date'].dt.date <= end_date)] if 'date' in df_defects.columns else df_defects
     total_defects = len(filtered_defects)
     
@@ -207,20 +206,29 @@ if menu_option == "Tableau de bord":
     if "distance(km)" not in missions_df.columns:
         st.error("Le fichier ne contient pas la colonne 'distance(km)'.")
     else:
-        # Récupération des missions historiques
-        hist = st.session_state.get("mission_history", [])
+        # Récupération des missions historiques (on s'assure qu'elles sont des dictionnaires)
+        hist = []
+        for m in st.session_state.get("mission_history", []):
+            if isinstance(m, str):
+                try:
+                    m = json.loads(m)
+                except Exception as e:
+                    st.error("Erreur lors de la conversion d'une mission historique : " + str(e))
+                    continue
+            hist.append(m)
         num_hist = len(hist)
         total_distance_hist = sum(float(m.get("distance(km)", 0)) for m in hist)
+        
         # Indicateurs issus du JSON
         num_missions_json = len(missions_df)
         total_distance_json = missions_df["distance(km)"].sum()
-        # Combinaison des missions
+        # Fusion des deux
         total_missions = num_missions_json + num_hist
         total_distance_all = total_distance_json + total_distance_hist
         avg_distance_all = total_distance_all / total_missions if total_missions > 0 else 0
         
-        # Fusion des défauts issus du JSON avec ceux des missions historiques
-        mission_ids = [m["id"] for m in st.session_state.get("mission_history", [])]
+        # Fusion des défauts issus du JSON avec ceux des missions historiques (marqueurs)
+        mission_ids = [m["id"] for m in hist]
         markers_list = []
         for markers in st.session_state.get("markers_by_pair", {}).values():
             for marker in markers:
@@ -718,9 +726,16 @@ elif menu_option == "Missions":
             mission_markers_map[mission_id].append(marker)
         mission_history_display = []
         for mission in st.session_state.mission_history:
+            # On s'assure que chaque mission historique est un dictionnaire
+            if isinstance(mission, str):
+                try:
+                    mission = json.loads(mission)
+                except Exception as e:
+                    st.error("Erreur de conversion de mission historique : " + str(e))
+                    continue
             m = mission.copy()
             markers_for_mission = mission_markers_map.get(m["id"], [])
-            m["Données Défauts"] = markers_for_mission  # Conserver la liste pour d'éventuels traitements
+            m["Données Défauts"] = markers_for_mission
             mission_history_display.append(m)
         df_missions_hist = pd.DataFrame(mission_history_display)
         st.sidebar.table(df_missions_hist)
