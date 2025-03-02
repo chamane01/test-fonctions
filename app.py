@@ -1,261 +1,298 @@
 import streamlit as st
-from datetime import date, datetime
-from io import BytesIO
+import pandas as pd
+import json
+import altair as alt
+import plotly.express as px
+import pydeck as pdk
+from datetime import datetime, date, timedelta
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph
 from reportlab.lib import colors
+from io import BytesIO
 
-# Configuration de la page
-st.set_page_config(page_title="Générateur Structuré", layout="centered")
-
-# Dimensions standard
-PAGE_WIDTH, PAGE_HEIGHT = A4
-SECTION_HEIGHT = PAGE_HEIGHT / 3
-COLUMN_WIDTH = PAGE_WIDTH / 2
-
-def create_element_controller():
-    with st.expander("➕ Ajouter un élément", expanded=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            elem_type = st.selectbox("Type", ["Image", "Texte"], key="elem_type")
-            size = st.selectbox("Taille", ["Grand", "Moyen", "Petit"], key="elem_size")
-        with col2:
-            vertical_pos = st.selectbox("Position verticale", ["Haut", "Milieu", "Bas"], key="v_pos")
-            horizontal_pos = st.selectbox(
-                "Position horizontale",
-                ["Gauche", "Droite", "Centre"] if size == "Petit" else ["Gauche", "Droite"],
-                key="h_pos"
-            )
-        
-        if elem_type == "Image":
-            content = st.file_uploader("Contenu (image)", type=["png", "jpg", "jpeg"], key="content_image")
-            image_title = st.text_input("Titre de l'image", max_chars=50, key="image_title")
-            description = st.text_input("Description brève (max 100 caractères)", max_chars=100, key="image_desc")
-        else:
-            content = st.text_area("Contenu", key="content_text")
-        
-        if st.button("Valider l'élément"):
-            if elem_type == "Image" and content is None:
-                st.error("Veuillez charger une image pour cet élément.")
-                return None
-            element_data = {
-                "type": elem_type,
-                "size": size,
-                "v_pos": vertical_pos,
-                "h_pos": horizontal_pos,
-                "content": content,
-            }
-            if elem_type == "Image":
-                element_data["image_title"] = image_title
-                element_data["description"] = description
-            return element_data
-    return None
-
-def calculate_dimensions(size):
-    dimensions = {
-        "Grand": (PAGE_WIDTH, SECTION_HEIGHT),
-        "Moyen": (COLUMN_WIDTH, SECTION_HEIGHT),
-        "Petit": (COLUMN_WIDTH / 1.5, SECTION_HEIGHT)
+# Configuration générale de la page
+st.set_page_config(page_title="Suivi des Dégradations sur Routes Ivoiriennes", layout="wide")
+st.markdown(
+    """
+    <style>
+    body {
+        background-color: #f4f4f9;
+        color: #333;
+        font-family: 'Helvetica', sans-serif;
     }
-    return dimensions.get(size, (PAGE_WIDTH, SECTION_HEIGHT))
+    .sidebar .sidebar-content {
+        background-color: #ffffff;
+    }
+    .stMetric {
+        background: linear-gradient(90deg, #8e44ad, #3498db);
+        color: #fff;
+        padding: 10px;
+        border-radius: 10px;
+    }
+    h1, h2, h3 {
+        color: #2c3e50;
+    }
+    .main-container {
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    </style>
+    """, unsafe_allow_html=True
+)
 
-def calculate_position(element):
-    vertical_offset = {"Haut": 0, "Milieu": SECTION_HEIGHT, "Bas": SECTION_HEIGHT*2}[element['v_pos']]
-    
-    if element['size'] == "Grand":
-        return (0, PAGE_HEIGHT - vertical_offset - SECTION_HEIGHT)
-    
-    if element['h_pos'] == "Gauche":
-        x = 0
-    elif element['h_pos'] == "Droite":
-        x = COLUMN_WIDTH
-    else:  # Centre
-        x = COLUMN_WIDTH / 2 - calculate_dimensions(element['size'])[0] / 2
-    
-    return (x, PAGE_HEIGHT - vertical_offset - SECTION_HEIGHT)
+# Menu latéral principal
+menu_option = st.sidebar.radio("Menu", ["Tableau de bord", "Rapport"])
 
-def draw_metadata(c, metadata):
-    margin = 40
-    x_left = margin
-    y_top = PAGE_HEIGHT - margin
-    line_height = 16
+# Chargement des données (commun aux deux sections)
+with open("jeu_donnees_missions (1).json", "r", encoding="utf-8") as f:
+    data = json.load(f)
+missions_df = pd.DataFrame(data)
+missions_df['date'] = pd.to_datetime(missions_df['date'])
 
-    logo_drawn = False
-    if metadata['logo']:
-        try:
-            img = ImageReader(metadata['logo'])
-            img_width, img_height = img.getSize()
-            aspect = img_height / img_width
-            desired_width = 40
-            desired_height = desired_width * aspect
-            
-            c.drawImage(img, x_left, y_top - desired_height, width=desired_width, height=desired_height, preserveAspectRatio=True, mask='auto')
-            logo_drawn = True
-        except Exception as e:
-            st.error(f"Erreur de chargement du logo: {str(e)}")
+# Extraction des défauts
+defects = []
+for mission in data:
+    for defect in mission.get("Données Défauts", []):
+        defects.append(defect)
+df_defects = pd.DataFrame(defects)
+if 'date' in df_defects.columns:
+    df_defects['date'] = pd.to_datetime(df_defects['date'])
+
+#############################################
+# Fonctions pour la génération automatique du rapport PDF
+#############################################
+def generate_report_pdf(report_type, missions_df, df_defects, metadata):
+    # Détermination de la période en fonction du type de rapport
+    if report_type == "Journalier":
+        start_date = date.today()
+        end_date = start_date
+    elif report_type == "Semaine":
+        today = date.today()
+        start_date = today - timedelta(days=today.weekday())
+        end_date = start_date + timedelta(days=6)
+    elif report_type == "Mensuel":
+        today = date.today()
+        start_date = today.replace(day=1)
+        next_month = today.replace(day=28) + timedelta(days=4)
+        end_date = next_month.replace(day=1) - timedelta(days=1)
+    elif report_type == "Annuel":
+        today = date.today()
+        start_date = today.replace(month=1, day=1)
+        end_date = today.replace(month=12, day=31)
+    else:  # Général
+        start_date = missions_df['date'].min().date()
+        end_date = missions_df['date'].max().date()
     
-    if logo_drawn:
-        x_title = x_left + 50
-        y_title = y_top - 20
+    # Filtrage des missions sur la période
+    filtered_missions = missions_df[(missions_df['date'].dt.date >= start_date) & (missions_df['date'].dt.date <= end_date)]
+    num_missions = len(filtered_missions)
+    total_distance = filtered_missions["distance(km)"].sum() if "distance(km)" in filtered_missions.columns else 0
+    avg_distance = filtered_missions["distance(km)"].mean() if ("distance(km)" in filtered_missions.columns and num_missions > 0) else 0
+
+    # Filtrage des défauts
+    if not df_defects.empty and 'date' in df_defects.columns:
+        filtered_defects = df_defects[(df_defects['date'].dt.date >= start_date) & (df_defects['date'].dt.date <= end_date)]
     else:
-        x_title = x_left
-        y_title = y_top - 20
+        filtered_defects = df_defects
+    total_defects = len(filtered_defects)
     
-    c.setFont("Helvetica-Bold", 20)
-    c.setFillColor(colors.black)
-    if metadata.get('titre'):
-        c.drawString(x_title, y_title, metadata['titre'])
-    
-    c.setFont("Helvetica", 14)
-    y_company = y_title - 25
-    if metadata.get('company'):
-        c.drawString(x_title, y_company, metadata['company'])
-    
-    y_line = y_company - 10
-    c.setStrokeColor(colors.darkgray)
-    c.setLineWidth(2)
-    c.line(x_left, y_line, x_left + 150, y_line)
-    c.setLineWidth(1)
-    
-    y_text = y_line - 20
-    infos = [
-        ("ID Rapport", metadata['report_id']),
-        ("Date", metadata['date'].strftime('%d/%m/%Y') if hasattr(metadata['date'], "strftime") else metadata['date']),
-        ("Heure", metadata['time'].strftime('%H:%M') if hasattr(metadata['time'], "strftime") else metadata['time']),
-        ("Éditeur", metadata['editor']),
-        ("Localisation", metadata['location'])
-    ]
-    
-    value_x_offset = x_left + 70
-    for label, value in infos:
-        c.setFont("Helvetica-Bold", 10)
-        c.setFillColor(colors.black)
-        c.drawString(x_left, y_text, label + ":")
-        c.setFont("Helvetica", 10)
-        c.drawString(value_x_offset, y_text, str(value))
-        y_text -= line_height
-
-def generate_pdf(elements, metadata):
+    # Création du PDF avec Reportlab
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
+    PAGE_WIDTH, PAGE_HEIGHT = A4
+    margin = 40
+
+    # En-tête avec le logo (même logo que pour le tableau de bord)
+    logo_path = "images (5).png"
+    try:
+        img = ImageReader(logo_path)
+        c.drawImage(img, margin, PAGE_HEIGHT - margin - 50, width=50, height=50, preserveAspectRatio=True, mask='auto')
+    except Exception as e:
+        st.error(f"Erreur de chargement du logo: {str(e)}")
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(margin + 60, PAGE_HEIGHT - margin - 20, metadata.get("titre", "Rapport de Suivi"))
+    c.setFont("Helvetica", 12)
+    c.drawString(margin + 60, PAGE_HEIGHT - margin - 40, f"Type: {report_type} | Période: {start_date} au {end_date}")
+    c.drawString(margin + 60, PAGE_HEIGHT - margin - 60, f"Éditeur: {metadata.get('editor', 'Inconnu')}")
     
-    c.setAuthor(metadata['editor'])
-    c.setTitle(metadata['report_id'])
+    # Affichage des indicateurs principaux
+    y = PAGE_HEIGHT - margin - 100
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(margin, y, "Métriques Principales")
+    y -= 20
+    c.setFont("Helvetica", 12)
+    c.drawString(margin, y, f"Nombre de Missions: {num_missions}")
+    y -= 20
+    c.drawString(margin, y, f"Distance Totale (km): {total_distance:.1f}")
+    y -= 20
+    c.drawString(margin, y, f"Distance Moyenne (km): {avg_distance:.1f}")
+    y -= 20
+    c.drawString(margin, y, f"Nombre de Défauts: {total_defects}")
     
-    for element in elements:
-        width, height = calculate_dimensions(element['size'])
-        x, y = calculate_position(element)
-        
-        if element['type'] == "Image":
-            if element["content"] is not None:
-                try:
-                    img = ImageReader(element["content"])
-                    # Réserver des marges pour le titre et la description
-                    top_margin = 20
-                    bottom_margin = 20
-                    # Réduire l'image pour laisser de l'espace en haut et en bas
-                    horizontal_scale = 0.9  # réduction horizontale à 90%
-                    image_actual_width = width * horizontal_scale
-                    image_actual_height = height - top_margin - bottom_margin
-                    # Centrer l'image dans l'aire allouée
-                    image_x = x + (width - image_actual_width) / 2
-                    image_y = y + bottom_margin
-                    c.drawImage(img, image_x, image_y, width=image_actual_width, height=image_actual_height, preserveAspectRatio=True, mask='auto')
-                    
-                    # Afficher le titre en haut, centré, dans la marge supérieure (en dehors de l'image) en majuscules
-                    if element.get("image_title"):
-                        c.setFont("Helvetica-Bold", 12)
-                        image_title = element["image_title"].upper()
-                        c.drawCentredString(x + width / 2, y + height - top_margin / 2, image_title)
-                    
-                    # Afficher la description en bas à droite, en gris, dans la marge inférieure (en dehors de l'image)
-                    if element.get("description"):
-                        c.setFont("Helvetica", 10)
-                        c.setFillColor(colors.gray)
-                        c.drawRightString(x + width - 10, y + bottom_margin / 2, element["description"][:100])
-                        c.setFillColor(colors.black)
-                except Exception as e:
-                    st.error(f"Erreur d'image: {str(e)}")
-            else:
-                st.error("Une image validée est introuvable.")
-        else:
-            text = element['content']
-            style = getSampleStyleSheet()["Normal"]
-            style.fontSize = 14 if element['size'] == "Grand" else 12 if element['size'] == "Moyen" else 10
-            p = Paragraph(text, style)
-            p.wrapOn(c, width, height)
-            p.drawOn(c, x, y)
+    # Zone réservée aux graphiques ou analyses complémentaires
+    y -= 40
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(margin, y, "Graphiques et Analyses")
+    y -= 20
+    c.setFont("Helvetica", 10)
+    c.drawString(margin, y, "Les graphiques détaillés sont consultables dans l'application.")
     
-    draw_metadata(c, metadata)
+    # Pied de page avec la date de génération
+    c.setFont("Helvetica", 8)
+    c.drawRightString(PAGE_WIDTH - margin, margin, f"Rapport généré le {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     
+    c.showPage()
     c.save()
     buffer.seek(0)
     return buffer
 
-def display_elements_preview(elements):
-    st.markdown("## Aperçu des éléments validés")
-    for idx, element in enumerate(elements, start=1):
-        st.markdown(f"**Élément {idx}**")
-        if element["type"] == "Image":
-            # Affichage réduit de l'image (largeur fixe)
-            st.image(element["content"], width=200)
-            if element.get("image_title"):
-                st.markdown(f"*Titre de l'image :* **{element['image_title'].upper()}**")
-            if element.get("description"):
-                st.markdown(
-                    f"<span style='color:gray'>*Description :* {element['description']}</span>",
-                    unsafe_allow_html=True
-                )
-        else:
-            st.markdown(f"**Texte :** {element['content']}")
+#############################################
+# Affichage selon le menu sélectionné
+#############################################
+
+if menu_option == "Tableau de bord":
+    # -------------------
+    # Partie Tableau de bord
+    # -------------------
+    st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
+    st.image("images (5).png", width=200)
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    st.markdown("<div class='main-container'>", unsafe_allow_html=True)
+    st.title("Tableau de bord de Suivi des Dégradations sur les Routes Ivoiriennes")
+    st.markdown("Parce que nous croyons que la route précède le développement")
+    
+    if "distance(km)" not in missions_df.columns:
+        st.error("Le fichier ne contient pas la colonne 'distance(km)'.")
+    else:
+        # Calcul des indicateurs
+        num_missions = len(missions_df)
+        total_distance = missions_df["distance(km)"].sum()
+        avg_distance = missions_df["distance(km)"].mean()
+        total_defects = len(df_defects)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Nombre de Missions", num_missions)
+        col2.metric("Nombre de Défauts", total_defects)
+        col3.metric("Distance Totale (km)", f"{total_distance:.1f}")
+        col4.metric("Distance Moyenne (km)", f"{avg_distance:.1f}")
+        
         st.markdown("---")
+        # Graphique : Évolution des Missions
+        missions_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M")).size().reset_index(name="Missions")
+        missions_over_time['date'] = missions_over_time['date'].dt.to_timestamp()
+        chart_missions = alt.Chart(missions_over_time).mark_line(point=True).encode(
+            x=alt.X('date:T', title='Date'),
+            y=alt.Y('Missions:Q', title='Nombre de Missions'),
+            tooltip=['date:T', 'Missions:Q']
+        ).properties(width=350, height=300, title="Évolution des Missions")
+        
+        # Graphique : Évolution des Défauts
+        defects_over_time = df_defects.groupby(df_defects['date'].dt.to_period("M")).size().reset_index(name="Défauts")
+        defects_over_time['date'] = defects_over_time['date'].dt.to_timestamp()
+        chart_defects_time = alt.Chart(defects_over_time).mark_line(point=True).encode(
+            x=alt.X('date:T', title='Date'),
+            y=alt.Y('Défauts:Q', title='Nombre de Défauts'),
+            tooltip=['date:T', 'Défauts:Q']
+        ).properties(width=350, height=300, title="Évolution des Défauts")
+        
+        col_time1, col_time2 = st.columns(2)
+        with col_time1:
+            st.altair_chart(chart_missions, use_container_width=True)
+        with col_time2:
+            st.altair_chart(chart_defects_time, use_container_width=True)
+        
+        st.markdown("---")
+        # Graphique : Distance Totale et Score de Sévérité
+        distance_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M"))["distance(km)"].sum().reset_index(name="Distance Totale")
+        distance_over_time['date'] = distance_over_time['date'].dt.to_timestamp()
+        chart_distance_time = alt.Chart(distance_over_time).mark_line(point=True).encode(
+            x=alt.X('date:T', title='Date'),
+            y=alt.Y('Distance Totale:Q', title='Km Totaux', scale=alt.Scale(domain=[0, distance_over_time["Distance Totale"].max()*1.2])),
+            tooltip=['date:T', 'Distance Totale:Q']
+        ).properties(width=350, height=300, title="Évolution des Km")
+        
+        gravity_sizes = {1: 5, 2: 7, 3: 9}
+        if 'gravite' in df_defects.columns:
+            df_defects['severite'] = df_defects['gravite'].map(gravity_sizes)
+        severity_over_time = df_defects.groupby(df_defects['date'].dt.to_period("M"))["severite"].mean().reset_index(name="Score Moyen")
+        severity_over_time['date'] = severity_over_time['date'].dt.to_timestamp()
+        chart_severity_over_time = alt.Chart(severity_over_time).mark_line(point=True).encode(
+            x=alt.X('date:T', title='Date'),
+            y=alt.Y('Score Moyen:Q', title='Score de Sévérité Moyen'),
+            tooltip=['date:T', 'Score Moyen:Q']
+        ).properties(width=350, height=300, title="Score de Sévérité Moyen")
+        
+        col_time3, col_time4 = st.columns(2)
+        with col_time3:
+            st.altair_chart(chart_distance_time, use_container_width=True)
+        with col_time4:
+            st.altair_chart(chart_severity_over_time, use_container_width=True)
+        
+        st.markdown("---")
+        # Diagramme circulaire pour la répartition des défauts par catégorie
+        if 'classe' in df_defects.columns:
+            defect_category_counts = df_defects['classe'].value_counts().reset_index()
+            defect_category_counts.columns = ["Catégorie", "Nombre de Défauts"]
+            fig_pie = px.pie(defect_category_counts, values='Nombre de Défauts', names='Catégorie',
+                             title="Répartition Globale des Défauts par Catégorie",
+                             color_discrete_sequence=px.colors.qualitative.Set3)
+            st.plotly_chart(fig_pie, use_container_width=True)
+        
+        st.markdown("---")
+        # Carte des défauts
+        if 'lat' in df_defects.columns and 'long' in df_defects.columns:
+            def get_red_color(gravite):
+                if gravite == 1:
+                    return [255, 200, 200]
+                elif gravite == 2:
+                    return [255, 100, 100]
+                elif gravite == 3:
+                    return [255, 0, 0]
+                else:
+                    return [255, 0, 0]
+            df_defects['marker_color'] = df_defects['gravite'].apply(get_red_color)
+            
+            layer = pdk.Layer(
+                "ScatterplotLayer",
+                data=df_defects,
+                get_position='[long, lat]',
+                get_color="marker_color",
+                get_radius="severite * 50",
+                pickable=True,
+            )
+            view_state = pdk.ViewState(
+                latitude=df_defects['lat'].mean(),
+                longitude=df_defects['long'].mean(),
+                zoom=8,
+                pitch=0,
+            )
+            deck = pdk.Deck(
+                layers=[layer],
+                initial_view_state=view_state,
+                tooltip={"text": "Route: {routes}\nClasse: {classe}\nGravité: {gravite}"}
+            )
+            st.pydeck_chart(deck)
+        
+        st.markdown("---")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-def main():
-    st.title("📐 Conception de Rapport Structuré")
+elif menu_option == "Rapport":
+    # -------------------
+    # Partie Génération de Rapport PDF
+    # -------------------
+    st.title("Génération de Rapports")
+    report_type = st.selectbox("Sélectionnez le type de rapport", 
+                               ["Journalier", "Semaine", "Mensuel", "Annuel", "Général"])
     
-    with st.sidebar:
-        st.header("📝 Métadonnées")
-        titre = st.text_input("Titre principal")
-        report_id = st.text_input("ID du rapport")
-        report_date = st.date_input("Date du rapport", date.today())
-        report_time = st.time_input("Heure du rapport", datetime.now().time())
-        editor = st.text_input("Éditeur")
-        location = st.text_input("Localisation")
-        company = st.text_input("Société")
-        logo = st.file_uploader("Logo", type=["png", "jpg", "jpeg"])
+    # Saisie des métadonnées (par exemple, titre et éditeur)
+    st.sidebar.header("📝 Métadonnées pour le Rapport")
+    titre = st.sidebar.text_input("Titre du rapport", "Rapport de Suivi")
+    editor = st.sidebar.text_input("Éditeur", "Admin")
+    metadata = {"titre": titre, "editor": editor}
     
-    metadata = {
-        'titre': titre,
-        'report_id': report_id,
-        'date': report_date,
-        'time': report_time,
-        'editor': editor,
-        'location': location,
-        'company': company,
-        'logo': logo
-    }
-    
-    if "elements" not in st.session_state:
-        st.session_state["elements"] = []
-    elements = st.session_state["elements"]
-    
-    new_element = create_element_controller()
-    if new_element:
-        elements.append(new_element)
-        st.session_state["elements"] = elements
-        st.success("Élément validé avec succès !")
-    
-    if elements:
-        display_elements_preview(elements)
-    
-    if elements:
-        if st.button("Générer le PDF"):
-            pdf = generate_pdf(elements, metadata)
-            st.success("✅ Rapport généré avec succès!")
-            st.download_button("Télécharger le PDF", pdf, "rapport_structuré.pdf", "application/pdf")
-
-if __name__ == "__main__":
-    main()
+    if st.button("Générer le Rapport PDF"):
+        pdf_buffer = generate_report_pdf(report_type, missions_df, df_defects, metadata)
+        st.success("✅ Rapport généré avec succès!")
+        st.download_button("Télécharger le PDF", data=pdf_buffer, file_name=f"rapport_{report_type}.pdf", mime="application/pdf")
