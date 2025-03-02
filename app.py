@@ -12,7 +12,7 @@ from reportlab.lib import colors
 from io import BytesIO
 import calendar
 
-# Configuration générale de la page
+# Configuration générale de la page et CSS personnalisée
 st.set_page_config(page_title="Suivi des Dégradations sur Routes Ivoiriennes", layout="wide")
 st.markdown(
     """
@@ -94,7 +94,7 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
         filtered_defects = df_defects
     total_defects = len(filtered_defects)
     
-    # Affichage des indicateurs principaux
+    # Affichage des indicateurs principaux dans le PDF
     y = PAGE_HEIGHT - margin - 100
     c.setFont("Helvetica-Bold", 14)
     c.drawString(margin, y, "Métriques Principales")
@@ -143,6 +143,7 @@ if menu_option == "Tableau de bord":
     if "distance(km)" not in missions_df.columns:
         st.error("Le fichier ne contient pas la colonne 'distance(km)'.")
     else:
+        # Indicateurs principaux
         num_missions = len(missions_df)
         total_distance = missions_df["distance(km)"].sum()
         avg_distance = missions_df["distance(km)"].mean()
@@ -155,7 +156,7 @@ if menu_option == "Tableau de bord":
         col4.metric("Distance Moyenne (km)", f"{avg_distance:.1f}")
         
         st.markdown("---")
-        # Graphiques d'évolution
+        # Graphiques d'évolution dans le temps
         missions_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M")).size().reset_index(name="Missions")
         missions_over_time['date'] = missions_over_time['date'].dt.to_timestamp()
         chart_missions = alt.Chart(missions_over_time).mark_line(point=True).encode(
@@ -179,7 +180,7 @@ if menu_option == "Tableau de bord":
             st.altair_chart(chart_defects_time, use_container_width=True)
         
         st.markdown("---")
-        # Graphique Distance Totale et Score de Sévérité
+        # Graphiques Distance Totale et Score de Sévérité Moyen
         distance_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M"))["distance(km)"].sum().reset_index(name="Distance Totale")
         distance_over_time['date'] = distance_over_time['date'].dt.to_timestamp()
         chart_distance_time = alt.Chart(distance_over_time).mark_line(point=True).encode(
@@ -188,6 +189,7 @@ if menu_option == "Tableau de bord":
             tooltip=['date:T', 'Distance Totale:Q']
         ).properties(width=350, height=300, title="Évolution des Km")
         
+        # Mapping de la gravité pour le score
         gravity_sizes = {1: 5, 2: 7, 3: 9}
         if 'gravite' in df_defects.columns:
             df_defects['severite'] = df_defects['gravite'].map(gravity_sizes)
@@ -206,7 +208,7 @@ if menu_option == "Tableau de bord":
             st.altair_chart(chart_severity_over_time, use_container_width=True)
         
         st.markdown("---")
-        # Diagramme circulaire pour la répartition des défauts par catégorie
+        # Diagramme circulaire : Répartition Globale des Défauts par Catégorie
         if 'classe' in df_defects.columns:
             defect_category_counts = df_defects['classe'].value_counts().reset_index()
             defect_category_counts.columns = ["Catégorie", "Nombre de Défauts"]
@@ -216,7 +218,7 @@ if menu_option == "Tableau de bord":
             st.plotly_chart(fig_pie, use_container_width=True)
         
         st.markdown("---")
-        # Carte des défauts
+        # Carte des Défauts (Pydeck)
         if 'lat' in df_defects.columns and 'long' in df_defects.columns:
             def get_red_color(gravite):
                 if gravite == 1:
@@ -251,7 +253,76 @@ if menu_option == "Tableau de bord":
             st.pydeck_chart(deck)
         
         st.markdown("---")
-        st.markdown("</div>", unsafe_allow_html=True)
+        # Section Complémentaire : Analyse par Route et par Type de Défaut
+        
+        show_all = st.checkbox("Afficher tous les éléments", value=False)
+        limit = None if show_all else 7
+        
+        # Graphique 5 : Nombre de Défauts par Route
+        route_defect_counts = df_defects['routes'].value_counts().reset_index()
+        route_defect_counts.columns = ["Route", "Nombre de Défauts"]
+        display_routes = route_defect_counts if show_all else route_defect_counts.head(limit)
+        chart_routes = alt.Chart(display_routes).mark_bar().encode(
+            x=alt.X("Route:N", sort='-y', title="Route",
+                    axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
+            y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
+            tooltip=["Route:N", "Nombre de Défauts:Q"],
+            color=alt.Color("Route:N", scale=alt.Scale(scheme='tableau10'))
+        ).properties(width=450, height=500, title="Nombre de Défauts par Route")
+        
+        # Graphique 6 : Score de Sévérité Total par Route
+        route_severity = df_defects.groupby('routes')['severite'].sum().reset_index().sort_values(by='severite', ascending=False)
+        display_severity = route_severity if show_all else route_severity.head(limit)
+        chart_severity = alt.Chart(display_severity).mark_bar().encode(
+            x=alt.X("routes:N", sort='-y', title="Route",
+                    axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
+            y=alt.Y("severite:Q", title="Score de Sévérité Total"),
+            tooltip=["routes:N", "severite:Q"],
+            color=alt.Color("routes:N", scale=alt.Scale(scheme='tableau20'))
+        ).properties(width=450, height=500, title="Score de Sévérité par Route")
+        
+        col_route, col_severity = st.columns(2)
+        with col_route:
+            st.altair_chart(chart_routes, use_container_width=True)
+        with col_severity:
+            st.altair_chart(chart_severity, use_container_width=True)
+        
+        # Graphique 7 : Analyse interactive par Type de Défaut
+        st.markdown("### Analyse par Type de Défaut")
+        defect_types = df_defects['classe'].unique()
+        selected_defect = st.selectbox("Sélectionnez un type de défaut", defect_types)
+        filtered_defects = df_defects[df_defects['classe'] == selected_defect]
+        if not filtered_defects.empty:
+            route_count_selected = filtered_defects['routes'].value_counts().reset_index()
+            route_count_selected.columns = ["Route", "Nombre de Défauts"]
+            display_selected = route_count_selected if show_all else route_count_selected.head(limit)
+            chart_defect_type = alt.Chart(display_selected).mark_bar().encode(
+                x=alt.X("Route:N", sort='-y', title="Route",
+                        axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
+                y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
+                tooltip=["Route:N", "Nombre de Défauts:Q"],
+                color=alt.Color("Route:N", scale=alt.Scale(scheme='category20b'))
+            ).properties(width=900, height=500, title=f"Répartition des Défauts pour le Type : {selected_defect} (Top 7 par défaut)")
+            st.altair_chart(chart_defect_type, use_container_width=True)
+        else:
+            st.write("Aucune donnée disponible pour ce type de défaut.")
+        
+        st.markdown("---")
+        # Section Analyse par Route
+        st.markdown("### Analyse par Route")
+        selected_route = st.selectbox("Sélectionnez une route", sorted(df_defects['routes'].unique()))
+        inventory = df_defects[df_defects['routes'] == selected_route]['classe'].value_counts().reset_index()
+        inventory.columns = ["Dégradation", "Nombre de Défauts"]
+        chart_route_inventory = alt.Chart(inventory).mark_bar().encode(
+            x=alt.X("Dégradation:N", sort='-y', title="Dégradation",
+                    axis=alt.Axis(labelAngle=45, labelOverlap=False, labelLimit=150)),
+            y=alt.Y("Nombre de Défauts:Q", title="Nombre de Défauts"),
+            tooltip=["Dégradation:N", "Nombre de Défauts:Q"],
+            color=alt.Color("Dégradation:N", scale=alt.Scale(scheme='category20b'))
+        ).properties(width=900, height=500, title=f"Inventaire des Dégradations pour la Route : {selected_route}")
+        st.altair_chart(chart_route_inventory, use_container_width=True)
+    
+    st.markdown("</div>", unsafe_allow_html=True)
 
 elif menu_option == "Rapport":
     # -------------------
@@ -261,7 +332,7 @@ elif menu_option == "Rapport":
     report_type = st.selectbox("Sélectionnez le type de rapport", 
                                ["Journalier", "Semaine", "Mensuel", "Annuel", "Général"])
     
-    # En fonction du type de rapport, proposer un sélecteur pour choisir la période désirée
+    # Sélecteur de période selon le type de rapport
     if report_type == "Journalier":
         selected_day = st.date_input("Sélectionnez le jour", value=date.today(), key="daily_date")
         start_date = selected_day
@@ -280,11 +351,10 @@ elif menu_option == "Rapport":
         start_date = date(int(selected_year), 1, 1)
         end_date = date(int(selected_year), 12, 31)
     else:
-        # Pour le rapport général, on prend l'intégralité de la période
         start_date = missions_df['date'].min().date()
         end_date = missions_df['date'].max().date()
     
-    # Saisie des métadonnées (par exemple, titre et éditeur) dans la sidebar
+    # Métadonnées pour le rapport dans la sidebar
     st.sidebar.header("📝 Métadonnées pour le Rapport")
     titre = st.sidebar.text_input("Titre du rapport", "Rapport de Suivi")
     editor = st.sidebar.text_input("Éditeur", "Admin")
