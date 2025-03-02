@@ -10,6 +10,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
 from reportlab.lib import colors
 from io import BytesIO
+import calendar
 
 # Configuration générale de la page
 st.set_page_config(page_title="Suivi des Dégradations sur Routes Ivoiriennes", layout="wide")
@@ -60,44 +61,9 @@ if 'date' in df_defects.columns:
     df_defects['date'] = pd.to_datetime(df_defects['date'])
 
 #############################################
-# Fonctions pour la génération automatique du rapport PDF
+# Fonction de génération du PDF pour le rapport
 #############################################
-def generate_report_pdf(report_type, missions_df, df_defects, metadata):
-    # Détermination de la période en fonction du type de rapport
-    if report_type == "Journalier":
-        start_date = date.today()
-        end_date = start_date
-    elif report_type == "Semaine":
-        today = date.today()
-        start_date = today - timedelta(days=today.weekday())
-        end_date = start_date + timedelta(days=6)
-    elif report_type == "Mensuel":
-        today = date.today()
-        start_date = today.replace(day=1)
-        next_month = today.replace(day=28) + timedelta(days=4)
-        end_date = next_month.replace(day=1) - timedelta(days=1)
-    elif report_type == "Annuel":
-        today = date.today()
-        start_date = today.replace(month=1, day=1)
-        end_date = today.replace(month=12, day=31)
-    else:  # Général
-        start_date = missions_df['date'].min().date()
-        end_date = missions_df['date'].max().date()
-    
-    # Filtrage des missions sur la période
-    filtered_missions = missions_df[(missions_df['date'].dt.date >= start_date) & (missions_df['date'].dt.date <= end_date)]
-    num_missions = len(filtered_missions)
-    total_distance = filtered_missions["distance(km)"].sum() if "distance(km)" in filtered_missions.columns else 0
-    avg_distance = filtered_missions["distance(km)"].mean() if ("distance(km)" in filtered_missions.columns and num_missions > 0) else 0
-
-    # Filtrage des défauts
-    if not df_defects.empty and 'date' in df_defects.columns:
-        filtered_defects = df_defects[(df_defects['date'].dt.date >= start_date) & (df_defects['date'].dt.date <= end_date)]
-    else:
-        filtered_defects = df_defects
-    total_defects = len(filtered_defects)
-    
-    # Création du PDF avec Reportlab
+def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_date, end_date):
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     PAGE_WIDTH, PAGE_HEIGHT = A4
@@ -115,6 +81,18 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata):
     c.setFont("Helvetica", 12)
     c.drawString(margin + 60, PAGE_HEIGHT - margin - 40, f"Type: {report_type} | Période: {start_date} au {end_date}")
     c.drawString(margin + 60, PAGE_HEIGHT - margin - 60, f"Éditeur: {metadata.get('editor', 'Inconnu')}")
+    
+    # Calcul des indicateurs pour la période sélectionnée
+    filtered_missions = missions_df[(missions_df['date'].dt.date >= start_date) & (missions_df['date'].dt.date <= end_date)]
+    num_missions = len(filtered_missions)
+    total_distance = filtered_missions["distance(km)"].sum() if "distance(km)" in filtered_missions.columns else 0
+    avg_distance = filtered_missions["distance(km)"].mean() if ("distance(km)" in filtered_missions.columns and num_missions > 0) else 0
+
+    if not df_defects.empty and 'date' in df_defects.columns:
+        filtered_defects = df_defects[(df_defects['date'].dt.date >= start_date) & (df_defects['date'].dt.date <= end_date)]
+    else:
+        filtered_defects = df_defects
+    total_defects = len(filtered_defects)
     
     # Affichage des indicateurs principaux
     y = PAGE_HEIGHT - margin - 100
@@ -150,7 +128,6 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata):
 #############################################
 # Affichage selon le menu sélectionné
 #############################################
-
 if menu_option == "Tableau de bord":
     # -------------------
     # Partie Tableau de bord
@@ -166,7 +143,6 @@ if menu_option == "Tableau de bord":
     if "distance(km)" not in missions_df.columns:
         st.error("Le fichier ne contient pas la colonne 'distance(km)'.")
     else:
-        # Calcul des indicateurs
         num_missions = len(missions_df)
         total_distance = missions_df["distance(km)"].sum()
         avg_distance = missions_df["distance(km)"].mean()
@@ -179,7 +155,7 @@ if menu_option == "Tableau de bord":
         col4.metric("Distance Moyenne (km)", f"{avg_distance:.1f}")
         
         st.markdown("---")
-        # Graphique : Évolution des Missions
+        # Graphiques d'évolution
         missions_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M")).size().reset_index(name="Missions")
         missions_over_time['date'] = missions_over_time['date'].dt.to_timestamp()
         chart_missions = alt.Chart(missions_over_time).mark_line(point=True).encode(
@@ -188,7 +164,6 @@ if menu_option == "Tableau de bord":
             tooltip=['date:T', 'Missions:Q']
         ).properties(width=350, height=300, title="Évolution des Missions")
         
-        # Graphique : Évolution des Défauts
         defects_over_time = df_defects.groupby(df_defects['date'].dt.to_period("M")).size().reset_index(name="Défauts")
         defects_over_time['date'] = defects_over_time['date'].dt.to_timestamp()
         chart_defects_time = alt.Chart(defects_over_time).mark_line(point=True).encode(
@@ -204,7 +179,7 @@ if menu_option == "Tableau de bord":
             st.altair_chart(chart_defects_time, use_container_width=True)
         
         st.markdown("---")
-        # Graphique : Distance Totale et Score de Sévérité
+        # Graphique Distance Totale et Score de Sévérité
         distance_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M"))["distance(km)"].sum().reset_index(name="Distance Totale")
         distance_over_time['date'] = distance_over_time['date'].dt.to_timestamp()
         chart_distance_time = alt.Chart(distance_over_time).mark_line(point=True).encode(
@@ -280,19 +255,42 @@ if menu_option == "Tableau de bord":
 
 elif menu_option == "Rapport":
     # -------------------
-    # Partie Génération de Rapport PDF
+    # Partie Génération de Rapport PDF avec choix de la période
     # -------------------
     st.title("Génération de Rapports")
     report_type = st.selectbox("Sélectionnez le type de rapport", 
                                ["Journalier", "Semaine", "Mensuel", "Annuel", "Général"])
     
-    # Saisie des métadonnées (par exemple, titre et éditeur)
+    # En fonction du type de rapport, proposer un sélecteur pour choisir la période désirée
+    if report_type == "Journalier":
+        selected_day = st.date_input("Sélectionnez le jour", value=date.today(), key="daily_date")
+        start_date = selected_day
+        end_date = selected_day
+    elif report_type == "Semaine":
+        selected_week = st.date_input("Sélectionnez une date de la semaine", value=date.today(), key="weekly_date")
+        start_date = selected_week - timedelta(days=selected_week.weekday())
+        end_date = start_date + timedelta(days=6)
+    elif report_type == "Mensuel":
+        selected_month = st.date_input("Sélectionnez un mois", value=date.today(), key="monthly_date")
+        start_date = selected_month.replace(day=1)
+        _, last_day = calendar.monthrange(selected_month.year, selected_month.month)
+        end_date = selected_month.replace(day=last_day)
+    elif report_type == "Annuel":
+        selected_year = st.number_input("Sélectionnez l'année", value=date.today().year, step=1, key="yearly_year")
+        start_date = date(int(selected_year), 1, 1)
+        end_date = date(int(selected_year), 12, 31)
+    else:
+        # Pour le rapport général, on prend l'intégralité de la période
+        start_date = missions_df['date'].min().date()
+        end_date = missions_df['date'].max().date()
+    
+    # Saisie des métadonnées (par exemple, titre et éditeur) dans la sidebar
     st.sidebar.header("📝 Métadonnées pour le Rapport")
     titre = st.sidebar.text_input("Titre du rapport", "Rapport de Suivi")
     editor = st.sidebar.text_input("Éditeur", "Admin")
     metadata = {"titre": titre, "editor": editor}
     
     if st.button("Générer le Rapport PDF"):
-        pdf_buffer = generate_report_pdf(report_type, missions_df, df_defects, metadata)
+        pdf_buffer = generate_report_pdf(report_type, missions_df, df_defects, metadata, start_date, end_date)
         st.success("✅ Rapport généré avec succès!")
         st.download_button("Télécharger le PDF", data=pdf_buffer, file_name=f"rapport_{report_type}.pdf", mime="application/pdf")
