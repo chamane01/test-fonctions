@@ -1,11 +1,81 @@
 import streamlit as st
 
-# Configuration de la page
-st.set_page_config(
-    page_title="Ubuntu Détect",
-    page_icon="🔍",
-    layout="wide"
-)
+# Configuration CSS personnalisée
+st.markdown("""
+    <style>
+        :root {
+            --primary: #2C3E50;
+            --secondary: #3498DB;
+            --accent: #2980B9;
+        }
+        
+        .profile-frame {
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            padding: 4px;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            transition: all 0.3s ease;
+            margin: 0 auto;
+        }
+        
+        .profile-frame:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+        }
+        
+        .sidebar .sidebar-content {
+            background: linear-gradient(180deg, var(--primary) 60%, var(--secondary) 100%);
+            color: white;
+            padding: 1rem;
+        }
+        
+        .stButton>button {
+            background: var(--secondary) !important;
+            color: white !important;
+            border-radius: 8px;
+            padding: 8px 24px;
+            transition: all 0.3s ease;
+            border: none !important;
+        }
+        
+        .stButton>button:hover {
+            background: var(--accent) !important;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        
+        .stTextInput>div>div>input {
+            border-radius: 8px !important;
+            padding: 12px !important;
+            border: 1px solid #ddd !important;
+        }
+        
+        .metric-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .dataframe {
+            border-radius: 12px !important;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important;
+        }
+        
+        .login-container {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 3rem;
+            border-radius: 20px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # Base de données virtuelle
 users_db = {
@@ -18,58 +88,14 @@ users_db = {
 
 DEFAULT_PROFILE = "profil.jpg"
 
-# Styles CSS personnalisés
-st.markdown("""
-    <style>
-    .main {
-        background: url('https://i.pinimg.com/originals/7d/9f/53/7d9f5307f0b74e9c5e8b5a7c5e5e8b5a.jpg');
-        background-size: cover;
-    }
-    
-    .login-container {
-        background: rgba(255, 255, 255, 0.9);
-        padding: 3rem;
-        border-radius: 1rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    
-    .stButton>button {
-        width: 100%;
-        background: #4CAF50 !important;
-        color: white !important;
-    }
-    
-    .sidebar .profile-box {
-        padding: 1.5rem;
-        background: #f0f2f6;
-        border-radius: 15px;
-        margin-bottom: 2rem;
-        text-align: center;
-    }
-    
-    .metric-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        margin: 1rem 0;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# Gestion de session
-def init_session():
-    session_defaults = {
+# Initialisation session
+if "logged_in" not in st.session_state:
+    st.session_state.update({
         "logged_in": False,
         "current_user": None,
         "role": None,
         "page_option": None
-    }
-    for key, value in session_defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-
-init_session()
+    })
 
 def login(username, password):
     if user := users_db.get(username):
@@ -88,85 +114,153 @@ def logout():
 
 # Page de connexion
 if not st.session_state.logged_in:
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
+    col = st.columns([1, 3, 1])
+    with col[1]:
         with st.container():
             st.markdown('<div class="login-container">', unsafe_allow_html=True)
-            st.title("🔍 Ubuntu Détect")
-            st.image("ubuntu_logo.png", width=200)
-            st.write("""
-                **L'Esprit d'Humanité dans la Détection des Défauts**  
-                *Plateforme collaborative de gestion des inspections techniques*
-            """)
+            st.image("images (5).png", width=300)
+            st.markdown("<h1 style='text-align: center; color: var(--primary); margin-bottom: 0.5rem;'>Ubuntu Détect</h1>", 
+                       unsafe_allow_html=True)
+            st.markdown("<div style='text-align: center; color: var(--secondary); font-size: 1.2rem; margin-bottom: 2rem;'>L'Esprit d'Humanité dans la Détection des Défauts</div>", 
+                       unsafe_allow_html=True)
             
-            with st.form("Login"):
-                username = st.text_input("Nom d'utilisateur")
-                password = st.text_input("Mot de passe", type="password")
-                if st.form_submit_button("Se connecter"):
-                    if not login(username, password):
-                        st.error("Identifiants incorrects")
+            with st.form("login_form"):
+                username = st.text_input("Nom d'utilisateur", key="user_input")
+                password = st.text_input("Mot de passe", type="password", key="pass_input")
+                if st.form_submit_button("Se connecter 🔑"):
+                    if login(username, password):
+                        st.success("Connexion réussie! ✅")
+                    else:
+                        st.error("Identifiants incorrects ❌")
             st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 # Interface principale
-user_data = users_db.get(st.session_state.current_user, {})
-profile_image = user_data.get("profile", DEFAULT_PROFILE)
-
-# Sidebar
-with st.sidebar:
-    st.markdown('<div class="profile-box">', unsafe_allow_html=True)
-    st.image(profile_image, width=100)
-    st.subheader(st.session_state.current_user)
-    st.caption(f"Rôle: {st.session_state.role.capitalize()}")
-    if st.button("🚪 Déconnexion"):
-        logout()
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    menu_options = ["Tableau de bord", "Missions", "Rapports"] if st.session_state.role == "directions" else ["Missions", "Rapports"]
-    st.session_state.page_option = st.radio("Navigation", menu_options)
-
-# Contenu principal
-st.title(f"🔍 {st.session_state.page_option}")
-
-if st.session_state.page_option == "Tableau de bord":
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown('<div class="metric-card">📊 **Statistiques**<br>15 Nouvelles missions<br>32% Progrès global</div>', unsafe_allow_html=True)
-    with col2:
-        st.markdown('<div class="metric-card">✅ **Réalisations**<br>98% Taux de résolution<br>4.8★ Satisfaction</div>', unsafe_allow_html=True)
-    with col3:
-        st.markdown('<div class="metric-card">📅 **Calendrier**<br>3 Échéances<br>2 Réunions</div>', unsafe_allow_html=True)
+else:
+    user_data = users_db.get(st.session_state.current_user, {})
+    profile_image = user_data.get("profile", DEFAULT_PROFILE)
     
-    with st.expander("📈 Graphiques analytiques"):
-        st.line_chart({"Données": [1, 3, 2, 4, 5, 2, 4]})
+    # Sidebar stylisée
+    with st.sidebar:
+        st.markdown(f"""
+            <div style='text-align: center; padding: 20px 0;'>
+                <div class="profile-frame">
+                    <img src="{profile_image}" 
+                         style="width:100px; height:100px; 
+                                border-radius:50%; 
+                                object-fit:cover;
+                                border: 2px solid white;"/>
+                </div>
+                <h3 style='margin: 15px 0; color: white;'>{st.session_state.current_user}</h3>
+                <div style='background: var(--accent); 
+                            padding: 6px; 
+                            border-radius: 8px;
+                            margin-bottom: 30px;
+                            color: white;'>
+                    {st.session_state.role.capitalize()}
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button("Déconnexion 🚪", use_container_width=True):
+            logout()
+        
+        menu_options = ["Tableau de bord", "Missions", "Rapports"] if st.session_state.role == "directions" else ["Missions", "Rapports"]
+        st.session_state.page_option = st.radio("Navigation", menu_options, label_visibility="collapsed")
 
-elif st.session_state.page_option == "Missions":
-    tab1, tab2 = st.tabs(["📋 Liste des missions", "➕ Nouvelle mission"])
+    # Contenu principal
+    st.markdown(f"<h1 style='color: var(--primary); border-bottom: 2px solid var(--secondary); padding-bottom: 0.5rem;'>{st.session_state.page_option}</h1>", 
+               unsafe_allow_html=True)
     
-    with tab1:
-        st.dataframe({
-            "Mission": ["Inspection électrique", "Contrôle sécurité", "Audit réseau"],
-            "Statut": ["En cours", "Terminé", "En attente"],
-            "Progrès": [45, 100, 10]
-        }, use_container_width=True)
-    
-    with tab2:
-        with st.form("Nouvelle mission"):
-            st.text_input("Titre de la mission")
-            st.date_input("Date d'échéance")
-            st.text_area("Description")
-            st.form_submit_button("Créer mission")
-
-elif st.session_state.page_option == "Rapports":
-    with st.container():
-        col1, col2 = st.columns([1, 3])
+    if st.session_state.page_option == "Tableau de bord":
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st.date_input("Date de début")
-            st.date_input("Date de fin")
-            st.selectbox("Format", ["PDF", "Excel", "HTML"])
+            st.markdown("""
+                <div class="metric-card">
+                    <h3>📊 Statistiques</h3>
+                    <p>15 Nouvelles missions</p>
+                    <div style="background: #f0f0f0; border-radius: 8px; height: 8px;">
+                        <div style="background: var(--secondary); width: 32%; height: 100%; border-radius: 8px;"></div>
+                    </div>
+                    <p style="margin-top: 8px;">32% Progrès global</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
         with col2:
-            st.write("Aperçu du rapport")
-            st.code("Données du rapport généré...", language="markdown")
+            st.markdown("""
+                <div class="metric-card">
+                    <h3>✅ Réalisations</h3>
+                    <p>98% Taux de résolution</p>
+                    <div style="display: flex; gap: 4px; margin-top: 12px;">
+                        <span style="color: #ffd700;">★</span>
+                        <span style="color: #ffd700;">★</span>
+                        <span style="color: #ffd700;">★</span>
+                        <span style="color: #ffd700;">★</span>
+                        <span style="color: #ffd700;">☆</span>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            st.markdown("""
+                <div class="metric-card">
+                    <h3>📅 Calendrier</h3>
+                    <p>3 Échéances</p>
+                    <p>2 Réunions</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with st.expander("📈 Graphiques détaillés", expanded=True):
+            st.line_chart({"Données": [1, 3, 2, 4, 5, 2, 4]}, height=300)
+    
+    elif st.session_state.page_option == "Missions":
+        tab1, tab2 = st.tabs(["📋 Liste des missions", "➕ Création"])
+        
+        with tab1:
+            st.dataframe(
+                data={
+                    "Mission": ["Inspection électrique", "Contrôle sécurité", "Audit réseau"],
+                    "Statut": ["🟡 En cours", "🟢 Terminé", "🔴 En attente"],
+                    "Progrès": [45, 100, 10],
+                    "Échéance": ["2024-03-15", "2024-03-10", "2024-04-01"]
+                },
+                use_container_width=True,
+                height=300
+            )
+        
+        with tab2:
+            with st.form("Nouvelle mission"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    titre = st.text_input("Titre de la mission")
+                    date_echeance = st.date_input("Date d'échéance")
+                with col2:
+                    priorite = st.selectbox("Priorité", ["Haute", "Moyenne", "Basse"])
+                    responsable = st.text_input("Responsable")
+                description = st.text_area("Description", height=100)
+                
+                if st.form_submit_button("Créer mission 🚀"):
+                    st.success("Mission créée avec succès!")
+    
+    elif st.session_state.page_option == "Rapports":
+        with st.container():
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                with st.form("rapport_form"):
+                    date_debut = st.date_input("Date de début")
+                    date_fin = st.date_input("Date de fin")
+                    format_rapport = st.selectbox("Format", ["PDF", "Excel", "HTML"])
+                    
+                    if st.form_submit_button("Générer le rapport 🖨️"):
+                        st.toast("Génération du rapport en cours...")
             
-    if st.button("🖨 Générer le rapport"):
-        st.success("Rapport généré avec succès!")
+            with col2:
+                st.markdown("""
+                    <div style='background: white; 
+                                padding: 2rem; 
+                                border-radius: 12px; 
+                                box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>
+                        <h3 style='color: var(--primary);'>Aperçu du rapport</h3>
+                        <p style='color: #666;'>Données du rapport généré...</p>
+                    </div>
+                """, unsafe_allow_html=True)
