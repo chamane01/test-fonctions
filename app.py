@@ -1,14 +1,6 @@
 import streamlit as st
 
-# Configuration de la page
-st.set_page_config(
-    page_title="Ubuntu Détect",
-    page_icon="🔍",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Base de données utilisateurs
+# Base de données virtuelle de 5 comptes avec chemin d'image de profil
 users_db = {
     "alice": {"password": "pass1", "role": "directions", "profile": "fille.jpeg"},
     "bob": {"password": "pass2", "role": "services", "profile": "garcon.jpeg"},
@@ -16,9 +8,11 @@ users_db = {
     "david": {"password": "pass4", "role": "services", "profile": "garcon.jpeg"},
     "eve": {"password": "pass5", "role": "directions", "profile": "fille.jpeg"}
 }
+
+# Image par défaut si aucun profil n'est défini
 DEFAULT_PROFILE = "profil.jpg"
 
-# Initialisation session
+# Initialisation de l'état de session
 if "logged_in" not in st.session_state:
     st.session_state.update({
         "logged_in": False,
@@ -42,61 +36,6 @@ def logout():
     st.session_state.clear()
     st.rerun()
 
-# Styles personnalisés
-st.markdown("""
-    <style>
-        :root {
-            --primary: #2C3E50;
-            --secondary: #3498DB;
-            --accent: #2980B9;
-        }
-        
-        .stApp {
-            background-color: #f8f9fa;
-        }
-        
-        .profile-frame {
-            padding: 4px;
-            border-radius: 50%;
-            display: inline-block;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
-        
-        .sidebar .sidebar-content {
-            background: linear-gradient(180deg, #2C3E50 60%, #3498DB 100%);
-            color: white;
-        }
-        
-        .stButton>button {
-            background: #3498DB !important;
-            color: white !important;
-            border-radius: 8px;
-            padding: 8px 24px;
-            transition: all 0.3s ease;
-        }
-        
-        .stButton>button:hover {
-            background: #2980B9 !important;
-            transform: translateY(-2px);
-        }
-        
-        .metric-card {
-            background: white;
-            border-radius: 12px;
-            padding: 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
-        
-        .login-container {
-            background: white;
-            padding: 40px;
-            border-radius: 15px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-        }
-    </style>
-""", unsafe_allow_html=True)
-
 # Page de connexion
 if not st.session_state.logged_in:
     col = st.columns([1, 3, 1])
@@ -104,10 +43,14 @@ if not st.session_state.logged_in:
         with st.container():
             st.markdown('<div class="login-container">', unsafe_allow_html=True)
             st.image("images (5).png", width=300)
-            st.markdown("<h1 style='text-align: center; color: var(--primary); margin-bottom: 0.5rem;'>Ubuntu Détect</h1>", 
-                       unsafe_allow_html=True)
-            st.markdown("<div style='text-align: center; color: #7f8c8d; font-size: 1.2rem; margin-bottom: 2rem;'>L'Esprit d'Humanité dans la Détection des Défauts</div>", 
-                       unsafe_allow_html=True)
+            st.markdown(
+                "<h1 style='text-align: center; color: var(--primary); margin-bottom: 0.5rem;'>Ubuntu Détect</h1>", 
+                unsafe_allow_html=True
+            )
+            st.markdown(
+                "<div style='text-align: center; color: var(--secondary); font-size: 1.2rem; margin-bottom: 2rem;'>L'Esprit d'Humanité dans la Détection des Défauts</div>", 
+                unsafe_allow_html=True
+            )
             
             with st.form("login_form"):
                 username = st.text_input("Nom d'utilisateur", key="user_input")
@@ -125,22 +68,24 @@ else:
     user_data = users_db.get(st.session_state.current_user, {})
     profile_image = user_data.get("profile", DEFAULT_PROFILE)
     
-    # Sidebar
+    # Sidebar stylisée
     with st.sidebar:
-        st.markdown(f'<div class="profile-frame"><img src="{profile_image}" width="150" style="border-radius: 50%"></div>', 
-                    unsafe_allow_html=True)
-        st.markdown(f"<h3 style='color: white; margin: 15px 0; text-align: center;'>{st.session_state.current_user}</h3>", 
-                    unsafe_allow_html=True)
+        st.markdown('<div class="profile-box">', unsafe_allow_html=True)
+        st.image(profile_image, width=150)
+        st.markdown(
+            f"<h3 style='color: white; margin: 15px 0;'>{st.session_state.current_user}</h3>", 
+            unsafe_allow_html=True
+        )
         st.markdown(f"""
             <div style='background: var(--accent); 
                         padding: 6px; 
                         border-radius: 8px;
                         margin-bottom: 1rem;
-                        color: white;
-                        text-align: center;'>
+                        color: white;'>
                 {st.session_state.role.capitalize()}
             </div>
         """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
         
         if st.button("Déconnexion 🚪", use_container_width=True):
             logout()
@@ -149,8 +94,10 @@ else:
         st.session_state.page_option = st.radio("Navigation", menu_options, label_visibility="collapsed")
 
     # Contenu principal
-    st.markdown(f"<h1 style='color: var(--primary); border-bottom: 2px solid var(--secondary); padding-bottom: 0.5rem;'>{st.session_state.page_option}</h1>", 
-               unsafe_allow_html=True)
+    st.markdown(
+        f"<h1 style='color: var(--primary); border-bottom: 2px solid var(--secondary); padding-bottom: 0.5rem;'>{st.session_state.page_option}</h1>", 
+        unsafe_allow_html=True
+    )
     
     if st.session_state.page_option == "Tableau de bord":
         col1, col2, col3 = st.columns(3)
@@ -236,8 +183,47 @@ else:
             
             with col2:
                 st.markdown("""
-                    <div class="metric-card">
+                    <div style='background: white; 
+                                padding: 2rem; 
+                                border-radius: 12px; 
+                                box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>
                         <h3 style='color: var(--primary);'>Aperçu du rapport</h3>
                         <p style='color: #666;'>Données du rapport généré...</p>
                     </div>
                 """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <style>
+        .profile-frame {
+            background: linear-gradient(45deg, #2C3E50, #3498DB);
+            padding: 4px;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease;
+        }
+        .profile-frame:hover {
+            transform: scale(1.05);
+        }
+        .sidebar .sidebar-content {
+            background: linear-gradient(180deg, #2C3E50 60%, #3498DB 100%);
+            color: white;
+        }
+        .stButton>button {
+            background: #3498DB !important;
+            color: white !important;
+            border-radius: 8px;
+            padding: 8px 24px;
+            transition: all 0.3s ease;
+        }
+        .stButton>button:hover {
+            background: #2980B9 !important;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .stTextInput>div>div>input {
+            border-radius: 8px !important;
+            padding: 12px !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
