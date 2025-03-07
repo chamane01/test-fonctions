@@ -1,4 +1,12 @@
 import streamlit as st
+from PIL import Image
+import os
+
+# Vérification et chargement des images
+def load_image(image_path):
+    if os.path.exists(image_path):
+        return Image.open(image_path)
+    return Image.open("profil.jpg")  # Image par défaut
 
 # Base de données virtuelle de 5 comptes avec image de profil
 users_db = {
@@ -50,7 +58,6 @@ if not st.session_state.logged_in:
     if st.button("Se connecter"):
         if login(username, password):
             st.success("Connexion réussie!")
-            # La mise à jour de st.session_state entraînera la réexécution du script
         else:
             st.error("Nom d'utilisateur ou mot de passe incorrect.")
 
@@ -58,21 +65,35 @@ if not st.session_state.logged_in:
 else:
     # Récupération du chemin de l'image de profil de l'utilisateur
     user_data = users_db.get(st.session_state.current_user, {})
-    profile_image = user_data.get("profile", DEFAULT_PROFILE)
-    
-    # Affichage de l'image de profil dans la sidebar avec style circulaire
-    profile_html = f"""
-    <div style="text-align: center;">
-        <img src="{profile_image}" style="width:100px; height:100px; border-radius:50%; object-fit:cover; border:2px solid #ccc;" />
-        <p><strong>{st.session_state.current_user}</strong><br>({st.session_state.role.capitalize()})</p>
-    </div>
-    """
-    st.sidebar.markdown(profile_html, unsafe_allow_html=True)
-    
+    profile_image_path = user_data.get("profile", DEFAULT_PROFILE)
+
+    # Chargement de l'image
+    profile_image = load_image(profile_image_path)
+
+    # Affichage de l'image de profil avec une vignette circulaire
+    st.sidebar.markdown(
+        f"""
+        <div style="text-align: center; position: relative; display: inline-block;">
+            <div style="
+                width: 120px;
+                height: 120px;
+                border-radius: 50%;
+                overflow: hidden;
+                border: 5px solid #2E4053; /* Couleur du masque */
+                display: flex;
+                align-items: center;
+                justify-content: center;">
+                <img src="{profile_image_path}" style="width: 100%; height: 100%; object-fit: cover;" />
+            </div>
+            <p><strong>{st.session_state.current_user}</strong><br>({st.session_state.role.capitalize()})</p>
+        </div>
+        """, unsafe_allow_html=True
+    )
+
     # Bouton de déconnexion
     if st.sidebar.button("Déconnexion"):
         logout()
-    
+
     # Définition du menu selon le rôle
     if st.session_state.role == "directions":
         options = ["Tableau de bord", "Missions", "Rapports"]
@@ -80,21 +101,18 @@ else:
         options = ["Missions", "Rapports"]
     else:
         options = []
-    
+
     st.session_state.page_option = st.sidebar.radio("Menu", options)
-    
+
     # Titre principal dynamique
     st.title("Ubuntu Détect : L'Esprit d'Humanité dans la Détection des Défauts")
-    
+
     # Affichage du contenu selon l'option sélectionnée
     if st.session_state.page_option == "Tableau de bord":
         st.write("Contenu du Tableau de bord : indicateurs, graphiques interactifs, etc.")
-        # ... insérez ici votre code du tableau de bord ...
     elif st.session_state.page_option == "Missions":
         st.write("Contenu de la Gestion des Missions : création, suivi, export, etc.")
-        # ... insérez ici votre code de gestion des missions ...
     elif st.session_state.page_option == "Rapports":
         st.write("Contenu de la Génération de Rapports : choix de périodes, génération de PDF, etc.")
-        # ... insérez ici votre code de génération de rapports ...
     else:
         st.write("Veuillez sélectionner une option dans le menu.")
