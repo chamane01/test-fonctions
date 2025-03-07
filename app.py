@@ -90,19 +90,25 @@ else:
         if st.button("Déconnexion 🚪", use_container_width=True):
             logout()
         
-        # Affichage toujours des 3 options pour les deux entités
+        # Affichage des 3 options pour tous
         menu_options = ["Tableau de bord", "Missions", "Rapports"]
         st.session_state.page_option = st.radio("Navigation", menu_options, label_visibility="collapsed")
+    
+    # Affichage du titre dynamique avec distinction entre tableau de bord général et personnel
+    if st.session_state.page_option == "Tableau de bord":
+        title_text = "Tableau de bord général" if st.session_state.role == "directions" else "Tableau de bord personnel"
+    else:
+        title_text = st.session_state.page_option
 
-    # Contenu principal
     st.markdown(
-        f"<h1 style='color: var(--primary); border-bottom: 2px solid var(--secondary); padding-bottom: 0.5rem;'>{st.session_state.page_option}</h1>", 
+        f"<h1 style='color: var(--primary); border-bottom: 2px solid var(--secondary); padding-bottom: 0.5rem;'>{title_text}</h1>", 
         unsafe_allow_html=True
     )
     
+    # Contenu de la page sélectionnée
     if st.session_state.page_option == "Tableau de bord":
         if st.session_state.role == "directions":
-            # Tableau de bord orienté données pour la direction
+            # Tableau de bord général pour la direction
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown("""
@@ -141,30 +147,43 @@ else:
                 st.line_chart({"Données": [1, 3, 2, 4, 5, 2, 4]}, height=300)
         
         elif st.session_state.role == "services":
-            # Tableau de bord personnel pour les services
-            st.markdown("""
-                <div class="personal-dashboard" style="background: #f9f9f9; padding: 1rem; border-radius: 8px;">
-                    <h3>Bienvenue dans votre tableau de bord personnel</h3>
-                    <p>Affichage de vos indicateurs et missions personnelles.</p>
-                </div>
-            """, unsafe_allow_html=True)
-            col1, col2 = st.columns(2)
+            # Tableau de bord personnel pour les services (similaire au général mais avec éléments personnels)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown("""
-                    <div class="personal-card" style="background: #ffffff; padding: 1rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                        <h4>Vos Missions Actives</h4>
-                        <p>Nombre de missions : 3</p>
+                    <div class="metric-card">
+                        <h3>📊 Vos Missions</h3>
+                        <p>Vous avez 5 missions en cours</p>
+                        <div style="background: #f0f0f0; border-radius: 8px; height: 8px;">
+                            <div style="background: var(--secondary); width: 40%; height: 100%; border-radius: 8px;"></div>
+                        </div>
+                        <p style="margin-top: 8px;">40% de progression</p>
                     </div>
                 """, unsafe_allow_html=True)
             with col2:
                 st.markdown("""
-                    <div class="personal-card" style="background: #ffffff; padding: 1rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                        <h4>Prochaines Réunions</h4>
-                        <p>2 réunions planifiées</p>
+                    <div class="metric-card">
+                        <h3>👤 Suivi Personnel</h3>
+                        <p>Performance individuelle : 85%</p>
+                        <div style="display: flex; gap: 4px; margin-top: 12px;">
+                            <span style="color: #00cc66;">●</span>
+                            <span style="color: #00cc66;">●</span>
+                            <span style="color: #00cc66;">●</span>
+                            <span style="color: #ff9900;">●</span>
+                            <span style="color: #ff9900;">●</span>
+                        </div>
                     </div>
                 """, unsafe_allow_html=True)
-            with st.expander("Détails des performances"):
-                st.line_chart({"Progression": [1, 2, 3, 2, 4, 5]})
+            with col3:
+                st.markdown("""
+                    <div class="metric-card">
+                        <h3>📅 Agenda Personnel</h3>
+                        <p>1 réunion prévue</p>
+                        <p>2 rappels</p>
+                    </div>
+                """, unsafe_allow_html=True)
+            with st.expander("📈 Graphiques personnels", expanded=True):
+                st.line_chart({"Progression": [2, 4, 3, 5, 4, 6, 5]}, height=300)
     
     elif st.session_state.page_option == "Missions":
         tab1, tab2 = st.tabs(["📋 Liste des missions", "➕ Création"])
