@@ -63,17 +63,13 @@ if not st.session_state.logged_in:
             st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
-# Interface principale (après connexion)
+# Interface principale
 else:
     user_data = users_db.get(st.session_state.current_user, {})
     profile_image = user_data.get("profile", DEFAULT_PROFILE)
     
     # Sidebar stylisée
     with st.sidebar:
-        # Gestion du mode clair/sombre
-        theme_mode = st.radio("Mode", ["Clair", "Sombre"], index=0)
-        st.markdown('<hr>', unsafe_allow_html=True)
-        
         st.markdown('<div class="profile-box">', unsafe_allow_html=True)
         st.image(profile_image, width=150)
         st.markdown(
@@ -94,46 +90,11 @@ else:
         if st.button("Déconnexion 🚪", use_container_width=True):
             logout()
         
-        # Menu de navigation commun aux deux entités
+        # Affichage des 3 options pour tous
         menu_options = ["Tableau de bord", "Missions", "Rapports"]
         st.session_state.page_option = st.radio("Navigation", menu_options, label_visibility="collapsed")
     
-    # Injection de variables CSS selon le mode choisi
-    if theme_mode == "Clair":
-        css_theme = """
-        <style>
-            :root {
-                --primary: #3498db;
-                --secondary: #2c3e50;
-                --accent: #e74c3c;
-                --background: #ffffff;
-                --text: #000000;
-            }
-            body {
-                background-color: var(--background);
-                color: var(--text);
-            }
-        </style>
-        """
-    else:
-        css_theme = """
-        <style>
-            :root {
-                --primary: #ecf0f1;
-                --secondary: #95a5a6;
-                --accent: #e74c3c;
-                --background: #2c3e50;
-                --text: #ffffff;
-            }
-            body {
-                background-color: var(--background);
-                color: var(--text);
-            }
-        </style>
-        """
-    st.markdown(css_theme, unsafe_allow_html=True)
-    
-    # Titre de la page
+    # Affichage du titre dynamique avec distinction entre tableau de bord général et personnel
     if st.session_state.page_option == "Tableau de bord":
         title_text = "Tableau de bord général" if st.session_state.role == "directions" else "Tableau de bord personnel"
     else:
@@ -151,10 +112,10 @@ else:
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown("""
-                    <div class="metric-card" style="padding: 1rem; background: #f0f0f0; border-radius: 8px;">
+                    <div class="metric-card">
                         <h3>📊 Statistiques</h3>
                         <p>15 Nouvelles missions</p>
-                        <div style="background: #dcdcdc; border-radius: 8px; height: 8px;">
+                        <div style="background: #f0f0f0; border-radius: 8px; height: 8px;">
                             <div style="background: var(--secondary); width: 32%; height: 100%; border-radius: 8px;"></div>
                         </div>
                         <p style="margin-top: 8px;">32% Progrès global</p>
@@ -162,7 +123,7 @@ else:
                 """, unsafe_allow_html=True)
             with col2:
                 st.markdown("""
-                    <div class="metric-card" style="padding: 1rem; background: #f0f0f0; border-radius: 8px;">
+                    <div class="metric-card">
                         <h3>✅ Réalisations</h3>
                         <p>98% Taux de résolution</p>
                         <div style="display: flex; gap: 4px; margin-top: 12px;">
@@ -176,7 +137,7 @@ else:
                 """, unsafe_allow_html=True)
             with col3:
                 st.markdown("""
-                    <div class="metric-card" style="padding: 1rem; background: #f0f0f0; border-radius: 8px;">
+                    <div class="metric-card">
                         <h3>📅 Calendrier</h3>
                         <p>3 Échéances</p>
                         <p>2 Réunions</p>
@@ -186,14 +147,14 @@ else:
                 st.line_chart({"Données": [1, 3, 2, 4, 5, 2, 4]}, height=300)
         
         elif st.session_state.role == "services":
-            # Tableau de bord personnel pour les services, avec éléments personnels
+            # Tableau de bord personnel pour les services (similaire au général mais avec éléments personnels)
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown("""
-                    <div class="metric-card" style="padding: 1rem; background: #f0f0f0; border-radius: 8px;">
+                    <div class="metric-card">
                         <h3>📊 Vos Missions</h3>
-                        <p>5 missions en cours</p>
-                        <div style="background: #dcdcdc; border-radius: 8px; height: 8px;">
+                        <p>Vous avez 5 missions en cours</p>
+                        <div style="background: #f0f0f0; border-radius: 8px; height: 8px;">
                             <div style="background: var(--secondary); width: 40%; height: 100%; border-radius: 8px;"></div>
                         </div>
                         <p style="margin-top: 8px;">40% de progression</p>
@@ -201,7 +162,7 @@ else:
                 """, unsafe_allow_html=True)
             with col2:
                 st.markdown("""
-                    <div class="metric-card" style="padding: 1rem; background: #f0f0f0; border-radius: 8px;">
+                    <div class="metric-card">
                         <h3>👤 Suivi Personnel</h3>
                         <p>Performance individuelle : 85%</p>
                         <div style="display: flex; gap: 4px; margin-top: 12px;">
@@ -215,7 +176,7 @@ else:
                 """, unsafe_allow_html=True)
             with col3:
                 st.markdown("""
-                    <div class="metric-card" style="padding: 1rem; background: #f0f0f0; border-radius: 8px;">
+                    <div class="metric-card">
                         <h3>📅 Agenda Personnel</h3>
                         <p>1 réunion prévue</p>
                         <p>2 rappels</p>
@@ -271,11 +232,11 @@ else:
                     </div>
                 """, unsafe_allow_html=True)
 
-    # Injection de CSS personnalisé complémentaire
+    # Injection de CSS personnalisé
     st.markdown("""
     <style>
         .profile-frame {
-            background: linear-gradient(45deg, var(--secondary), var(--primary));
+            background: linear-gradient(45deg, #2C3E50, #3498DB);
             padding: 4px;
             border-radius: 50%;
             display: inline-block;
@@ -286,18 +247,18 @@ else:
             transform: scale(1.05);
         }
         .sidebar .sidebar-content {
-            background: linear-gradient(180deg, var(--secondary) 60%, var(--primary) 100%);
+            background: linear-gradient(180deg, #2C3E50 60%, #3498DB 100%);
             color: white;
         }
         .stButton>button {
-            background: var(--primary) !important;
+            background: #3498DB !important;
             color: white !important;
             border-radius: 8px;
             padding: 8px 24px;
             transition: all 0.3s ease;
         }
         .stButton>button:hover {
-            background: var(--secondary) !important;
+            background: #2980B9 !important;
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
