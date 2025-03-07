@@ -49,7 +49,8 @@ if not st.session_state.logged_in:
     if st.button("Se connecter"):
         if login(username, password):
             st.success("Connexion réussie!")
-            st.experimental_rerun()  # Redémarrage de l'application après connexion
+            # Pas besoin d'appeler st.experimental_rerun(), 
+            # la mise à jour de st.session_state déclenche la réexécution du script.
         else:
             st.error("Nom d'utilisateur ou mot de passe incorrect.")
 
@@ -63,7 +64,7 @@ else:
     
     if st.sidebar.button("Déconnexion"):
         logout()
-        st.experimental_rerun()  # Redémarrage de l'application après déconnexion
+        # La réinitialisation du state provoque la réexécution du script
     
     # Définition du menu en fonction du rôle
     if st.session_state.role == "directions":
