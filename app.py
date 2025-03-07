@@ -203,4 +203,88 @@ else:
                 <div class="metric-card">
                     <h3>📊 Statistiques</h3>
                     <p>15 Nouvelles missions</p>
-                    <div style="background: #f0f0f0; border-radius: 8px; height: 8px
+                    <div style="background: #f0f0f0; border-radius: 8px; height: 8px;">
+                        <div style="background: var(--secondary); width: 32%; height: 100%; border-radius: 8px;"></div>
+                    </div>
+                    <p style="margin-top: 8px;">32% Progrès global</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("""
+                <div class="metric-card">
+                    <h3>✅ Réalisations</h3>
+                    <p>98% Taux de résolution</p>
+                    <div style="display: flex; gap: 4px; margin-top: 12px;">
+                        <span style="color: #ffd700;">★</span>
+                        <span style="color: #ffd700;">★</span>
+                        <span style="color: #ffd700;">★</span>
+                        <span style="color: #ffd700;">★</span>
+                        <span style="color: #ffd700;">☆</span>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            st.markdown("""
+                <div class="metric-card">
+                    <h3>📅 Calendrier</h3>
+                    <p>3 Échéances</p>
+                    <p>2 Réunions</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with st.expander("📈 Graphiques détaillés", expanded=True):
+            st.line_chart({"Données": [1, 3, 2, 4, 5, 2, 4]}, height=300)
+    
+    elif st.session_state.page_option == "📋 Missions":
+        tab1, tab2 = st.tabs(["📋 Liste des missions", "➕ Création"])
+        
+        with tab1:
+            st.dataframe(
+                data={
+                    "Mission": ["Inspection électrique", "Contrôle sécurité", "Audit réseau"],
+                    "Statut": ["🟡 En cours", "🟢 Terminé", "🔴 En attente"],
+                    "Progrès": [45, 100, 10],
+                    "Échéance": ["2024-03-15", "2024-03-10", "2024-04-01"]
+                },
+                use_container_width=True,
+                height=300
+            )
+        
+        with tab2:
+            with st.form("Nouvelle mission"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    titre = st.text_input("Titre de la mission")
+                    date_echeance = st.date_input("Date d'échéance")
+                with col2:
+                    priorite = st.selectbox("Priorité", ["Haute", "Moyenne", "Basse"])
+                    responsable = st.text_input("Responsable")
+                description = st.text_area("Description", height=100)
+                
+                if st.form_submit_button("Créer mission 🚀"):
+                    st.success("Mission créée avec succès!")
+    
+    elif st.session_state.page_option == "📈 Rapports":
+        with st.container():
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                with st.form("rapport_form"):
+                    date_debut = st.date_input("Date de début")
+                    date_fin = st.date_input("Date de fin")
+                    format_rapport = st.selectbox("Format", ["PDF", "Excel", "HTML"])
+                    
+                    if st.form_submit_button("Générer le rapport 🖨️"):
+                        st.toast("Génération du rapport en cours...")
+            
+            with col2:
+                st.markdown("""
+                    <div style='background: white; 
+                                padding: 2rem; 
+                                border-radius: 12px; 
+                                box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>
+                        <h3 style='color: var(--primary);'>Aperçu du rapport</h3>
+                        <p style='color: #666;'>Données du rapport généré...</p>
+                    </div>
+                """, unsafe_allow_html=True)
