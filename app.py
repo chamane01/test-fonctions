@@ -9,7 +9,7 @@ users_db = {
     "eve": {"password": "pass5", "role": "directions", "profile": "fille.jpeg"}
 }
 
-# Si aucun profil n'est défini pour un utilisateur, on utilisera "profil.jpg"
+# Si aucun profil n'est défini, on utilisera "profil.jpg"
 DEFAULT_PROFILE = "profil.jpg"
 
 # Initialisation des variables de session
@@ -60,10 +60,10 @@ else:
     user_data = users_db.get(st.session_state.current_user, {})
     profile_image = user_data.get("profile", DEFAULT_PROFILE)
     
-    # Affichage de la sidebar avec image de profil en forme circulaire
+    # Affichage de la sidebar avec l'image de profil (affichage normal)
     sidebar_html = f"""
     <div style="text-align: center;">
-        <img src="{profile_image}" style="width:100px; border-radius:50%; border:2px solid #ccc;" />
+        <img src="{profile_image}" style="width:100px; border:2px solid #ccc;" />
         <p><strong>{st.session_state.current_user}</strong><br>({st.session_state.role.capitalize()})</p>
     </div>
     """
@@ -72,7 +72,7 @@ else:
         logout()
         st.stop()
     
-    # Définition du menu dynamique selon le rôle
+    # Menu dynamique en fonction du rôle
     if st.session_state.role == "directions":
         options = ["Tableau de bord", "Missions", "Rapports"]
     elif st.session_state.role == "services":
@@ -82,10 +82,10 @@ else:
     
     st.session_state.page_option = st.sidebar.radio("Menu", options)
     
-    # Titre principal dynamique
+    # Titre principal dynamique pour l'application
     st.title("Ubuntu Détect : L'Esprit d'Humanité dans la Détection des Défauts")
     
-    # Affichage du contenu en fonction de l'option choisie
+    # Affichage du contenu selon l'option choisie
     if st.session_state.page_option == "Tableau de bord":
         st.write("Contenu du Tableau de bord : indicateurs, graphiques interactifs, etc.")
         # ... insérez ici votre code du tableau de bord ...
