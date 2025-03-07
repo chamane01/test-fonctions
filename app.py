@@ -1,43 +1,25 @@
 import streamlit as st
 
-# Configuration CSS personnalisée
+# Ajout de CSS personnalisé pour un style plus moderne
 st.markdown("""
     <style>
-        .profile-frame {
-            background: linear-gradient(45deg, #2C3E50, #3498DB);
-            padding: 4px;
-            border-radius: 50%;
-            display: inline-block;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-            transition: transform 0.3s ease;
-        }
-        .profile-frame:hover {
-            transform: scale(1.05);
-        }
-        .sidebar .sidebar-content {
-            background: linear-gradient(180deg, #2C3E50 60%, #3498DB 100%);
-            color: white;
-        }
-        .stButton>button {
-            background: #3498DB !important;
-            color: white !important;
-            border-radius: 8px;
-            padding: 8px 24px;
-            transition: all 0.3s ease;
-        }
-        .stButton>button:hover {
-            background: #2980B9 !important;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
-        .stTextInput>div>div>input {
-            border-radius: 8px !important;
-            padding: 12px !important;
-        }
+    /* Style global de l'application */
+    body {
+        background-color: #ffffff;
+    }
+    h1 {
+        color: #E95420;
+        text-align: center;
+        font-family: 'Helvetica Neue', sans-serif;
+    }
+    /* Style de la sidebar */
+    .css-1d391kg {  /* classe interne susceptible de varier selon la version de Streamlit */
+        background-color: #f7f7f7;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# Base de données virtuelle
+# Base de données virtuelle de 5 comptes avec image de profil
 users_db = {
     "alice": {"password": "pass1", "role": "directions", "profile": "fille.jpeg"},
     "bob": {"password": "pass2", "role": "services", "profile": "garcon.jpeg"},
@@ -46,88 +28,94 @@ users_db = {
     "eve": {"password": "pass5", "role": "directions", "profile": "fille.jpeg"}
 }
 
+# Image par défaut si aucun profil n'est défini
 DEFAULT_PROFILE = "profil.jpg"
 
-# Initialisation session
+# Initialisation des variables de session
 if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
+if "role" not in st.session_state:
+    st.session_state.role = None
+if "page_option" not in st.session_state:
+    st.session_state.page_option = None
+
+def login(username, password):
+    user = users_db.get(username)
+    if user and user["password"] == password:
+        st.session_state.logged_in = True
+        st.session_state.current_user = username
+        st.session_state.role = user["role"]
+        return True
+    return False
+
+def logout():
     st.session_state.logged_in = False
     st.session_state.current_user = None
     st.session_state.role = None
     st.session_state.page_option = None
+    st.write("Déconnexion effectuée. Veuillez actualiser la page.")
 
-def login(username, password):
-    if user := users_db.get(username):
-        if user["password"] == password:
-            st.session_state.update({
-                "logged_in": True,
-                "current_user": username,
-                "role": user["role"]
-            })
-            return True
-    return False
-
-def logout():
-    st.session_state.clear()
-    st.experimental_rerun()
-
-# Page de connexion
+# Si l'utilisateur n'est pas connecté, afficher la page de connexion
 if not st.session_state.logged_in:
-    col = st.columns([1, 3, 1])
-    with col[1]:
-        st.image("images (5).png", width=300)
-        st.markdown("<h1 style='text-align: center; color: #2C3E50;'>Ubuntu Détect</h1>", unsafe_allow_html=True)
-        st.markdown("<div style='text-align: center; margin-bottom: 40px;'>L'Esprit d'Humanité dans la Détection des Défauts</div>", unsafe_allow_html=True)
-        
-        with st.form("login_form"):
-            username = st.text_input("Nom d'utilisateur", key="user_input")
-            password = st.text_input("Mot de passe", type="password", key="pass_input")
-            if st.form_submit_button("Se connecter 🔑"):
-                if login(username, password):
-                    st.success("Connexion réussie! ✅")
-                else:
-                    st.error("Identifiants incorrects ❌")
+    st.title("Connexion à Ubuntu Détect")
+    st.image("images (5).png", width=200)  # Logo de l'application
+    st.write("Bienvenue dans **Ubuntu Détect : L'Esprit d'Humanité dans la Détection des Défauts**")
+    
+    username = st.text_input("Nom d'utilisateur")
+    password = st.text_input("Mot de passe", type="password")
+    
+    if st.button("Se connecter"):
+        if login(username, password):
+            st.success("Connexion réussie!")
+        else:
+            st.error("Nom d'utilisateur ou mot de passe incorrect.")
 
-# Interface principale
+# Interface principale après connexion
 else:
+    # Récupération du chemin de l'image de profil de l'utilisateur
     user_data = users_db.get(st.session_state.current_user, {})
     profile_image = user_data.get("profile", DEFAULT_PROFILE)
     
-    # Sidebar stylisée
-    with st.sidebar:
-        st.markdown(f"""
-            <div style='text-align: center; padding: 20px 0;'>
-                <div class="profile-frame">
-                    <img src="{profile_image}" 
-                         style="width:100px; height:100px; 
-                                border-radius:50%; 
-                                object-fit:cover;
-                                border: 2px solid white;"/>
-                </div>
-                <h3 style='margin: 15px 0;'>{st.session_state.current_user}</h3>
-                <div style='background: #3498DB; 
-                            padding: 6px; 
-                            border-radius: 8px;
-                            margin-bottom: 30px;'>
-                    {st.session_state.role.capitalize()}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        if st.button("Déconnexion 🚪"):
-            logout()
-        
-        menu_options = ["Tableau de bord", "Missions", "Rapports"] if st.session_state.role == "directions" else ["Missions", "Rapports"]
-        st.session_state.page_option = st.radio("Navigation", menu_options, label_visibility="collapsed")
-
-    # Contenu principal
-    st.markdown(f"<h1 style='color: #2C3E50;'>{st.session_state.page_option}</h1>", unsafe_allow_html=True)
+    # Affichage de l'image de profil dans la sidebar avec masque circulaire
+    # Le masque utilise la couleur thème (#E95420) pour encadrer l'image
+    profile_html = f"""
+    <div style="text-align: center; margin-bottom: 20px;">
+        <div style="display: inline-block; padding: 4px; background-color: #E95420; border-radius: 50%;">
+            <img src="{profile_image}" style="width: 100px; height: 100px; border-radius: 50%; object-fit: cover;" />
+        </div>
+        <p style="margin-top: 10px; font-weight: bold;">{st.session_state.current_user}<br>({st.session_state.role.capitalize()})</p>
+    </div>
+    """
+    st.sidebar.markdown(profile_html, unsafe_allow_html=True)
     
+    # Bouton de déconnexion dans la sidebar
+    if st.sidebar.button("Déconnexion"):
+        logout()
+    
+    # Définition du menu selon le rôle
+    if st.session_state.role == "directions":
+        options = ["Tableau de bord", "Missions", "Rapports"]
+    elif st.session_state.role == "services":
+        options = ["Missions", "Rapports"]
+    else:
+        options = []
+    
+    st.session_state.page_option = st.sidebar.radio("Menu", options)
+    
+    # Titre principal dynamique
+    st.title("Ubuntu Détect : L'Esprit d'Humanité dans la Détection des Défauts")
+    
+    # Affichage du contenu selon l'option sélectionnée
     if st.session_state.page_option == "Tableau de bord":
-        st.write("Statistiques en temps réel...")
-        # Ajouter des composants visuels ici
-    
+        st.write("Contenu du Tableau de bord : indicateurs, graphiques interactifs, etc.")
+        # ... insérez ici votre code du tableau de bord ...
     elif st.session_state.page_option == "Missions":
-        st.write("Gestion des missions...")
-    
+        st.write("Contenu de la Gestion des Missions : création, suivi, export, etc.")
+        # ... insérez ici votre code de gestion des missions ...
     elif st.session_state.page_option == "Rapports":
-        st.write("Génération de rapports...")
+        st.write("Contenu de la Génération de Rapports : choix de périodes, génération de PDF, etc.")
+        # ... insérez ici votre code de génération de rapports ...
+    else:
+        st.write("Veuillez sélectionner une option dans le menu.")
