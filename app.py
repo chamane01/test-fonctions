@@ -36,7 +36,6 @@ def logout():
     st.session_state.current_user = None
     st.session_state.role = None
     st.session_state.page_option = None
-    st.experimental_rerun()
 
 # Page de connexion (affichée si l'utilisateur n'est pas connecté)
 if not st.session_state.logged_in:
@@ -50,21 +49,21 @@ if not st.session_state.logged_in:
     if st.button("Se connecter"):
         if login(username, password):
             st.success("Connexion réussie!")
-            # La mise à jour de st.session_state provoque la réexécution du script.
+            st.experimental_rerun()  # Redémarrage de l'application après connexion
         else:
             st.error("Nom d'utilisateur ou mot de passe incorrect.")
 
 # Interface principale après connexion
 else:
-    # Affichage de la photo de profil de l'utilisateur (affichage normal via st.image)
+    # Affichage de la photo de profil de l'utilisateur
     user_data = users_db.get(st.session_state.current_user, {})
     profile_image = user_data.get("profile", DEFAULT_PROFILE)
-    st.sidebar.image(profile_image, width=100)  # Affichage de la photo de profil
+    st.sidebar.image(profile_image, width=100)
     st.sidebar.write(f"Connecté(e) : {st.session_state.current_user} ({st.session_state.role.capitalize()})")
     
     if st.sidebar.button("Déconnexion"):
         logout()
-        st.stop()
+        st.experimental_rerun()  # Redémarrage de l'application après déconnexion
     
     # Définition du menu en fonction du rôle
     if st.session_state.role == "directions":
