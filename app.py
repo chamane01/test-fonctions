@@ -1,6 +1,6 @@
 import streamlit as st
 
-# Base de données virtuelle de 5 comptes avec chemin d'image de profil
+# Base de données virtuelle de 5 comptes avec image de profil
 users_db = {
     "alice": {"password": "pass1", "role": "directions", "profile": "fille.jpeg"},
     "bob": {"password": "pass2", "role": "services", "profile": "garcon.jpeg"},
@@ -12,7 +12,7 @@ users_db = {
 # Image par défaut si aucun profil n'est défini
 DEFAULT_PROFILE = "profil.jpg"
 
-# Initialisation de l'état de session
+# Initialisation des variables de session
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "current_user" not in st.session_state:
@@ -36,12 +36,12 @@ def logout():
     st.session_state.current_user = None
     st.session_state.role = None
     st.session_state.page_option = None
-    st.experimental_rerun()
+    st.write("Déconnexion effectuée. Veuillez actualiser la page.")
 
-# Page de connexion (affichée si l'utilisateur n'est pas connecté)
+# Si l'utilisateur n'est pas connecté, afficher la page de connexion
 if not st.session_state.logged_in:
     st.title("Connexion à Ubuntu Détect")
-    st.image("images (5).png", width=200)  # Logo affiché sur la page de connexion
+    st.image("images (5).png", width=200)  # Affichage du logo sur la page de connexion
     st.write("Bienvenue dans **Ubuntu Détect : L'Esprit d'Humanité dans la Détection des Défauts**")
     
     username = st.text_input("Nom d'utilisateur")
@@ -50,23 +50,30 @@ if not st.session_state.logged_in:
     if st.button("Se connecter"):
         if login(username, password):
             st.success("Connexion réussie!")
-            # La mise à jour de st.session_state provoque la réexécution du script.
+            # La mise à jour de st.session_state entraînera la réexécution du script
         else:
             st.error("Nom d'utilisateur ou mot de passe incorrect.")
 
-# Interface principale après connexion
+# Une fois connecté, afficher l'interface principale
 else:
-    # Affichage de la photo de profil de l'utilisateur (affichage normal via st.image)
+    # Récupération du chemin de l'image de profil de l'utilisateur
     user_data = users_db.get(st.session_state.current_user, {})
     profile_image = user_data.get("profile", DEFAULT_PROFILE)
-    st.sidebar.image(profile_image, width=100)  # Affichage de la photo de profil
-    st.sidebar.write(f"Connecté(e) : {st.session_state.current_user} ({st.session_state.role.capitalize()})")
     
+    # Affichage de l'image de profil dans la sidebar avec style circulaire
+    profile_html = f"""
+    <div style="text-align: center;">
+        <img src="{profile_image}" style="width:100px; height:100px; border-radius:50%; object-fit:cover; border:2px solid #ccc;" />
+        <p><strong>{st.session_state.current_user}</strong><br>({st.session_state.role.capitalize()})</p>
+    </div>
+    """
+    st.sidebar.markdown(profile_html, unsafe_allow_html=True)
+    
+    # Bouton de déconnexion
     if st.sidebar.button("Déconnexion"):
         logout()
-        st.stop()
     
-    # Définition du menu en fonction du rôle
+    # Définition du menu selon le rôle
     if st.session_state.role == "directions":
         options = ["Tableau de bord", "Missions", "Rapports"]
     elif st.session_state.role == "services":
@@ -79,7 +86,7 @@ else:
     # Titre principal dynamique
     st.title("Ubuntu Détect : L'Esprit d'Humanité dans la Détection des Défauts")
     
-    # Affichage du contenu selon l'option choisie
+    # Affichage du contenu selon l'option sélectionnée
     if st.session_state.page_option == "Tableau de bord":
         st.write("Contenu du Tableau de bord : indicateurs, graphiques interactifs, etc.")
         # ... insérez ici votre code du tableau de bord ...
