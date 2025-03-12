@@ -36,7 +36,45 @@ import csv
 import random, string
 from shapely.geometry import Point, LineString
 
-
+#############################################
+# CONFIGURATION GLOBALE ET CSS
+#############################################
+st.set_page_config(page_title="Suivi des Dégradations sur Routes Ivoiriennes", layout="wide")
+st.markdown(
+    """
+    <style>
+    body {
+        background-color: #f4f4f9;
+        color: #333;
+        font-family: 'Helvetica', sans-serif;
+    }
+    .sidebar .sidebar-content {
+        background-color: #ffffff;
+    }
+    .stMetric {
+        background: linear-gradient(90deg, #8e44ad, #3498db);
+        color: #fff;
+        padding: 10px;
+        border-radius: 10px;
+    }
+    h1, h2, h3 {
+        color: #2c3e50;
+    }
+    .main-container {
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    /* CSS pour la page de connexion */
+    .login-container {
+        text-align: center;
+        padding: 2rem;
+        background: #ffffff;
+        border-radius: 10px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    </style>
+    """, unsafe_allow_html=True
+)
 
 #############################################
 # PAGE DE CONNEXION
