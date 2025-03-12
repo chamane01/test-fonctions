@@ -153,8 +153,23 @@ with st.sidebar:
     )
     if st.button("Déconnexion 🚪", use_container_width=True):
         logout()
-    # Menu principal
-    menu_option = st.radio("Menu", ["Tableau de bord", "Missions", "Rapport"])
+    
+
+    # Menu principal (adapté en fonction du rôle)
+    if st.session_state.role == "services":
+        menu_items = ["Missions", "Rapport"]
+    else:
+        menu_items = ["Tableau de bord", "Missions", "Rapport"]
+    menu_option = st.radio("Menu", menu_items)
+
+
+
+    
+
+    
+    
+
+
 
 #############################################
 # DONNÉES ET FONCTIONS COMMUNES (Tableau de bord & Rapport)
