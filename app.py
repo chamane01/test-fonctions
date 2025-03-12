@@ -37,7 +37,7 @@ import random, string
 from shapely.geometry import Point, LineString
 
 #############################################
-# CONFIGURATION GLOBALE ET CSS
+# Configuration générale et CSS
 #############################################
 st.set_page_config(page_title="Suivi des Dégradations sur Routes Ivoiriennes", layout="wide")
 st.markdown(
@@ -64,104 +64,19 @@ st.markdown(
         max-width: 1200px;
         margin: 0 auto;
     }
-    /* CSS pour la page de connexion */
-    .login-container {
-        text-align: center;
-        padding: 2rem;
-        background: #ffffff;
-        border-radius: 10px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
     </style>
     """, unsafe_allow_html=True
 )
 
 #############################################
-# PAGE DE CONNEXION
+# Menu principal : Tableau de bord, Missions, Rapport
 #############################################
-# Base de données virtuelle de comptes avec image de profil
-users_db = {
-    "alice": {"password": "pass1", "role": "directions", "profile": "fille.jpeg"},
-    "bob": {"password": "pass2", "role": "services", "profile": "garcon.jpeg"},
-    "charlie": {"password": "pass3", "role": "directions", "profile": "garcon.jpeg"},
-    "david": {"password": "pass4", "role": "services", "profile": "garcon.jpeg"},
-    "eve": {"password": "pass5", "role": "directions", "profile": "fille.jpeg"}
-}
-DEFAULT_PROFILE = "profil.jpg"
-
-# Initialisation de l'état de session pour la connexion
-if "logged_in" not in st.session_state:
-    st.session_state.update({
-        "logged_in": False,
-        "current_user": None,
-        "role": None,
-        "page_option": None
-    })
-
-def login(username, password):
-    if user := users_db.get(username):
-        if user["password"] == password:
-            st.session_state.update({
-                "logged_in": True,
-                "current_user": username,
-                "role": user["role"]
-            })
-            return True
-    return False
-
-def logout():
-    st.session_state.clear()
-    st.experimental_rerun()
-
-# Si non connecté, afficher la page de connexion et stopper l'exécution
-if not st.session_state.logged_in:
-    col = st.columns([1, 3, 1])
-    with col[1]:
-        with st.container():
-            st.markdown('<div class="login-container">', unsafe_allow_html=True)
-            st.image("images (5).png", width=300)
-            st.markdown(
-                "<h1 style='text-align: center; color: #3498DB; margin-bottom: 0.5rem;'>Ubuntu Détect</h1>", 
-                unsafe_allow_html=True
-            )
-            st.markdown(
-                "<div style='text-align: center; color: #666; font-size: 1.2rem; margin-bottom: 2rem;'>L'Esprit d'Humanité dans la Détection des Défauts</div>", 
-                unsafe_allow_html=True
-            )
-            with st.form("login_form"):
-                username = st.text_input("Nom d'utilisateur", key="user_input")
-                password = st.text_input("Mot de passe", type="password", key="pass_input")
-                if st.form_submit_button("Se connecter 🔑"):
-                    if login(username, password):
-                        st.success("Connexion réussie! ✅")
-                    else:
-                        st.error("Identifiants incorrects ❌")
-            st.markdown('</div>', unsafe_allow_html=True)
-    st.stop()
+menu_option = st.sidebar.radio("Menu", ["Tableau de bord", "Missions", "Rapport"])
 
 #############################################
-# SIDEBAR : PROFIL & MENU
+# Données et fonctions communes pour Tableau de bord et Rapport
 #############################################
-with st.sidebar:
-    # Affichage du profil utilisateur
-    user_data = users_db.get(st.session_state.current_user, {})
-    profile_image = user_data.get("profile", DEFAULT_PROFILE)
-    st.image(profile_image, width=150)
-    st.markdown(f"<h3 style='color: #2c3e50; margin: 15px 0;'>{st.session_state.current_user}</h3>", unsafe_allow_html=True)
-    st.markdown(
-        f"<div style='background: #3498DB; padding: 6px; border-radius: 8px; margin-bottom: 1rem; color: white;'>"
-        f"{st.session_state.role.capitalize()}</div>",
-        unsafe_allow_html=True
-    )
-    if st.button("Déconnexion 🚪", use_container_width=True):
-        logout()
-    # Menu principal
-    menu_option = st.radio("Menu", ["Tableau de bord", "Missions", "Rapport"])
-
-#############################################
-# DONNÉES ET FONCTIONS COMMUNES (Tableau de bord & Rapport)
-#############################################
-# Chargement des données depuis le fichier JSON
+# Chargement des données du suivi (JSON)
 with open("jeu_donnees_missions (1).json", "r", encoding="utf-8") as f:
     data = json.load(f)
 missions_df = pd.DataFrame(data)
@@ -177,7 +92,7 @@ if 'date' in df_defects.columns:
     df_defects['date'] = pd.to_datetime(df_defects['date'])
 
 #############################################
-# FONCTION DE GENERATION DU RAPPORT PDF
+# Fonction de génération du rapport PDF
 #############################################
 def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_date, end_date):
     buffer = BytesIO()
@@ -204,6 +119,7 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     total_distance = filtered_missions["distance(km)"].sum() if "distance(km)" in filtered_missions.columns else 0
     avg_distance = filtered_missions["distance(km)"].mean() if ("distance(km)" in filtered_missions.columns and num_missions > 0) else 0
 
+    # On utilise ici uniquement les défauts issus du JSON (pour le rapport)
     filtered_defects = df_defects[(df_defects['date'].dt.date >= start_date) & (df_defects['date'].dt.date <= end_date)] if 'date' in df_defects.columns else df_defects
     total_defects = len(filtered_defects)
     
@@ -245,7 +161,7 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     buf1.seek(0)
     img_chart1 = ImageReader(buf1)
     
-    # Second graphique : Pie chart
+    # Second graphique : Pie chart avec texte réduit et rayon augmenté
     fig2, ax2 = plt.subplots(figsize=(4,3))
     if not filtered_defects.empty and "classe" in filtered_defects.columns:
         defect_counts = filtered_defects['classe'].value_counts()
@@ -261,7 +177,7 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     buf2.seek(0)
     img_chart2 = ImageReader(buf2)
     
-    # Positionnement des graphiques
+    # Positionnement côte à côte des graphiques
     chart_width = (PAGE_WIDTH - 3 * margin) / 2
     chart_height = 200
     y_chart = y - chart_height - 20
@@ -278,282 +194,7 @@ def generate_report_pdf(report_type, missions_df, df_defects, metadata, start_da
     return buffer
 
 #############################################
-# FONCTIONS ET VARIABLES POUR LA PARTIE MISSIONS
-#############################################
-def extract_exif_info(image_file):
-    image_file.seek(0)
-    tags = exifread.process_file(image_file)
-    lat = lon = altitude = focal_length = None
-    fp_x_res = fp_unit = None
-    if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
-        lat_vals = tags['GPS GPSLatitude'].values
-        lon_vals = tags['GPS GPSLongitude'].values
-        lat_ref = tags.get('GPS GPSLatitudeRef', None)
-        lon_ref = tags.get('GPS GPSLongitudeRef', None)
-        if lat_vals and lon_vals and lat_ref and lon_ref:
-            lat = (float(lat_vals[0].num) / lat_vals[0].den +
-                   float(lat_vals[1].num) / lat_vals[1].den / 60 +
-                   float(lat_vals[2].num) / lat_vals[2].den / 3600)
-            lon = (float(lon_vals[0].num) / lon_vals[0].den +
-                   float(lon_vals[1].num) / lon_vals[1].den / 60 +
-                   float(lon_vals[2].num) / lon_vals[2].den / 3600)
-            if lat_ref.printable.strip().upper() == 'S':
-                lat = -lat
-            if lon_ref.printable.strip().upper() == 'W':
-                lon = -lon
-    if 'GPS GPSAltitude' in tags:
-        alt_tag = tags['GPS GPSAltitude']
-        altitude = float(alt_tag.values[0].num) / alt_tag.values[0].den
-    if 'EXIF FocalLength' in tags:
-        focal_tag = tags['EXIF FocalLength']
-        focal_length = float(focal_tag.values[0].num) / focal_tag.values[0].den
-    if 'EXIF FocalPlaneXResolution' in tags and 'EXIF FocalPlaneResolutionUnit' in tags:
-        fp_res_tag = tags['EXIF FocalPlaneXResolution']
-        fp_unit_tag = tags['EXIF FocalPlaneResolutionUnit']
-        fp_x_res = float(fp_res_tag.values[0].num) / fp_res_tag.values[0].den
-        fp_unit = int(fp_unit_tag.values[0])
-    return lat, lon, altitude, focal_length, fp_x_res, fp_unit
-
-def latlon_to_utm(lat, lon):
-    zone = int((lon + 180) / 6) + 1
-    if lat >= 0:
-        utm_crs = f"EPSG:326{zone:02d}"
-    else:
-        utm_crs = f"EPSG:327{zone:02d}"
-    transformer = Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
-    utm_x, utm_y = transformer.transform(lon, lat)
-    return utm_x, utm_y, utm_crs
-
-def compute_gsd(altitude, focal_length_mm, sensor_width_mm, image_width_px):
-    focal_length_m = focal_length_mm / 1000.0
-    sensor_width_m = sensor_width_mm / 1000.0
-    return (altitude * sensor_width_m) / (focal_length_m * image_width_px)
-
-def convert_to_tiff_in_memory(image_file, pixel_size, utm_center, utm_crs, rotation_angle=0, scaling_factor=1):
-    img = Image.open(image_file)
-    img = ImageOps.exif_transpose(img)
-    orig_width, orig_height = img.size
-    new_width = int(orig_width * scaling_factor)
-    new_height = int(orig_height * scaling_factor)
-    img = img.resize((new_width, new_height), Image.LANCZOS)
-    img_array = np.array(img)
-    height, width = img_array.shape[:2]
-    effective_pixel_size = pixel_size / scaling_factor
-    center_x, center_y = utm_center
-    T1 = Affine.translation(-width/2, -height/2)
-    T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
-    T3 = Affine.rotation(rotation_angle)
-    T4 = Affine.translation(center_x, center_y)
-    transform = T4 * T3 * T2 * T1
-    memfile = MemoryFile()
-    with memfile.open(
-        driver='GTiff',
-        height=height,
-        width=width,
-        count=3 if len(img_array.shape)==3 else 1,
-        dtype=img_array.dtype,
-        crs=utm_crs,
-        transform=transform
-    ) as dst:
-        if len(img_array.shape)==3:
-            for i in range(3):
-                dst.write(img_array[:, :, i], i+1)
-        else:
-            dst.write(img_array, 1)
-    return memfile.read()
-
-def assign_route_to_marker(lat, lon, routes):
-    marker_point = Point(lon, lat)
-    min_distance = float('inf')
-    closest_route = "Route inconnue"
-    for route in routes:
-        line = LineString(route["coords"])
-        distance = marker_point.distance(line)
-        if distance < min_distance:
-            min_distance = distance
-            closest_route = route["nom"]
-    threshold = 0.01
-    return closest_route if min_distance <= threshold else "Route inconnue"
-
-def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
-    with rasterio.open(input_tiff) as src:
-        transform_, width, height = calculate_default_transform(
-            src.crs, target_crs, src.width, src.height, *src.bounds
-        )
-        kwargs = src.meta.copy()
-        kwargs.update({
-            "crs": target_crs,
-            "transform": transform_,
-            "width": width,
-            "height": height,
-        })
-        unique_id = str(uuid.uuid4())[:8]
-        output_tiff = f"reprojected_{unique_id}.tif"
-        with rasterio.open(output_tiff, "w", **kwargs) as dst:
-            for i in range(1, src.count+1):
-                reproject(
-                    source=rasterio.band(src, i),
-                    destination=rasterio.band(dst, i),
-                    src_transform=src.transform,
-                    src_crs=src.crs,
-                    dst_transform=transform_,
-                    dst_crs=target_crs,
-                    resampling=Resampling.nearest,
-                )
-    return output_tiff
-
-def apply_color_gradient(tiff_path, output_png_path):
-    with rasterio.open(tiff_path) as src:
-        data = src.read(1)
-        cmap = plt.get_cmap("terrain")
-        norm = plt.Normalize(vmin=data.min(), vmax=data.max())
-        colored_image = cmap(norm(data))
-        plt.imsave(output_png_path, colored_image)
-        plt.close()
-
-def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1, show=True, control=True):
-    with open(image_path, "rb") as f:
-        image_data = f.read()
-    image_base64 = base64.b64encode(image_data).decode("utf-8")
-    img_data_url = f"data:image/png;base64,{image_base64}"
-    folium.raster_layers.ImageOverlay(
-        image=img_data_url,
-        bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
-        name=layer_name,
-        opacity=opacity,
-        show=show,
-        control=control
-    ).add_to(map_object)
-
-def normalize_data(data):
-    lower = np.percentile(data, 2)
-    upper = np.percentile(data, 98)
-    norm_data = np.clip(data, lower, upper)
-    return (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
-
-def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
-               hide_osm=False, tiff_opacity=1, tiff_show=True, tiff_control=True,
-               draw_routes=True, add_draw_tool=True):
-    if hide_osm:
-        m = folium.Map(location=[center_lat, center_lon], tiles=None)
-    else:
-        m = folium.Map(location=[center_lat, center_lon])
-    if display_path:
-        add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=tiff_opacity,
-                          show=tiff_show, control=tiff_control)
-    if draw_routes:
-        for route in routes_ci:
-            poly_coords = [(lat, lon) for lon, lat in route["coords"]]
-            folium.PolyLine(
-                locations=poly_coords,
-                color="blue",
-                weight=3,
-                opacity=0.7,
-                tooltip=route["nom"]
-            ).add_to(m)
-    if add_draw_tool:
-        draw = Draw(
-            draw_options={
-                'marker': True,
-                'polyline': False,
-                'polygon': False,
-                'rectangle': False,
-                'circle': False,
-                'circlemarker': False,
-            },
-            edit_options={'edit': True}
-        )
-        draw.add_to(m)
-        m.add_child(MeasureControl())
-    m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
-    folium.LayerControl().add_to(m)
-    if marker_data:
-        for marker in marker_data:
-            if marker.get("lat") is not None and marker.get("long") is not None:
-                color = class_color.get(marker["classe"], "#000000")
-                radius = gravity_sizes.get(marker["gravite"], 5)
-                folium.CircleMarker(
-                    location=[marker["lat"], marker["long"]],
-                    radius=radius,
-                    color=color,
-                    fill=True,
-                    fill_color=color,
-                    fill_opacity=0.7,
-                    tooltip=f"{marker['ID']} - {marker['classe']} (Gravité {marker['gravite']}) - Route : {marker.get('routes', 'Route inconnue')}"
-                ).add_to(m)
-    return m
-
-def get_reprojected_and_center(uploaded_file, group):
-    unique_id = str(uuid.uuid4())[:8]
-    temp_path = f"uploaded_{group}_{unique_id}.tif"
-    with open(temp_path, "wb") as f:
-        f.write(uploaded_file.read())
-    with rasterio.open(temp_path) as src:
-        crs_str = src.crs.to_string()
-    if crs_str != "EPSG:4326":
-        reproj_path = reproject_tiff(temp_path, "EPSG:4326")
-    else:
-        reproj_path = temp_path
-    with rasterio.open(reproj_path) as src:
-        bounds = src.bounds
-        center_lon = (bounds.left + bounds.right) / 2
-        center_lat = (bounds.bottom + bounds.top) / 2
-    return {"path": reproj_path, "center": (center_lon, center_lat), "bounds": bounds, "temp_original": temp_path}
-
-def generate_mission_id(date_mission, counter):
-    random_letter = random.choice(string.ascii_uppercase)
-    return f"{date_mission.strftime('%Y%m%d')}-{counter:03d}-{random_letter}"
-
-#############################################
-# VARIABLES GLOBALES POUR LA PARTIE MISSIONS
-#############################################
-if "current_pair_index" not in st.session_state:
-    st.session_state.current_pair_index = 0
-if "pairs" not in st.session_state:
-    st.session_state.pairs = []
-if "markers_by_pair" not in st.session_state:
-    st.session_state.markers_by_pair = {}
-if "mission_marker_counter" not in st.session_state:
-    st.session_state.mission_marker_counter = {}
-if "missions" not in st.session_state:
-    st.session_state.missions = {}
-if "mission_counter" not in st.session_state:
-    st.session_state.mission_counter = 1
-if "mission_history" not in st.session_state:
-    st.session_state.mission_history = []
-
-# Dictionnaire des classes et niveaux de gravité
-class_color = {
-    "deformations ornierage": "#FF0000",
-    "fissurations": "#00FF00",
-    "Faiençage": "#0000FF",
-    "fissure de retrait": "#FFFF00",
-    "fissure anarchique": "#FF00FF",
-    "reparations": "#00FFFF",
-    "nid de poule": "#FFA500",
-    "arrachements": "#800080",
-    "fluage": "#008000",
-    "denivellement accotement": "#000080",
-    "chaussée detruite": "#FFC0CB",
-    "envahissement vegetations": "#A52A2A",
-    "assainissements": "#808080",
-    "depot de terre": "#8B4513"
-}
-gravity_sizes = {1: 5, 2: 7, 3: 9}
-
-# Chargement des routes
-with open("routeQSD.txt", "r") as f:
-    routes_data = json.load(f)
-routes_ci = []
-for feature in routes_data["features"]:
-    if feature["geometry"]["type"] == "LineString":
-        routes_ci.append({
-            "coords": feature["geometry"]["coordinates"],
-            "nom": feature["properties"].get("ID", "Route inconnue")
-        })
-
-#############################################
-# AFFICHAGE SELON LE MENU SELECTIONNÉ
+# Affichage pour Tableau de bord, Missions et Rapport
 #############################################
 if menu_option == "Tableau de bord":
     st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
@@ -566,27 +207,20 @@ if menu_option == "Tableau de bord":
     if "distance(km)" not in missions_df.columns:
         st.error("Le fichier ne contient pas la colonne 'distance(km)'.")
     else:
-        # Fusion des missions historiques et issues du JSON
-        hist = []
-        for m in st.session_state.get("mission_history", []):
-            if isinstance(m, str):
-                try:
-                    m = json.loads(m)
-                except Exception as e:
-                    st.error("Erreur lors de la conversion d'une mission historique : " + str(e))
-                    continue
-            hist.append(m)
+        # Récupération des missions historiques
+        hist = st.session_state.get("mission_history", [])
         num_hist = len(hist)
         total_distance_hist = sum(float(m.get("distance(km)", 0)) for m in hist)
-        
+        # Indicateurs issus du JSON
         num_missions_json = len(missions_df)
         total_distance_json = missions_df["distance(km)"].sum()
+        # Combinaison des missions
         total_missions = num_missions_json + num_hist
         total_distance_all = total_distance_json + total_distance_hist
         avg_distance_all = total_distance_all / total_missions if total_missions > 0 else 0
         
-        # Fusion des défauts issus du JSON et des missions historiques
-        mission_ids = [m["id"] for m in hist]
+        # Fusion des défauts issus du JSON avec ceux des missions historiques
+        mission_ids = [m["id"] for m in st.session_state.get("mission_history", [])]
         markers_list = []
         for markers in st.session_state.get("markers_by_pair", {}).values():
             for marker in markers:
@@ -608,7 +242,7 @@ if menu_option == "Tableau de bord":
         col4.metric("Distance Moyenne (km)", f"{avg_distance_all:.1f}")
         
         st.markdown("---")
-        # Graphiques interactifs avec Altair
+        # Graphiques interactifs
         missions_over_time = missions_df.groupby(missions_df['date'].dt.to_period("M")).size().reset_index(name="Missions")
         missions_over_time['date'] = missions_over_time['date'].dt.to_timestamp()
         chart_missions = alt.Chart(missions_over_time).mark_line(point=True).encode(
@@ -760,8 +394,283 @@ if menu_option == "Tableau de bord":
 
 elif menu_option == "Missions":
     ######################################################################################
-    # SECTION MISSIONS : Création, post-traitement, détection et suivi
+    # Section Missions : Création, gestion, post-traitement, détection, suivi et export
     ######################################################################################
+    def extract_exif_info(image_file):
+        image_file.seek(0)
+        tags = exifread.process_file(image_file)
+        lat = lon = altitude = focal_length = None
+        fp_x_res = fp_unit = None
+        if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
+            lat_vals = tags['GPS GPSLatitude'].values
+            lon_vals = tags['GPS GPSLongitude'].values
+            lat_ref = tags.get('GPS GPSLatitudeRef', None)
+            lon_ref = tags.get('GPS GPSLongitudeRef', None)
+            if lat_vals and lon_vals and lat_ref and lon_ref:
+                lat = (float(lat_vals[0].num) / lat_vals[0].den +
+                       float(lat_vals[1].num) / lat_vals[1].den / 60 +
+                       float(lat_vals[2].num) / lat_vals[2].den / 3600)
+                lon = (float(lon_vals[0].num) / lon_vals[0].den +
+                       float(lon_vals[1].num) / lon_vals[1].den / 60 +
+                       float(lon_vals[2].num) / lon_vals[2].den / 3600)
+                if lat_ref.printable.strip().upper() == 'S':
+                    lat = -lat
+                if lon_ref.printable.strip().upper() == 'W':
+                    lon = -lon
+        if 'GPS GPSAltitude' in tags:
+            alt_tag = tags['GPS GPSAltitude']
+            altitude = float(alt_tag.values[0].num) / alt_tag.values[0].den
+        if 'EXIF FocalLength' in tags:
+            focal_tag = tags['EXIF FocalLength']
+            focal_length = float(focal_tag.values[0].num) / focal_tag.values[0].den
+        if 'EXIF FocalPlaneXResolution' in tags and 'EXIF FocalPlaneResolutionUnit' in tags:
+            fp_res_tag = tags['EXIF FocalPlaneXResolution']
+            fp_unit_tag = tags['EXIF FocalPlaneResolutionUnit']
+            fp_x_res = float(fp_res_tag.values[0].num) / fp_res_tag.values[0].den
+            fp_unit = int(fp_unit_tag.values[0])
+        return lat, lon, altitude, focal_length, fp_x_res, fp_unit
+
+    def latlon_to_utm(lat, lon):
+        zone = int((lon + 180) / 6) + 1
+        if lat >= 0:
+            utm_crs = f"EPSG:326{zone:02d}"
+        else:
+            utm_crs = f"EPSG:327{zone:02d}"
+        transformer = Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
+        utm_x, utm_y = transformer.transform(lon, lat)
+        return utm_x, utm_y, utm_crs
+
+    def compute_gsd(altitude, focal_length_mm, sensor_width_mm, image_width_px):
+        focal_length_m = focal_length_mm / 1000.0
+        sensor_width_m = sensor_width_mm / 1000.0
+        return (altitude * sensor_width_m) / (focal_length_m * image_width_px)
+
+    def convert_to_tiff_in_memory(image_file, pixel_size, utm_center, utm_crs, rotation_angle=0, scaling_factor=1):
+        img = Image.open(image_file)
+        img = ImageOps.exif_transpose(img)
+        orig_width, orig_height = img.size
+        new_width = int(orig_width * scaling_factor)
+        new_height = int(orig_height * scaling_factor)
+        img = img.resize((new_width, new_height), Image.LANCZOS)
+        img_array = np.array(img)
+        height, width = img_array.shape[:2]
+        effective_pixel_size = pixel_size / scaling_factor
+        center_x, center_y = utm_center
+        T1 = Affine.translation(-width/2, -height/2)
+        T2 = Affine.scale(effective_pixel_size, -effective_pixel_size)
+        T3 = Affine.rotation(rotation_angle)
+        T4 = Affine.translation(center_x, center_y)
+        transform = T4 * T3 * T2 * T1
+        memfile = MemoryFile()
+        with memfile.open(
+            driver='GTiff',
+            height=height,
+            width=width,
+            count=3 if len(img_array.shape)==3 else 1,
+            dtype=img_array.dtype,
+            crs=utm_crs,
+            transform=transform
+        ) as dst:
+            if len(img_array.shape)==3:
+                for i in range(3):
+                    dst.write(img_array[:, :, i], i+1)
+            else:
+                dst.write(img_array, 1)
+        return memfile.read()
+
+    def assign_route_to_marker(lat, lon, routes):
+        marker_point = Point(lon, lat)
+        min_distance = float('inf')
+        closest_route = "Route inconnue"
+        for route in routes:
+            line = LineString(route["coords"])
+            distance = marker_point.distance(line)
+            if distance < min_distance:
+                min_distance = distance
+                closest_route = route["nom"]
+        threshold = 0.01
+        return closest_route if min_distance <= threshold else "Route inconnue"
+
+    def reproject_tiff(input_tiff, target_crs="EPSG:4326"):
+        with rasterio.open(input_tiff) as src:
+            transform_, width, height = calculate_default_transform(
+                src.crs, target_crs, src.width, src.height, *src.bounds
+            )
+            kwargs = src.meta.copy()
+            kwargs.update({
+                "crs": target_crs,
+                "transform": transform_,
+                "width": width,
+                "height": height,
+            })
+            unique_id = str(uuid.uuid4())[:8]
+            output_tiff = f"reprojected_{unique_id}.tif"
+            with rasterio.open(output_tiff, "w", **kwargs) as dst:
+                for i in range(1, src.count+1):
+                    reproject(
+                        source=rasterio.band(src, i),
+                        destination=rasterio.band(dst, i),
+                        src_transform=src.transform,
+                        src_crs=src.crs,
+                        dst_transform=transform_,
+                        dst_crs=target_crs,
+                        resampling=Resampling.nearest,
+                    )
+        return output_tiff
+
+    def apply_color_gradient(tiff_path, output_png_path):
+        with rasterio.open(tiff_path) as src:
+            data = src.read(1)
+            cmap = plt.get_cmap("terrain")
+            norm = plt.Normalize(vmin=data.min(), vmax=data.max())
+            colored_image = cmap(norm(data))
+            plt.imsave(output_png_path, colored_image)
+            plt.close()
+
+    def add_image_overlay(map_object, image_path, bounds, layer_name, opacity=1, show=True, control=True):
+        with open(image_path, "rb") as f:
+            image_data = f.read()
+        image_base64 = base64.b64encode(image_data).decode("utf-8")
+        img_data_url = f"data:image/png;base64,{image_base64}"
+        folium.raster_layers.ImageOverlay(
+            image=img_data_url,
+            bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
+            name=layer_name,
+            opacity=opacity,
+            show=show,
+            control=control
+        ).add_to(map_object)
+
+    def normalize_data(data):
+        lower = np.percentile(data, 2)
+        upper = np.percentile(data, 98)
+        norm_data = np.clip(data, lower, upper)
+        return (255 * (norm_data - lower) / (upper - lower)).astype(np.uint8)
+
+    def create_map(center_lat, center_lon, bounds, display_path, marker_data=None,
+                   hide_osm=False, tiff_opacity=1, tiff_show=True, tiff_control=True,
+                   draw_routes=True, add_draw_tool=True):
+        if hide_osm:
+            m = folium.Map(location=[center_lat, center_lon], tiles=None)
+        else:
+            m = folium.Map(location=[center_lat, center_lon])
+        if display_path:
+            add_image_overlay(m, display_path, bounds, "TIFF Overlay", opacity=tiff_opacity,
+                              show=tiff_show, control=tiff_control)
+        if draw_routes:
+            for route in routes_ci:
+                poly_coords = [(lat, lon) for lon, lat in route["coords"]]
+                folium.PolyLine(
+                    locations=poly_coords,
+                    color="blue",
+                    weight=3,
+                    opacity=0.7,
+                    tooltip=route["nom"]
+                ).add_to(m)
+        if add_draw_tool:
+            draw = Draw(
+                draw_options={
+                    'marker': True,
+                    'polyline': False,
+                    'polygon': False,
+                    'rectangle': False,
+                    'circle': False,
+                    'circlemarker': False,
+                },
+                edit_options={'edit': True}
+            )
+            draw.add_to(m)
+            m.add_child(MeasureControl())
+        m.fit_bounds([[bounds.bottom, bounds.left], [bounds.top, bounds.right]])
+        folium.LayerControl().add_to(m)
+        if marker_data:
+            for marker in marker_data:
+                if marker.get("lat") is not None and marker.get("long") is not None:
+                    color = class_color.get(marker["classe"], "#000000")
+                    radius = gravity_sizes.get(marker["gravite"], 5)
+                    folium.CircleMarker(
+                        location=[marker["lat"], marker["long"]],
+                        radius=radius,
+                        color=color,
+                        fill=True,
+                        fill_color=color,
+                        fill_opacity=0.7,
+                        tooltip=f"{marker['ID']} - {marker['classe']} (Gravité {marker['gravite']}) - Route : {marker.get('routes', 'Route inconnue')} - Détection: {marker.get('detection', 'Inconnue')} - Mission: {marker.get('mission', 'N/A')}"
+                    ).add_to(m)
+        return m
+
+    def get_reprojected_and_center(uploaded_file, group):
+        unique_id = str(uuid.uuid4())[:8]
+        temp_path = f"uploaded_{group}_{unique_id}.tif"
+        with open(temp_path, "wb") as f:
+            f.write(uploaded_file.read())
+        with rasterio.open(temp_path) as src:
+            crs_str = src.crs.to_string()
+        if crs_str != "EPSG:4326":
+            reproj_path = reproject_tiff(temp_path, "EPSG:4326")
+        else:
+            reproj_path = temp_path
+        with rasterio.open(reproj_path) as src:
+            bounds = src.bounds
+            center_lon = (bounds.left + bounds.right) / 2
+            center_lat = (bounds.bottom + bounds.top) / 2
+        return {"path": reproj_path, "center": (center_lon, center_lat), "bounds": bounds, "temp_original": temp_path}
+
+    def generate_mission_id(date_mission, counter):
+        random_letter = random.choice(string.ascii_uppercase)
+        return f"{date_mission.strftime('%Y%m%d')}-{counter:03d}-{random_letter}"
+
+    #########################################
+    # Variables globales pour Missions
+    #########################################
+    if "current_pair_index" not in st.session_state:
+        st.session_state.current_pair_index = 0
+    if "pairs" not in st.session_state:
+        st.session_state.pairs = []
+    if "markers_by_pair" not in st.session_state:
+        st.session_state.markers_by_pair = {}
+    if "mission_marker_counter" not in st.session_state:
+        st.session_state.mission_marker_counter = {}
+    if "missions" not in st.session_state:
+        st.session_state.missions = {}
+    if "mission_counter" not in st.session_state:
+        st.session_state.mission_counter = 1
+    if "mission_history" not in st.session_state:
+        st.session_state.mission_history = []
+
+    # Dictionnaire des classes et niveaux de gravité
+    class_color = {
+        "deformations ornierage": "#FF0000",
+        "fissurations": "#00FF00",
+        "Faiençage": "#0000FF",
+        "fissure de retrait": "#FFFF00",
+        "fissure anarchique": "#FF00FF",
+        "reparations": "#00FFFF",
+        "nid de poule": "#FFA500",
+        "arrachements": "#800080",
+        "fluage": "#008000",
+        "denivellement accotement": "#000080",
+        "chaussée detruite": "#FFC0CB",
+        "envahissement vegetations": "#A52A2A",
+        "assainissements": "#808080",
+        "depot de terre": "#8B4513"
+    }
+    gravity_sizes = {1: 5, 2: 7, 3: 9}
+
+    # Chargement des routes
+    with open("routeQSD.txt", "r") as f:
+        routes_data = json.load(f)
+    routes_ci = []
+    for feature in routes_data["features"]:
+        if feature["geometry"]["type"] == "LineString":
+            routes_ci.append({
+                "coords": feature["geometry"]["coordinates"],
+                "nom": feature["properties"].get("ID", "Route inconnue")
+            })
+
+    #########################################
+    # Création et gestion des missions dans la sidebar
+    #########################################
     st.sidebar.header("Création de mission")
     with st.sidebar.form("mission_form"):
         operator = st.text_input("Nom de l'opérateur")
@@ -809,15 +718,9 @@ elif menu_option == "Missions":
             mission_markers_map[mission_id].append(marker)
         mission_history_display = []
         for mission in st.session_state.mission_history:
-            if isinstance(mission, str):
-                try:
-                    mission = json.loads(mission)
-                except Exception as e:
-                    st.error("Erreur de conversion de mission historique : " + str(e))
-                    continue
             m = mission.copy()
             markers_for_mission = mission_markers_map.get(m["id"], [])
-            m["Données Défauts"] = markers_for_mission
+            m["Données Défauts"] = markers_for_mission  # Conserver la liste pour d'éventuels traitements
             mission_history_display.append(m)
         df_missions_hist = pd.DataFrame(mission_history_display)
         st.sidebar.table(df_missions_hist)
@@ -849,9 +752,9 @@ elif menu_option == "Missions":
     else:
         st.sidebar.info("Aucune mission sauvegardée.")
 
-    #############################################
-    # AFFICHAGE SUR LA PAGE MISSIONS
-    #############################################
+    #########################################
+    # Affichage sur la page Missions
+    #########################################
     st.title("TRAITEMENTS")
     st.header("Post-traitements")
     uploaded_files = st.file_uploader(
