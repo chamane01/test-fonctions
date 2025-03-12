@@ -43,7 +43,11 @@ st.set_page_config(page_title="Suivi des Dégradations sur Routes Ivoiriennes", 
 st.markdown(
     """
     <style>
-
+    body {
+        background-color: #f4f4f9;
+        color: #333;
+        font-family: 'Helvetica', sans-serif;
+    }
     .sidebar .sidebar-content {
         background-color: #ffffff;
     }
