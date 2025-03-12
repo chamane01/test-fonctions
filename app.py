@@ -51,12 +51,7 @@ st.markdown(
     .sidebar .sidebar-content {
         background-color: #ffffff;
     }
-    .stMetric {
-        background: linear-gradient(90deg, #8e44ad, #3498db);
-        color: #fff;
-        padding: 10px;
-        border-radius: 10px;
-    }
+  
     h1, h2, h3 {
         color: #2c3e50;
     }
