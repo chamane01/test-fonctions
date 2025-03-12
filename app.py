@@ -70,7 +70,7 @@ st.markdown(
         padding: 2rem;
         background: #ffffff;
         border-radius: 10px;
-        
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
     </style>
     """, unsafe_allow_html=True
@@ -80,12 +80,12 @@ st.markdown(
 # PAGE DE CONNEXION
 #############################################
 # Base de données virtuelle de comptes avec image de profil
+# Les noms ont été remplacés par des noms à connotation ivoirienne.
 users_db = {
-    "alice": {"password": "pass1", "role": "directions", "profile": "fille.jpeg"},
-    "bob": {"password": "pass2", "role": "services", "profile": "garcon.jpeg"},
-    "charlie": {"password": "pass3", "role": "directions", "profile": "garcon.jpeg"},
-    "david": {"password": "pass4", "role": "services", "profile": "garcon.jpeg"},
-    "eve": {"password": "pass5", "role": "directions", "profile": "fille.jpeg"}
+    "kone": {"password": "pass1", "role": "directions", "profile": "fille.jpeg"},
+    "Magassouba": {"password": "pass2", "role": "services", "profile": "garcon.jpeg"},
+    "ouattara": {"password": "pass3", "role": "directions", "profile": "garcon.jpeg"},
+    "Amlan": {"password": "pass4", "role": "services", "profile": "garcon.jpeg"}
 }
 DEFAULT_PROFILE = "profil.jpg"
 
@@ -109,8 +109,11 @@ def login(username, password):
             return True
     return False
 
+# Modification de la fonction logout pour ne pas vider entièrement le session_state
 def logout():
-    st.session_state.clear()
+    st.session_state.logged_in = False
+    st.session_state.current_user = None
+    st.session_state.role = None
     st.experimental_rerun()
 
 # Si non connecté, afficher la page de connexion et stopper l'exécution
