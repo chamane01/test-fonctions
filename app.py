@@ -51,7 +51,12 @@ st.markdown(
     .sidebar .sidebar-content {
         background-color: #ffffff;
     }
-  
+    .stMetric {
+        background: linear-gradient(90deg, #8e44ad, #3498db);
+        color: #fff;
+        padding: 10px;
+        border-radius: 10px;
+    }
     h1, h2, h3 {
         color: #2c3e50;
     }
@@ -65,7 +70,7 @@ st.markdown(
         padding: 2rem;
         background: #ffffff;
         border-radius: 10px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        
     }
     </style>
     """, unsafe_allow_html=True
