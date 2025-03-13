@@ -39,43 +39,106 @@ from shapely.geometry import Point, LineString
 #############################################
 # CONFIGURATION GLOBALE ET CSS
 #############################################
-st.set_page_config(page_title="Suivi des Dégradations sur Routes Ivoiriennes", layout="wide")
-st.markdown(
-    """
+st.set_page_config(page_title="Suivi des Dégradations sur Routes Ivoiriennes", layout="wide", page_icon="🛣️")
+
+st.markdown("""
     <style>
+    :root {
+        --primary: #2A5C82;
+        --secondary: #5DA9E9;
+        --accent: #FF6B6B;
+        --background: #f8f9fa;
+        --text: #2d3436;
+    }
+    
     body {
-        background-color: #f4f4f9;
-        color: #333;
-        font-family: 'Helvetica', sans-serif;
+        background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
+        color: var(--text);
+        font-family: 'Segoe UI', system-ui, sans-serif;
     }
-    .sidebar .sidebar-content {
-        background-color: #ffffff;
-    }
-    .stMetric {
-        background: linear-gradient(90deg, #8e44ad, #3498db);
-        color: #fff;
-        padding: 10px;
-        border-radius: 10px;
-    }
-    h1, h2, h3 {
-        color: #2c3e50;
-    }
-    .main-container {
-        max-width: 1200px;
+    
+    .stApp {
+        max-width: 1600px;
         margin: 0 auto;
     }
-    /* CSS pour la page de connexion : fond transparent pour éviter la barre blanche */
+    
+    .sidebar .sidebar-content {
+        background: white;
+        box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+        border-right: none;
+    }
+    
+    .metric-card {
+        background: white;
+        border-radius: 15px;
+        padding: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        transition: transform 0.2s;
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-3px);
+    }
+    
+    .metric-value {
+        font-size: 2rem !important;
+        color: var(--primary) !important;
+        font-weight: 700 !important;
+    }
+    
+    .section-title {
+        color: var(--primary);
+        border-bottom: 3px solid var(--secondary);
+        padding-bottom: 0.5rem;
+        margin: 2rem 0 1.5rem;
+    }
+    
+    .stButton>button {
+        background: linear-gradient(45deg, var(--primary), var(--secondary)) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 0.5rem 1.5rem !important;
+        transition: all 0.3s !important;
+    }
+    
+    .stButton>button:hover {
+        opacity: 0.9;
+        transform: scale(1.05);
+    }
+    
     .login-container {
+        background: rgba(255,255,255,0.95);
+        border-radius: 20px;
+        padding: 3rem 4rem;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        backdrop-filter: blur(10px);
+        max-width: 600px;
+        margin: 2rem auto;
+    }
+    
+    .profile-card {
         text-align: center;
         padding: 2rem;
-        background: transparent;
-        border-radius: 10px;
-        /* suppression de l'ombre éventuelle */
-        box-shadow: none;
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        margin-bottom: 2rem;
+    }
+    
+    .chart-container {
+        background: white;
+        border-radius: 15px;
+        padding: 1rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+    
+    .stSelectbox, .stTextInput, .stDateInput {
+        background: white !important;
+        border-radius: 8px !important;
     }
     </style>
-    """, unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
 
 #############################################
 # PAGE DE CONNEXION
@@ -170,7 +233,96 @@ with st.sidebar:
         st.session_state["menu_option"] = menu_items[0]
     menu_option = st.radio("Menu", menu_items, index=menu_items.index(st.session_state["menu_option"]))
     st.session_state["menu_option"] = menu_option
-
+#############################################
+# FONCTION POUR AFFICHER LE TABLEAU DE BORD
+#############################################
+def afficher_tableau_de_bord():
+    st.markdown("""
+        <div style="text-align:center; margin:2rem 0;">
+            <img src="images (5).png" width="200">
+            <h1 style="color: var(--primary); margin:1rem 0 0.5rem;">Ubuntu Détect</h1>
+            <p style="color: var(--text); font-size:1.1rem;">L'intelligence collective au service des infrastructures routières</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Métriques principales
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown("""
+            <div class="metric-card">
+                <h3>Missions</h3>
+                <div class="metric-value">1,234</div>
+                <p style="color:#666; margin:0;">+12% vs mois dernier</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+            <div class="metric-card">
+                <h3>Défauts</h3>
+                <div class="metric-value">8,901</div>
+                <p style="color:#666; margin:0;">-5% vs mois dernier</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+            <div class="metric-card">
+                <h3>Distance</h3>
+                <div class="metric-value">1,234 km</div>
+                <p style="color:#666; margin:0;">+25% vs trimestre dernier</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown("""
+            <div class="metric-card">
+                <h3>Gravité Moy.</h3>
+                <div class="metric-value">2.4</div>
+                <p style="color:#666; margin:0;">Stable</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    # Graphiques
+    st.markdown('<h3 class="section-title">Évolution des indicateurs</h3>', unsafe_allow_html=True)
+    
+    col_chart1, col_chart2 = st.columns(2)
+    with col_chart1:
+        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+        st.line_chart(pd.DataFrame({"Missions": [120, 145, 160, 135, 190]}), height=300)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col_chart2:
+        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+        st.area_chart(pd.DataFrame({"Défauts": [850, 920, 780, 1100, 950]}), height=300)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Carte interactive
+    st.markdown('<h3 class="section-title">Répartition géographique</h3>', unsafe_allow_html=True)
+    st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+    st.pydeck_chart(pdk.Deck(
+        map_style='mapbox://styles/mapbox/light-v9',
+        initial_view_state=pdk.ViewState(
+            latitude=7.5399,
+            longitude=-5.5471,
+            zoom=6,
+            pitch=50,
+        ),
+        layers=[
+            pdk.Layer(
+                'HexagonLayer',
+                data=df_defects,
+                get_position='[long, lat]',
+                radius=2000,
+                elevation_scale=50,
+                elevation_range=[0, 1000],
+                pickable=True,
+                extruded=True,
+            ),
+        ],
+    ), use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    
 #############################################
 # DONNÉES ET FONCTIONS COMMUNES (Tableau de bord & Rapport)
 #############################################
