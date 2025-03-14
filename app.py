@@ -129,7 +129,7 @@ if not st.session_state.logged_in:
                 unsafe_allow_html=True
             )
             st.markdown(
-                "<div style='text-align: center; color: #666; font-size: 1.2rem; margin-bottom: 2rem;'>L'Esprit d'Humanité dans la Détection des Défauts</div>", 
+                "<div style='text-align: center; color: #666; font-size: 1.2rem; margin-bottom: 2rem;'>parceque nous croyons que la route précède le developpementv</div>", 
                 unsafe_allow_html=True
             )
             with st.form("login_form"):
