@@ -125,7 +125,7 @@ if not st.session_state.logged_in:
             st.markdown('<div class="login-container">', unsafe_allow_html=True)
             st.image("images (5).png", width=300)
             st.markdown(
-                "<h1 style='text-align: center; color: #3498DB; margin-bottom: 0.5rem;'>Ubuntu Détect</h1>", 
+                "<h1 style='text-align: center; color: #3498DB; margin-bottom: 0.5rem;'>ATTINKPA Détection</h1>", 
                 unsafe_allow_html=True
             )
             st.markdown(
